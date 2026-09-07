@@ -19,10 +19,6 @@ Monorepo for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 | Debugging        | Write-only byte register driving a two-digit hexadecimal seven-segment display               |
 | Expansion        | Two front-loading 3U Eurocard slots with DIN 41612 connectors                                |
 
-## Expansion bus
-
-Each slot accepts a 100 mm × 160 mm, 1.6 mm-thick 3U Eurocard through a 96-contact Type C DIN 41612 connector. Each receives a fixed 2 MiB memory window and 128 KiB I/O window, plus up to +5 V at 1.0 A and +12 V at 0.4 A. Cards must be inserted or removed with power off. The bus has no DMA, arbitration, or bus mastering.
-
 ## Documentation
 
 Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, peripherals, video, audio, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
