@@ -1,6 +1,6 @@
 # 68EC000 Computer
 
-Design documentation for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
+Monorepo for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 
 ## At a glance
 
