@@ -33,6 +33,8 @@ AI-generated code and documentation are welcome when a contributor reviews them 
 
 Review generated code as you would any other contribution. Build it, run the relevant tests, inspect error paths, and verify behavior against the hardware or interface documentation. Review generated documentation against primary sources and remove claims that cannot be checked.
 
+AI-generated schematics, PCBs, hardware, and images are NOT ALLOWED!!!!
+
 ## Check your change
 
 Run the formatter, build, tests, design-rule checks, and other validation that apply to the files you changed. Each project area may define its own commands.
