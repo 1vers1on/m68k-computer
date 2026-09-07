@@ -2,7 +2,7 @@
 
 This directory holds the project’s static design documentation. Open [static/index.html](static/index.html) in a browser to start at the document index.
 
-The pages cover the memory map, bus and address decode, clock and reset, interrupts, system control, debug display, DRAM, firmware ROM, MFP, floppy controller, VGA, OPL3, MIDI, RTC, and expansion slots. Each is revision 1.0 and records the pre-layout design where applicable.
+The pages cover the memory map, bus and address decode, clock and reset, power control, interrupts, system control, debug display, DRAM, firmware ROM, MFP, floppy controller, VGA, OPL3, MIDI, RTC, and expansion slots. Each is revision 1.0 and records the pre-layout design where applicable.
 
 `static/defaults.css` provides the shared page styling. `package.json` supplies Prettier commands for the HTML files:
 

@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Power Control, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Power Control</h1>
+      <p>
+        This document defines the computer's low-voltage power-control system.
+        The internal power supply provides raw +5 V and +12 V whenever the rear
+        master switch is on. The power-control PCB switches both rails in
+        response to the front-panel momentary button.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <p>
+        The front-panel button must be held for approximately three seconds to
+        turn the computer on and approximately five seconds to turn it off. The
+        control circuit uses 74HC-series logic and discrete components; it has
+        no microcontroller or programmable logic.
+      </p>
+      <p>
+        The PCB mounts beside the power supply and motherboard power wiring.
+        Only the low-current button and LED connections run to the front panel.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; component values and logic equations
+          are frozen, while relay inrush margin, RC timing, and assembled-board
+          behavior remain to be measured
+        </dd>
+        <dt>Raw power inputs</dt>
+        <dd>+5 V, +12 V, and ground from the internal power supply</dd>
+        <dt>Switched outputs</dt>
+        <dd>+5 V and +12 V to the motherboard and expansion system</dd>
+        <dt>Nominal load requirement</dt>
+        <dd>Up to approximately 5 A at +5 V and 3 A at +12 V</dd>
+        <dt>Front-panel control</dt>
+        <dd>Momentary normally-open pushbutton</dd>
+        <dt>Turn-on delay</dt>
+        <dd>Approximately 3 seconds of continuous button hold</dd>
+        <dt>Turn-off delay</dt>
+        <dd>Approximately 5 seconds of continuous button hold</dd>
+        <dt>Power-state storage</dt>
+        <dd>74HC74 flip-flop</dd>
+        <dt>Timing method</dt>
+        <dd>74HC4060 oscillator/divider and 74HC161 counter</dd>
+        <dt>Rail switching</dt>
+        <dd>DPST normally-open power relay</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#system-overview">System Overview</a></li>
+        <li><a href="#power-path">Power Path</a></li>
+        <li><a href="#front-panel-interface">Front-Panel Interface</a></li>
+        <li><a href="#button-conditioning">Button Conditioning</a></li>
+        <li><a href="#timing-and-state-logic">Timing and State Logic</a></li>
+        <li><a href="#signal-reference">Internal Signal Reference</a></li>
+        <li><a href="#relay-control">Relay Control</a></li>
+        <li><a href="#power-on-reset">Power-On Reset</a></li>
+        <li><a href="#power-led">Power LED</a></li>
+        <li><a href="#component-summary">Component Summary</a></li>
+        <li><a href="#operating-sequence">Operating Sequence</a></li>
+        <li>
+          <a href="#layout-and-acceptance">Board Layout and Acceptance</a>
+        </li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="system-overview">
+        <h2>1. System Overview</h2>
+        <p>
+          The rear master power switch controls whether the internal power
+          supply is energized. When the rear switch is on, the supply provides
+          raw +5 V and +12 V continuously. The power-control PCB is powered
+          directly from the raw +5 V rail, so it remains active even while the
+          rest of the computer is off.
+        </p>
+        <p>
+          The motherboard does not receive either rail until the power-control
+          circuit energizes a DPST relay. One relay contact switches +5 V and
+          the other switches +12 V. Ground remains connected continuously and is
+          not switched.
+        </p>
+        <pre>
+                INTERNAL POWER SUPPLY
+
+              +5V_RAW            +12V_RAW
+                 |                  |
+                 |                  |
+                 |             +----+----+
+                 |             | relay   |
+                 |             | contact |
+                 |             +----+----+
+                 |                  |
+            +----+----+             +-------------> +12V_SW
+            |         |
+            | control |
+            | circuit |
+            |         |
+            +----+----+
+                 |
+                 | controls relay
+                 |
+              +--+-----+
+              | relay  |
+              | driver |
+              +--+-----+
+                 |
+              relay coil
+
+        +5V_RAW ---- relay contact ----------------> +5V_SW
+
+        GND ---------------------------------------> GND
+        </pre>
+        <p>
+          The raw rails are the outputs directly from the internal power supply.
+          The switched rails are the outputs from the relay and are the only +5
+          V and +12 V rails delivered to the motherboard.
+        </p>
+      </section>
+
+      <section id="power-path">
+        <h2>2. Power Path</h2>
+        <p>
+          The power-control PCB has one low-voltage power input from the
+          internal supply and one low-voltage switched output to the computer.
+          The board receives <code>+5V_RAW</code>, <code>+12V_RAW</code>, and
+          <code>GND</code>. It produces <code>+5V_SW</code>,
+          <code>+12V_SW</code>, and <code>GND</code>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Power-control PCB rails
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Rail</th>
+              <th scope="col">Source</th>
+              <th scope="col">Switched</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>+5V_RAW</code></td>
+              <td>Internal power supply</td>
+              <td>No</td>
+              <td>Powers the control logic and feeds one relay contact.</td>
+            </tr>
+            <tr>
+              <td><code>+12V_RAW</code></td>
+              <td>Internal power supply</td>
+              <td>No</td>
+              <td>Powers the relay coil and feeds the second relay contact.</td>
+            </tr>
+            <tr>
+              <td><code>+5V_SW</code></td>
+              <td>Relay contact</td>
+              <td>Yes</td>
+              <td>Main +5 V rail for the motherboard and expansion system.</td>
+            </tr>
+            <tr>
+              <td><code>+12V_SW</code></td>
+              <td>Relay contact</td>
+              <td>Yes</td>
+              <td>Main +12 V rail for the motherboard and expansion system.</td>
+            </tr>
+            <tr>
+              <td><code>GND</code></td>
+              <td>Internal power supply</td>
+              <td>No</td>
+              <td>
+                Common return for the control PCB, motherboard, and peripherals.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The relay must provide two independent normally-open contacts. Each
+          contact is used for one positive supply rail. The relay contacts must
+          be rated for at least 10 A at 12 VDC. Board bring-up must verify that
+          contact heating and the startup current of each switched rail remain
+          within the selected relay's DC ratings.
+        </p>
+      </section>
+
+      <section id="front-panel-interface">
+        <h2>3. Front-Panel Interface</h2>
+        <p>
+          The front panel contains only the momentary power button and the power
+          LED. Both devices connect to the power-control PCB with low-current
+          wiring.
+        </p>
+        <p>
+          The power button is a normally-open momentary switch. It does not
+          carry either main power rail and does not drive the relay directly.
+          The switch is interpreted entirely by the logic circuit.
+        </p>
+        <p>
+          The power LED is controlled by the stored logical power state. It
+          lights when the relay is commanded on and turns off when the relay is
+          commanded off.
+        </p>
+        <pre>
+        FRONT PANEL                         POWER-CONTROL PCB
+
+        +--------------+                  +----------------------+
+        | momentary    |------------------| button input         |
+        | power button |------------------| ground               |
+        +--------------+                  |                      |
+                                          |                      |
+        +--------------+                  |                      |
+        | power LED    |------------------| LED drive            |
+        |              |------------------| ground               |
+        +--------------+                  +----------------------+
+        </pre>
+      </section>
+
+      <section id="button-conditioning">
+        <h2>4. Button Conditioning</h2>
+        <p>
+          The button input is pulled to a defined logic level when the switch is
+          open. A small RC network suppresses contact bounce, and one gate in
+          <code>U_POWER_SCHMITT</code>, an SN74HC14N, converts the filtered
+          signal into a clean digital button signal.
+        </p>
+        <p>
+          A 100 kohm pull-up resistor and 100 nF capacitor provide a nominal 10
+          ms time constant before the Schmitt trigger. A 1 kohm resistor in the
+          switch lead limits capacitor discharge current when the contacts
+          close.
+        </p>
+        <p>
+          The conditioned internal signal is named <code>BTN</code>.
+          <code>BTN</code> is high while the button is pressed and low while it
+          is released.
+        </p>
+        <pre>
+        button released -> BTN = 0
+        button pressed  -> BTN = 1
+        </pre>
+        <p>
+          Releasing the button immediately cancels any incomplete power-on or
+          power-off timing sequence and resets the hold-time counter.
+        </p>
+      </section>
+
+      <section id="timing-and-state-logic">
+        <h2>5. Timing and State Logic</h2>
+        <p>
+          The control logic consists of a slow clock source, a four-bit hold
+          counter, a selectable threshold comparator, a power-state flip-flop,
+          and a lockout flip-flop.
+        </p>
+
+        <h3>74HC4060 Hold-Time Clock</h3>
+        <p>
+          <code>U_HOLD_OSC</code>, an SN74HC4060N, provides the RC oscillator
+          and binary divider. Its oscillator uses a 13.7 kohm resistor, a 137
+          kohm resistor, and a 1 nF C0G or NP0 capacitor in the manufacturer's
+          two-resistor network. The datasheet's simplified equation gives a
+          nominal oscillator frequency of 33.2 kHz.
+        </p>
+        <pre><code>fOSC = 0.455 / (13.7 kohm * 1 nF) = 33.2 kHz</code></pre>
+        <p>
+          Output <code>QN</code> is the divide-by-16384 output, so its full
+          period is nominally 493 ms. Resistor, capacitor, threshold,
+          temperature, and device tolerances set the actual period. Measure the
+          resulting delays during board acceptance.
+        </p>
+        <p>
+          One <code>U_POWER_SCHMITT</code> stage inverts <code>QN</code> to make
+          <code>HOLD_CLK</code>. The hold counter advances on each rising edge
+          of <code>HOLD_CLK</code>, once per full <code>QN</code> period. The
+          inversion delays the first count until <code>QN</code> completes its
+          first full period instead of counting on its first rising edge.
+        </p>
+
+        <h3>74HC161 Hold Counter</h3>
+        <p>
+          <code>U_HOLD_COUNT</code>, an SN74HC161N four-bit binary counter,
+          measures how long the front-panel button remains continuously pressed.
+          Its two enable inputs and active-low load input are tied high.
+          <code>HOLD_CLK</code> drives its clock, and
+          <code>TIMER_ENABLE</code> drives its active-low clear input. The
+          counter advances at a nominal 2.03 counts per second.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Hold-time thresholds
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Power state</th>
+              <th scope="col">Target count</th>
+              <th scope="col">Nominal hold time</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Off</td>
+              <td>6</td>
+              <td>Nominally 3.21 seconds</td>
+              <td>Turn the computer on</td>
+            </tr>
+            <tr>
+              <td>On</td>
+              <td>10</td>
+              <td>Nominally 5.18 seconds</td>
+              <td>Turn the computer off</td>
+            </tr>
+          </tbody>
+        </table>
+        <pre><code>tON  = (6 + 0.5) * 493 ms = 3.21 seconds
+tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
+        <p>
+          If the button is released before the selected target count is reached,
+          the counter returns to zero and no power-state change occurs.
+        </p>
+
+        <h3>74HC85 Threshold Selection</h3>
+        <p>
+          <code>U_HOLD_COMPARE</code>, a CD74HC85E four-bit magnitude
+          comparator, compares the current hold count against a target selected
+          by the current power state.
+        </p>
+        <p>
+          The count connects to comparator input A. The target connects to input
+          B as <code>B3 = POWER_STATE</code>, <code>B2 = POWER_STATE_n</code>,
+          <code>B1 = 1</code>, and <code>B0 = 0</code>. The cascade inputs are
+          fixed for a single comparator: <code>A=B</code> is high, while
+          <code>A&gt;B</code> and <code>A&lt;B</code> are low.
+        </p>
+        <pre>
+        power state = OFF -> target = 0110 binary = 6
+        power state = ON  -> target = 1010 binary = 10
+        </pre>
+        <p>
+          The comparator's <code>A=B</code> output is <code>HOLD_DONE</code>. It
+          does not drive a clock input directly. One SN74HC08N gate combines it
+          with <code>QN</code> to make <code>STATE_CLK</code>. The counter
+          changes while <code>QN</code> is low, which masks comparator skew.
+          Half a timer cycle later, the rising edge of <code>QN</code> clocks
+          the state flip-flops if the comparison has settled equal.
+        </p>
+        <pre><code>STATE_CLK = QN AND HOLD_DONE</code></pre>
+        <p>
+          Changing <code>POWER_STATE</code> selects the other target, and
+          setting <code>DONE</code> resets the timer. Both actions remove the
+          equality condition and return <code>STATE_CLK</code> low after one
+          edge.
+        </p>
+
+        <h3>74HC74 Power-State Flip-Flop</h3>
+        <p>
+          One half of <code>U_POWER_STATE</code>, an SN74HC74N, stores the
+          logical power state. Its inverted output feeds its D input, and
+          <code>STATE_CLK</code> drives its positive-edge clock. Its preset
+          input is tied high. <code>POR_OK</code> drives its active-low clear
+          input, so the stored state is off during power-on reset.
+        </p>
+        <pre>
+        OFF + 3-second hold -> ON
+        ON  + 5-second hold -> OFF
+        </pre>
+        <p>
+          The stored state is named <code>POWER_STATE</code>. It controls the
+          relay driver and front-panel power LED.
+        </p>
+
+        <h3>74HC74 Button-Release Lockout</h3>
+        <p>
+          The second half of <code>U_POWER_STATE</code> stores
+          <code>DONE</code>. Its D and preset inputs are tied high, and
+          <code>STATE_CLK</code> drives its positive-edge clock. Its active-low
+          clear input receives <code>DONE_CLEAR_n</code>, so a completed hold
+          sets <code>DONE</code> until the button is released.
+        </p>
+        <p>
+          While <code>DONE</code> is set, the timer is disabled and reset. This
+          prevents one very long button hold from repeatedly turning the
+          computer on and off. Releasing the button clears <code>DONE</code> and
+          arms the circuit for the next press.
+        </p>
+        <pre>
+        button pressed
+             |
+             v
+        required hold time reached
+             |
+             v
+        power state changes
+             |
+             v
+        DONE = 1
+             |
+             v
+        timer disabled until button release
+        </pre>
+
+        <h3>74HC08 Enable Logic</h3>
+        <p>
+          <code>U_POWER_GATE</code>, an SN74HC08N, combines the button, lockout,
+          and reset signals. Two gates form <code>TIMER_ENABLE</code>, a third
+          forms <code>DONE_CLEAR_n</code>, and the fourth forms
+          <code>STATE_CLK</code>.
+        </p>
+        <pre>
+        TIMER_ENABLE = BTN AND DONE_n AND POR_OK
+        DONE_CLEAR_n = BTN AND POR_OK
+        STATE_CLK    = QN AND HOLD_DONE
+        </pre>
+        <p>
+          <code>TIMER_ENABLE</code> connects directly to the hold counter's
+          active-low clear input. Another <code>U_POWER_SCHMITT</code> stage
+          inverts it for the oscillator's active-high clear input. Both devices
+          stay at zero until a new button press is accepted.
+        </p>
+      </section>
+
+      <section id="signal-reference">
+        <h2>6. Internal Signal Reference</h2>
+        <p>
+          Signal names ending in <code>_n</code> are active low. Raw and
+          switched rail names describe separate power nets and do not use the
+          active-low suffix.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Power-control internal signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Consumers</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BTN</code></td>
+              <td>Button RC network and SN74HC14N</td>
+              <td><code>U_POWER_GATE</code></td>
+              <td>High while the debounced front-panel button is pressed.</td>
+            </tr>
+            <tr>
+              <td><code>POR_OK</code></td>
+              <td>Power-on-reset RC network and SN74HC14N</td>
+              <td><code>U_POWER_STATE</code> and <code>U_POWER_GATE</code></td>
+              <td>High after the raw +5 V startup delay has expired.</td>
+            </tr>
+            <tr>
+              <td><code>TIMER_ENABLE</code></td>
+              <td><code>U_POWER_GATE</code></td>
+              <td>Hold counter and SN74HC14N oscillator-clear inverter</td>
+              <td>High while an accepted button hold is being timed.</td>
+            </tr>
+            <tr>
+              <td><code>DONE_CLEAR_n</code></td>
+              <td><code>U_POWER_GATE</code></td>
+              <td><code>U_POWER_STATE</code> lockout clear</td>
+              <td>Low during reset or while the button is released.</td>
+            </tr>
+            <tr>
+              <td><code>QN</code></td>
+              <td><code>U_HOLD_OSC</code></td>
+              <td>SN74HC14N clock inverter and <code>U_POWER_GATE</code></td>
+              <td>Divide-by-16384 oscillator output.</td>
+            </tr>
+            <tr>
+              <td><code>HOLD_CLK</code></td>
+              <td><code>U_POWER_SCHMITT</code> clock inverter</td>
+              <td><code>U_HOLD_COUNT</code></td>
+              <td>Positive-edge count clock, nominally 2.03 Hz.</td>
+            </tr>
+            <tr>
+              <td><code>HOLD_COUNT3..HOLD_COUNT0</code></td>
+              <td><code>U_HOLD_COUNT</code></td>
+              <td><code>U_HOLD_COMPARE</code> input A</td>
+              <td>Four-bit count of complete hold-clock periods.</td>
+            </tr>
+            <tr>
+              <td><code>HOLD_DONE</code></td>
+              <td><code>U_HOLD_COMPARE</code> <code>A=B</code> output</td>
+              <td><code>U_POWER_GATE</code></td>
+              <td>High while the hold count equals the selected target.</td>
+            </tr>
+            <tr>
+              <td><code>STATE_CLK</code></td>
+              <td><code>U_POWER_GATE</code></td>
+              <td>Both <code>U_POWER_STATE</code> clock inputs</td>
+              <td>One clean rising edge after a completed button hold.</td>
+            </tr>
+            <tr>
+              <td><code>POWER_STATE</code></td>
+              <td><code>U_POWER_STATE</code> first flip-flop</td>
+              <td>Comparator target, relay driver, and power LED</td>
+              <td>High when the switched rails are commanded on.</td>
+            </tr>
+            <tr>
+              <td><code>POWER_STATE_n</code></td>
+              <td><code>U_POWER_STATE</code> first inverted output</td>
+              <td>First D input and comparator target</td>
+              <td>Complement of <code>POWER_STATE</code>.</td>
+            </tr>
+            <tr>
+              <td><code>DONE</code>, <code>DONE_n</code></td>
+              <td><code>U_POWER_STATE</code> second flip-flop</td>
+              <td><code>U_POWER_GATE</code></td>
+              <td>Completed-hold lockout and its complement.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="relay-control">
+        <h2>7. Relay Control</h2>
+        <p>
+          The 74HC logic does not drive the relay coil directly. A discrete
+          transistor provides the coil current. The design uses a 12 V relay
+          coil because the raw +12 V rail is present on the PCB while the
+          computer is off.
+        </p>
+        <p>
+          A 2N7000 N-channel MOSFET drives the selected relay coil. The coil
+          current must remain within the MOSFET's drain-current and dissipation
+          limits at a 5 V gate drive. <code>POWER_STATE</code> drives the gate
+          through 100 ohms, and a 100 kohm gate-to-ground resistor keeps the
+          relay off while the logic supply rises.
+        </p>
+        <p>
+          A 1N4001 flyback diode connects across the relay coil, with its
+          cathode at <code>+12V_RAW</code> and anode at the MOSFET drain. It
+          conducts the coil current when the MOSFET turns off.
+        </p>
+        <pre>
+        +12V_RAW
+            |
+         relay coil
+            |
+            +---- flyback diode ----+
+            |                       |
+         transistor                 |
+            |                       |
+           GND ---------------------+
+
+        POWER_STATE -> transistor control
+        </pre>
+        <p>
+          The relay uses two normally-open contacts. One switches
+          <code>+5V_RAW</code> to <code>+5V_SW</code>. The other switches
+          <code>+12V_RAW</code> to <code>+12V_SW</code>. Ground is never
+          switched.
+        </p>
+        <pre>
+        +5V_RAW  ---- normally-open contact ---- +5V_SW
+        +12V_RAW ---- normally-open contact ---- +12V_SW
+        GND      ------------------------------- GND
+        </pre>
+        <p>
+          The relay contact rating must be based on DC current, not only an AC
+          contact rating. The selected relay should also tolerate the charging
+          current of the motherboard and expansion-card bypass and bulk
+          capacitors when the contacts close.
+        </p>
+      </section>
+
+      <section id="power-on-reset">
+        <h2>8. Power-On Reset</h2>
+        <p>
+          The control logic includes its own power-on-reset circuit so that
+          enabling the rear master switch always starts from a defined state.
+          The default state is computer off, relay released, and hold timer
+          reset.
+        </p>
+        <p>
+          A 100 kohm pull-up and 1 uF capacitor to ground feed two
+          <code>U_POWER_SCHMITT</code> stages. The second stage produces
+          <code>POR_OK</code>, which stays low while the RC node crosses the
+          first stage's upper threshold. A 1N4148 diode across the resistor,
+          with its anode at the RC node and cathode at <code>+5V_RAW</code>,
+          discharges the capacitor when raw power falls. This restores the reset
+          delay after a short power interruption.
+        </p>
+        <p>
+          During reset, the power-state flip-flop is forced off and the
+          button-release lockout is cleared. The relay therefore cannot energize
+          accidentally during power-up.
+        </p>
+        <pre>
+        rear master switch turned on
+                  |
+                  v
+             +5V_RAW rises
+                  |
+                  v
+           power-on reset active
+                  |
+                  v
+        POWER_STATE = OFF
+        DONE = 0
+        counter = 0
+        relay = released
+                  |
+                  v
+              POR_OK = 1
+                  |
+                  v
+        front button becomes active
+        </pre>
+      </section>
+
+      <section id="power-led">
+        <h2>9. Power LED</h2>
+        <p>
+          The front-panel power LED follows <code>POWER_STATE</code>. The LED
+          and its two wires run between the front panel and the power-control
+          PCB.
+        </p>
+        <p>
+          A red LED and 1 kohm series resistor connect from
+          <code>POWER_STATE</code> to ground. The LED current is about 3 mA with
+          a 2 V forward drop, within the SN74HC74N's 4 mA output specification
+          at a 5 V supply.
+        </p>
+        <pre>
+        POWER_STATE = 0 -> LED off
+        POWER_STATE = 1 -> LED on
+        </pre>
+      </section>
+
+      <section id="component-summary">
+        <h2>10. Component Summary</h2>
+        <p>
+          The control circuit uses through-hole 74HC logic and discrete parts
+          available within the project's pre-1993 component limit.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Major power-control components
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Quantity</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>SN74HC14N</td>
+              <td>
+                Button Schmitt trigger, timing-clock inversion, and power-on
+                reset conditioning
+              </td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74HC08N</td>
+              <td>Timer-enable and control gating</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74HC4060N</td>
+              <td>RC oscillator and binary divider</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74HC161N</td>
+              <td>Four-bit hold-time counter</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>CD74HC85E</td>
+              <td>Selectable count-threshold comparator</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74HC74N</td>
+              <td>Power-state latch and button-release lockout latch</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>2N7000</td>
+              <td>Relay-coil driver</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>1N4001</td>
+              <td>Relay flyback diode</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>1N4148</td>
+              <td>Power-on-reset capacitor discharge diode</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>12 V DPST normally-open power relay</td>
+              <td>Switches the +5 V and +12 V computer rails</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>Momentary normally-open pushbutton</td>
+              <td>Front-panel power control</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>Red LED</td>
+              <td>Front-panel power indicator</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Passive Components</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Revision 1.0 values
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">Value</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Logic decoupling</td>
+              <td>100 nF per IC</td>
+              <td>Place across +5 V and ground for every logic IC.</td>
+            </tr>
+            <tr>
+              <td>PCB bulk decoupling</td>
+              <td>10 uF plus 100 nF</td>
+              <td>Placed near the raw +5 V logic-power input.</td>
+            </tr>
+            <tr>
+              <td>Button pull-up</td>
+              <td>100 kohm</td>
+              <td>Establishes the released button state.</td>
+            </tr>
+            <tr>
+              <td>Button debounce capacitor</td>
+              <td>100 nF</td>
+              <td>Approximately 10 ms RC filtering with 100 kohm.</td>
+            </tr>
+            <tr>
+              <td>Button series resistor</td>
+              <td>1 kohm</td>
+              <td>Limits transient current in the button RC network.</td>
+            </tr>
+            <tr>
+              <td>74HC4060 timing capacitor</td>
+              <td>1 nF</td>
+              <td>C0G, NP0, or another stable capacitor type is preferred.</td>
+            </tr>
+            <tr>
+              <td>74HC4060 timing resistors</td>
+              <td>13.7 kohm and 137 kohm, 1%</td>
+              <td>
+                Manufacturer's two-resistor oscillator network; nominal 33.2 kHz
+                operation.
+              </td>
+            </tr>
+            <tr>
+              <td>Power-on-reset resistor</td>
+              <td>100 kohm</td>
+              <td>Used with the reset capacitor.</td>
+            </tr>
+            <tr>
+              <td>Power-on-reset capacitor</td>
+              <td>1 uF</td>
+              <td>Provides a short startup delay.</td>
+            </tr>
+            <tr>
+              <td>MOSFET gate series resistor</td>
+              <td>100 ohm</td>
+              <td>Limits gate charging current and edge ringing.</td>
+            </tr>
+            <tr>
+              <td>MOSFET gate pull-down</td>
+              <td>100 kohm</td>
+              <td>Keeps the relay driver off during startup.</td>
+            </tr>
+            <tr>
+              <td>Power LED resistor</td>
+              <td>1 kohm</td>
+              <td>About 3 mA with a 2 V LED forward drop.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="operating-sequence">
+        <h2>11. Operating Sequence</h2>
+
+        <h3>Rear Master Switch Off</h3>
+        <p>
+          The internal power supply is not energized. The control PCB,
+          motherboard, relay, and front-panel LED are all off.
+        </p>
+
+        <h3>Rear Master Switch On, Computer Off</h3>
+        <p>
+          The internal power supply provides raw +5 V and +12 V. The control PCB
+          operates from <code>+5V_RAW</code>, but the relay remains released.
+          The motherboard receives neither switched positive rail.
+        </p>
+
+        <h3>Short Press While Off</h3>
+        <p>
+          Pressing the front button for less than approximately three seconds
+          starts the timer but does not change the power state. Releasing the
+          button resets the timer to zero.
+        </p>
+
+        <h3>Three-Second Hold While Off</h3>
+        <p>
+          When the hold counter reaches six counts, the comparator matches. The
+          next rising edge of <code>QN</code> changes
+          <code>POWER_STATE</code> to on, energizes the relay, connects both
+          switched rails to the motherboard, and lights the power LED.
+        </p>
+
+        <h3>Short Press While On</h3>
+        <p>
+          Pressing the front button for less than approximately five seconds
+          starts the timer but does not change the power state. Releasing the
+          button resets the timer to zero.
+        </p>
+
+        <h3>Five-Second Hold While On</h3>
+        <p>
+          When the hold counter reaches ten counts, the comparator matches. The
+          next rising edge of <code>QN</code> changes
+          <code>POWER_STATE</code> to off, releases the relay, disconnects both
+          switched rails from the motherboard, and turns off the power LED.
+        </p>
+
+        <h3>Continued Button Hold After an Action</h3>
+        <p>
+          The <code>DONE</code> latch disables the timer immediately after a
+          successful power-state change. Keeping the button held cannot cause a
+          second state change. The user must release the button before another
+          timed press can begin.
+        </p>
+      </section>
+
+      <section id="layout-and-acceptance">
+        <h2>12. Board Layout and Acceptance</h2>
+        <p>
+          Power the control PCB from <code>+5V_RAW</code>, not the switched +5 V
+          rail. The logic must remain active while the computer is off so it can
+          detect the next button press.
+        </p>
+        <p>
+          The +12 V relay coil is also connected to the raw side of the power
+          system. This is required because the relay must be able to energize
+          before <code>+12V_SW</code> exists.
+        </p>
+        <p>
+          Ground remains continuous at all times. Switching ground would create
+          unnecessary problems with cable shields, external interfaces,
+          peripherals, and alternate return paths.
+        </p>
+        <p>
+          Every unused CMOS logic input must be tied to a defined high or low
+          level. Unused inputs must not be left floating.
+        </p>
+        <p>
+          The power-control circuit handles only the low-voltage outputs of the
+          internal power supply. The rear master switch and AC input belong to
+          the separate mains-power portion of the computer and are outside the
+          scope of this control-circuit document.
+        </p>
+        <p>
+          Keep both switched-current paths short and wide, and keep them away
+          from the button, oscillator, and comparator traces. Place the 1N4001
+          at the relay coil, the 2N7000 gate pull-down at the transistor, and
+          each 100 nF bypass capacitor at its logic package. Join control ground
+          to the power-return path without routing relay-coil current through
+          the logic ground traces.
+        </p>
+        <p>The assembled board must pass these checks before release:</p>
+        <ul>
+          <li>
+            A short press in either power state leaves the relay and LED
+            unchanged.
+          </li>
+          <li>
+            A continuous press changes the state once at the applicable nominal
+            delay, and holding the button does not cause another change.
+          </li>
+          <li>
+            Releasing the button resets the timer and arms the next press.
+          </li>
+          <li>
+            Turning the rear switch on, including after a short interruption,
+            starts with the relay released and LED off.
+          </li>
+          <li>
+            At 5 A on <code>+5V_SW</code> and 3 A on <code>+12V_SW</code>, relay
+            contact drop, connector heating, trace heating, MOSFET temperature,
+            and relay-coil current remain within their component ratings.
+          </li>
+          <li>
+            Closing and opening the relay does not retrigger the state logic or
+            produce relay chatter.
+          </li>
+        </ul>
+      </section>
+
+      <section id="sources">
+        <h2>13. Sources</h2>
+        <ul>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hc4060.pdf"><cite>SN74HC4060</cite></a
+            >, RC-oscillator connection, frequency equation, divider outputs,
+            and active-high clear behavior.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hc161.pdf"><cite>SN74HC161</cite></a
+            >, positive-edge counting, count enables, and asynchronous
+            active-low clear behavior.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/cd74hc85.pdf"><cite>CD74HC85</cite></a
+            >, four-bit magnitude comparison and single-comparator cascade
+            inputs.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hc74.pdf"><cite>SN74HC74</cite></a
+            >, power-state and button-release storage, asynchronous clear, and
+            output-current limits.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hc08.pdf"><cite>SN74HC08</cite></a
+            >, timer-enable and clear gating.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hc14.pdf"><cite>SN74HC14</cite></a
+            >, button conditioning, oscillator inversion, and power-on-reset
+            conditioning.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
