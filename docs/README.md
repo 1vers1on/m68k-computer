@@ -11,6 +11,27 @@ npm run format
 npm run format:check
 ```
 
+## Run the website with Docker
+
+Build the image from this directory, then start the container:
+
+```sh
+docker build -t m68k-computer-docs .
+docker run --rm -p 8080:80 m68k-computer-docs
+```
+
+Open <http://localhost:8080> to view the documentation. The container serves the files in `static/` through nginx. Stop it with `Ctrl-C`.
+
+To run it in the background, add `-d` and give the container a name:
+
+```sh
+docker run -d --name m68k-computer-docs -p 8080:80 m68k-computer-docs
+docker stop m68k-computer-docs
+docker rm m68k-computer-docs
+```
+
+Change `8080` in the `-p 8080:80` argument if that port is already in use. To make the site available to other computers on your network, open `http://<host-address>:8080` and allow that port through the host firewall.
+
 ## License
 
 The project-authored documentation is licensed under [CC BY-NC-SA 4.0](LICENSE). The files in `static/datasheets/` are exempt from that documentation license: they are manufacturer-provided datasheets and remain subject to their respective rights holders’ terms.
