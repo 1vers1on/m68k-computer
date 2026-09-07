@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Memory Map, Revision 1.0</title>
+    <title>68EC000 Computer - Memory Map, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,14 +14,14 @@
         and firmware. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        The revision 1.0 address specification is frozen. This document may be
+        The revision 1.1 address specification is frozen. This document may be
         corrected or expanded without a new revision. Any change to an address
         range, slot assignment, or register address requires a new memory map
         revision.
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.0; the address specification is frozen</dd>
+        <dd>Revision 1.1; the address specification is frozen</dd>
         <dt>CPU</dt>
         <dd>MC68EC000FN10</dd>
         <dt>Address bus</dt>
@@ -50,6 +50,7 @@
     <nav aria-label="On this page">
       <ol>
         <li><a href="#main-memory-map">Main Memory Map</a></li>
+        <li><a href="#bios-scratch-memory">BIOS Scratch Memory</a></li>
         <li><a href="#i-o-and-firmware-map">I/O and Firmware Map</a></li>
         <li>
           <a href="#cl-gd5428-vga-byte-lanes">CL-GD5428 VGA Byte Lanes</a>
@@ -101,7 +102,10 @@
               <td><code>$3FFFFF</code></td>
               <td>2 MiB</td>
               <td>DRAM bank 1</td>
-              <td>The second 2 MiB DRAM bank.</td>
+              <td>
+                The second 2 MiB DRAM bank. Its last 64 KiB is BIOS scratch
+                memory.
+              </td>
             </tr>
             <tr>
               <td><code>$400000</code></td>
@@ -153,8 +157,43 @@
         </table>
       </section>
 
+      <section id="bios-scratch-memory">
+        <h2>2. BIOS Scratch Memory</h2>
+        <p>
+          The last 64 KiB of DRAM bank 1 is BIOS scratch memory. Firmware uses
+          it for its stack and working state, and nothing else reads or writes
+          it.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            BIOS scratch region
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
+              <th scope="col">Size</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$3F0000</code></td>
+              <td><code>$3FFFFF</code></td>
+              <td>64 KiB</td>
+              <td>BIOS scratch memory</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The range sits inside DRAM bank 1, so it shares that bank's refresh
+          and initialization rules. Firmware must start DRAM refresh and finish
+          memory initialization before it uses this range.
+        </p>
+      </section>
+
       <section id="i-o-and-firmware-map">
-        <h2>2. I/O and Firmware Map</h2>
+        <h2>3. I/O and Firmware Map</h2>
         <p>
           The final 2 MiB of the address space is divided into sixteen 128 KiB
           slots. A slot can contain a device, firmware, or space reserved for
@@ -341,7 +380,7 @@
       </section>
 
       <section id="cl-gd5428-vga-byte-lanes">
-        <h2>3. CL-GD5428 VGA Byte Lanes</h2>
+        <h2>4. CL-GD5428 VGA Byte Lanes</h2>
         <p>
           The CL-GD5428 expects little-endian byte ordering, while the MC68EC000
           uses big-endian byte ordering. The host interface crosses the 16-bit
@@ -364,7 +403,7 @@
       </section>
 
       <section id="boot-rom-overlay">
-        <h2>4. Boot ROM Overlay</h2>
+        <h2>5. Boot ROM Overlay</h2>
         <p>
           After a hardware reset, the firmware EEPROM also appears at the bottom
           of the address space so the CPU can read its reset vectors. Disabling
@@ -414,7 +453,7 @@
       </section>
 
       <section id="system-control-registers">
-        <h2>5. System Control Registers</h2>
+        <h2>6. System Control Registers</h2>
         <p>
           The system control block uses odd addresses on the lower 8-bit data
           lane. Only the first two registers have functions.
@@ -485,7 +524,7 @@
       </section>
 
       <section id="8-bit-peripheral-addressing">
-        <h2>6. 8-bit Peripheral Addressing</h2>
+        <h2>7. 8-bit Peripheral Addressing</h2>
         <p>
           The 8-bit peripherals connect to <code>D7..D0</code> and use
           <code>/LDS</code>. As a result, consecutive peripheral registers are
@@ -670,7 +709,7 @@
       </section>
 
       <section id="dram-organization">
-        <h2>7. DRAM Organization</h2>
+        <h2>8. DRAM Organization</h2>
         <p>
           Two 2 MiB banks provide 4 MiB of system DRAM. Each bank uses four 1M x
           4 devices to form the computer's 16-bit data width.
