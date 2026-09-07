@@ -1,6 +1,6 @@
 # 68EC000 Computer
 
-Design documentation for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10. The motherboard uses 5 V logic and discrete 74-series glue logic. Its revision 1.0 address map is frozen; most electrical and layout documents remain pre-layout designs pending board bring-up.
+Design documentation for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 
 ## At a glance
 
