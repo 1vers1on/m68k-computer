@@ -1,0 +1,2056 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Firmware ROM, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Firmware ROM</h1>
+      <p>
+        Firmware storage and read-cycle timing.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; assembled-board measurements and
+          firmware-image checks remain
+        </dd>
+        <dt>Capacity</dt>
+        <dd>128 KiB, 16-bit wide, always read-only</dd>
+        <dt>Parts</dt>
+        <dd>Four Atmel AT28C256-15PU EEPROMs, 32K x 8 each</dd>
+        <dt>Permanent mapping</dt>
+        <dd><code>$FE0000-$FFFFFF</code></dd>
+        <dt>Boot alias</dt>
+        <dd><code>$000000-$01FFFF</code> while the boot overlay is enabled</dd>
+      </dl>
+    </header>
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#purpose-and-scope">Purpose and Scope</a></li>
+        <li>
+          <a href="#physical-eeprom-organization"
+            >Physical EEPROM Organization</a
+          >
+        </li>
+        <li><a href="#cpu-address-wiring">CPU Address Wiring</a></li>
+        <li><a href="#cpu-data-wiring">CPU Data-Bus Wiring</a></li>
+        <li>
+          <a href="#firmware-address-mapping"
+            >Permanent and Boot-Alias Address Mapping</a
+          >
+        </li>
+        <li><a href="#firmware-half-selection">Firmware-Half Selection</a></li>
+        <li><a href="#byte-lane-selection">Byte-Lane Selection</a></li>
+        <li>
+          <a href="#eeprom-control-signals"
+            >EEPROM Control-Signal Architecture</a
+          >
+        </li>
+        <li><a href="#read-cycle-behavior">Read-Cycle Behavior</a></li>
+        <li><a href="#rom-dtack-generation">ROM /DTACK Generation</a></li>
+        <li>
+          <a href="#read-timing-verification">Read Timing Verification</a>
+        </li>
+        <li>
+          <a href="#boot-vector-verification">Boot-Vector Verification</a>
+        </li>
+        <li>
+          <a href="#electrical-compatibility-and-fanout"
+            >Electrical Compatibility and Fanout</a
+          >
+        </li>
+        <li><a href="#decoupling-pcb-notes">Decoupling / PCB Notes</a></li>
+        <li>
+          <a href="#internal-signal-reference">Internal Signal Reference</a>
+        </li>
+      </ol>
+    </nav>
+    <main>
+      <section id="purpose-and-scope">
+        <h2>1. Purpose and Scope</h2>
+
+        <p>
+          The firmware subsystem provides 128 KiB of nonvolatile storage using
+          four Atmel AT28C256-15PU EEPROMs connected to the 16-bit MC68EC000
+          data bus.
+        </p>
+
+        <p>
+          This page documents the electrical interface between the firmware
+          EEPROMs and the CPU bus. It defines the EEPROM address and data
+          wiring, device control signals, firmware read/write policy, bus-cycle
+          completion, timing requirements, electrical loading, and local PCB
+          implementation.
+        </p>
+
+        <p>
+          Global address ownership is defined by
+          <a href="bus-and-decode.html">Bus and Decode</a>. That logic provides
+          the following byte-specific active-low firmware selection signals:
+        </p>
+
+        <pre><code>ROM0_UDS_n
+ROM0_LDS_n
+ROM1_UDS_n
+ROM1_LDS_n</code></pre>
+
+        <p>
+          These signals identify the firmware half and CPU byte lane
+          participating in a bus cycle. This page determines how those
+          selections control the physical AT28C256 <code>/CE</code>,
+          <code>/OE</code>, and <code>/WE</code> inputs.
+        </p>
+
+        <p>
+          A chip select identifies the device; output enable controls whether it
+          drives the bus. During a write, the CPU supplies the data and all
+          EEPROM outputs must be disabled.
+        </p>
+
+        <p>
+          Timing below uses the AT28C256-15 read limits and the MC68EC000 10 MHz
+          bus specifications. The read-delay circuit feeds
+          <code>ROM_DTACK_n</code> into the shared completion tree in
+          <a href="bus-and-decode.html">Bus and Decode</a> and takes its clock
+          from a spare <code>U_DRAM_CLK_BUF</code> channel. Board timing
+          verification remains before construction.
+        </p>
+        <p>
+          A signal ending in <code>_n</code>, or written with a leading slash,
+          is active low: 0 means asserted and 1 means inactive. HI and LO name
+          byte lanes; ROM0 and ROM1 name the two 64 KiB halves.
+        </p>
+      </section>
+      <section id="physical-eeprom-organization">
+        <h2>2. Physical EEPROM Organization</h2>
+
+        <p>
+          The firmware store uses four Atmel AT28C256-15PU EEPROMs. Each device
+          is organized as 32K x 8 bits. The four devices are arranged as two 32K
+          x 16-bit firmware halves.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Firmware EEPROM organization
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Device</th>
+              <th scope="col">CPU data bus</th>
+              <th scope="col">Firmware half</th>
+              <th scope="col">Capacity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ROM0_HI</code></td>
+              <td>D15..D8</td>
+              <td>0</td>
+              <td>32 KiB</td>
+            </tr>
+            <tr>
+              <td><code>ROM0_LO</code></td>
+              <td>D7..D0</td>
+              <td>0</td>
+              <td>32 KiB</td>
+            </tr>
+            <tr>
+              <td><code>ROM1_HI</code></td>
+              <td>D15..D8</td>
+              <td>1</td>
+              <td>32 KiB</td>
+            </tr>
+            <tr>
+              <td><code>ROM1_LO</code></td>
+              <td>D7..D0</td>
+              <td>1</td>
+              <td>32 KiB</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Within each half, the high-byte and low-byte EEPROMs share the same
+          address and are selected independently according to the MC68EC000 byte
+          strobes. Together, one high/low pair behaves as a 32K x 16-bit memory.
+        </p>
+
+        <p>
+          Each high/low pair stores 32,768 words, or 64 KiB. Two pairs provide
+          128 KiB. A word read selects both devices in one pair.
+        </p>
+
+        <p>All four EEPROMs receive the same fifteen word-address bits:</p>
+
+        <pre><code>CPU A1  -> EEPROM A0
+CPU A2  -> EEPROM A1
+...
+CPU A15 -> EEPROM A14</code></pre>
+
+        <p>
+          CPU <code>A16</code> is not connected to an EEPROM address input. It
+          selects firmware half 0 or firmware half 1 through the previously
+          defined firmware-half selection logic.
+        </p>
+
+        <p>
+          The physical EEPROM organization is identical for the permanent
+          firmware mapping and the temporary boot alias. Both address ranges
+          access the same four devices; only the upstream address-selection
+          logic differs.
+        </p>
+      </section>
+
+      <section id="cpu-address-wiring">
+        <h2>3. CPU Address Wiring</h2>
+
+        <p>
+          Each AT28C256 has fifteen address inputs, <code>A0..A14</code>,
+          selecting one of 32,768 byte locations. The firmware interface maps
+          them directly from CPU <code>A1..A15</code>.
+        </p>
+
+        <pre><code>CPU A1  -> AT28C256 A0
+CPU A2  -> AT28C256 A1
+CPU A3  -> AT28C256 A2
+...
+CPU A15 -> AT28C256 A14</code></pre>
+
+        <p>
+          This wiring is identical on <code>ROM0_HI</code>,
+          <code>ROM0_LO</code>, <code>ROM1_HI</code>, and <code>ROM1_LO</code>.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Shared AT28C256 address wiring, 28-pin PDIP
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">CPU address lines</th>
+              <th scope="col">EEPROM address lines</th>
+              <th scope="col">EEPROM PDIP pins, in signal order</th>
+              <th scope="col">Applies to</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>A1..A8</code></td>
+              <td><code>A0..A7</code></td>
+              <td>10, 9, 8, 7, 6, 5, 4, 3</td>
+              <td>All four EEPROMs</td>
+            </tr>
+            <tr>
+              <td><code>A9..A15</code></td>
+              <td><code>A8..A14</code></td>
+              <td>25, 24, 21, 23, 2, 26, 1</td>
+              <td>All four EEPROMs</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Each range maps in ascending order. CPU <code>A1</code> connects to
+          EEPROM <code>A0</code> on pin 10, and CPU <code>A15</code> connects to
+          EEPROM <code>A14</code> on pin 1.
+        </p>
+
+        <p>
+          CPU <code>A0</code> is exposed by the processor but is not wired to an
+          EEPROM address input or to firmware-half selection. On the 16-bit bus,
+          the active-low <code>/UDS</code> and <code>/LDS</code> strobes select
+          the upper and lower EEPROM byte lanes.
+        </p>
+
+        <pre><code>CPU word address
+   |
+   +-- A1..A15 -> EEPROM A0..A14
+   |
+   +-- /UDS    -> high-byte device selection
+   |
+   +-- /LDS    -> low-byte device selection</code></pre>
+
+        <p>
+          One EEPROM address therefore corresponds to one 16-bit CPU word. The
+          high-byte and low-byte EEPROMs in a firmware half receive the same
+          address; the byte strobes determine which device participates in the
+          transfer.
+        </p>
+
+        <p>
+          CPU <code>A16</code> connects only to the firmware-half decode in
+          <a href="bus-and-decode.html">Bus and Decode</a>. It does not connect
+          to an AT28C256 address pin.
+        </p>
+
+        <pre><code>A16 = 0 -> firmware half 0
+A16 = 1 -> firmware half 1</code></pre>
+
+        <p>
+          No address translation occurs inside the firmware subsystem. The same
+          physical EEPROM address wiring is used through the permanent firmware
+          mapping and through the temporary boot alias.
+        </p>
+      </section>
+
+      <section id="cpu-data-wiring">
+        <h2>4. CPU Data-Bus Wiring</h2>
+
+        <p>
+          The two upper EEPROMs connect to <code>D15..D8</code>, and the two
+          lower EEPROMs connect to <code>D7..D0</code>. Every range below maps
+          in ascending signal order.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            EEPROM data-bus wiring, 28-pin PDIP
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">EEPROMs</th>
+              <th scope="col">EEPROM data signals</th>
+              <th scope="col">EEPROM PDIP pins, in signal order</th>
+              <th scope="col">CPU data signals</th>
+              <th scope="col">Byte strobe</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ROM0_HI</code>, <code>ROM1_HI</code></td>
+              <td><code>I/O0..I/O7</code></td>
+              <td>11, 12, 13, 15, 16, 17, 18, 19</td>
+              <td><code>D8..D15</code></td>
+              <td><code>/UDS</code></td>
+            </tr>
+            <tr>
+              <td><code>ROM0_LO</code>, <code>ROM1_LO</code></td>
+              <td><code>I/O0..I/O7</code></td>
+              <td>11, 12, 13, 15, 16, 17, 18, 19</td>
+              <td><code>D0..D7</code></td>
+              <td><code>/LDS</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          An upper EEPROM's <code>I/O0</code> connects to <code>D8</code> and
+          <code>I/O7</code> to <code>D15</code>. A lower EEPROM's
+          <code>I/O0</code> connects to <code>D0</code> and <code>I/O7</code> to
+          <code>D7</code>. The decoder outputs <code>ROM0_UDS_n</code>,
+          <code>ROM0_LDS_n</code>, <code>ROM1_UDS_n</code>, and
+          <code>ROM1_LDS_n</code> connect to the matching EEPROM
+          <code>/CE</code> pins.
+        </p>
+
+        <p>
+          The control connections below determine when these data pins drive the
+          bus. Both EEPROMs on a given byte lane share its eight CPU wires.
+        </p>
+
+        <p>
+          Microchip, <a href="datasheets/AT28C256.pdf">AT28C256 datasheet</a>,
+          sections 1 and 2; and
+          <a href="bus-and-decode.html">Bus and Decode</a>, firmware bank and
+          byte-lane selection.
+        </p>
+      </section>
+
+      <section id="firmware-address-mapping">
+        <h2>5. Permanent and Boot-Alias Address Mapping</h2>
+
+        <p>
+          The 128 KiB physical firmware image has two CPU mappings. The
+          permanent mapping is always available. The low-address boot alias is
+          available only while the motherboard boot overlay is enabled.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            CPU mappings of the physical firmware halves
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">CPU address range</th>
+              <th scope="col">Physical firmware</th>
+              <th scope="col">Availability</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$FE0000-$FEFFFF</code></td>
+              <td>Firmware half 0</td>
+              <td>Permanent</td>
+            </tr>
+            <tr>
+              <td><code>$FF0000-$FFFFFF</code></td>
+              <td>Firmware half 1</td>
+              <td>Permanent</td>
+            </tr>
+            <tr>
+              <td><code>$000000-$00FFFF</code></td>
+              <td>Firmware half 0</td>
+              <td>Boot overlay enabled</td>
+            </tr>
+            <tr>
+              <td><code>$010000-$01FFFF</code></td>
+              <td>Firmware half 1</td>
+              <td>Boot overlay enabled</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          These ranges do not represent separate firmware stores. The permanent
+          mapping and boot alias access the same four EEPROMs, so a
+          corresponding address reads the same stored byte through either
+          mapping.
+        </p>
+
+        <pre><code>$000000-$00FFFF  --+
+                   +--> ROM0_HI + ROM0_LO
+$FE0000-$FEFFFF  --+
+
+$010000-$01FFFF  --+
+                   +--> ROM1_HI + ROM1_LO
+$FF0000-$FFFFFF  --+</code></pre>
+
+        <p>
+          <a href="bus-and-decode.html">Bus and Decode</a> owns address
+          qualification and boot-overlay state. The EEPROM interface receives
+          the same firmware-cycle and byte-lane signals for either mapping; it
+          does not distinguish a permanent access from a boot-alias access.
+        </p>
+      </section>
+
+      <section id="firmware-half-selection">
+        <h2>6. Firmware-Half Selection</h2>
+
+        <p>
+          CPU address bit <code>A16</code> selects the 64 KiB half of the
+          physical firmware store during an active firmware cycle.
+        </p>
+
+        <pre><code>A16 = 0 -> firmware half 0
+A16 = 1 -> firmware half 1</code></pre>
+
+        <p>
+          The address decoder supplies the active-low half-selection signals
+          <code>ROM_BANK0_n</code> and <code>ROM_BANK1_n</code>. Their
+          definitions are:
+        </p>
+
+        <pre><code>ROM_BANK0_n = ROM_CYCLE_n OR A16
+ROM_BANK1_n = ROM_CYCLE_n OR A16_n</code></pre>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Firmware-half selection states
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Condition</th>
+              <th scope="col"><code>ROM_BANK0_n</code></th>
+              <th scope="col"><code>ROM_BANK1_n</code></th>
+              <th scope="col">EEPROM half eligible for byte selection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>No firmware cycle</td>
+              <td>1</td>
+              <td>1</td>
+              <td>None</td>
+            </tr>
+            <tr>
+              <td>Firmware cycle, <code>A16 = 0</code></td>
+              <td>0</td>
+              <td>1</td>
+              <td><code>ROM0_HI</code> and <code>ROM0_LO</code></td>
+            </tr>
+            <tr>
+              <td>Firmware cycle, <code>A16 = 1</code></td>
+              <td>1</td>
+              <td>0</td>
+              <td><code>ROM1_HI</code> and <code>ROM1_LO</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Only one half is eligible during a valid firmware access. The
+          byte-lane signals in the next section decide whether its upper EEPROM,
+          lower EEPROM, or both EEPROMs are selected.
+        </p>
+      </section>
+
+      <section id="byte-lane-selection">
+        <h2>7. Byte-Lane Selection</h2>
+
+        <p>
+          Each firmware half contains an upper EEPROM on CPU
+          <code>D15..D8</code> and a lower EEPROM on <code>D7..D0</code>. The
+          MC68EC000's active-low <code>/UDS</code> and <code>/LDS</code>
+          strobes select the participating byte lane.
+        </p>
+
+        <pre><code>HI device -> CPU D15..D8 -> /UDS
+LO device -> CPU D7..D0  -> /LDS</code></pre>
+
+        <p>
+          The decoder combines each active-low bank select with its matching
+          byte strobe:
+        </p>
+
+        <pre><code>ROM0_UDS_n = ROM_BANK0_n OR UDS_n
+ROM0_LDS_n = ROM_BANK0_n OR LDS_n
+ROM1_UDS_n = ROM_BANK1_n OR UDS_n
+ROM1_LDS_n = ROM_BANK1_n OR LDS_n</code></pre>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Byte-specific EEPROM chip-enable signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Physical EEPROM</th>
+              <th scope="col">CPU data lane</th>
+              <th scope="col">AT28C256 input</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>ROM0_UDS_n</code></td>
+              <td><code>ROM0_HI</code> (<code>U_ROM0U</code>)</td>
+              <td><code>D15..D8</code></td>
+              <td><code>/CE</code>, pin 20</td>
+            </tr>
+            <tr>
+              <td><code>ROM0_LDS_n</code></td>
+              <td><code>ROM0_LO</code> (<code>U_ROM0L</code>)</td>
+              <td><code>D7..D0</code></td>
+              <td><code>/CE</code>, pin 20</td>
+            </tr>
+            <tr>
+              <td><code>ROM1_UDS_n</code></td>
+              <td><code>ROM1_HI</code> (<code>U_ROM1U</code>)</td>
+              <td><code>D15..D8</code></td>
+              <td><code>/CE</code>, pin 20</td>
+            </tr>
+            <tr>
+              <td><code>ROM1_LDS_n</code></td>
+              <td><code>ROM1_LO</code> (<code>U_ROM1L</code>)</td>
+              <td><code>D7..D0</code></td>
+              <td><code>/CE</code>, pin 20</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Byte-lane selection within the selected firmware half
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col"><code>/UDS</code></th>
+              <th scope="col"><code>/LDS</code></th>
+              <th scope="col">Selected EEPROMs</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Active</td>
+              <td>Active</td>
+              <td>Upper and lower EEPROMs</td>
+            </tr>
+            <tr>
+              <td>Active</td>
+              <td>Inactive</td>
+              <td>Upper EEPROM only</td>
+            </tr>
+            <tr>
+              <td>Inactive</td>
+              <td>Active</td>
+              <td>Lower EEPROM only</td>
+            </tr>
+            <tr>
+              <td>Inactive</td>
+              <td>Inactive</td>
+              <td>None</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The chip-enable signals identify the EEPROMs participating in the
+          cycle. The control-signal section defines the separate
+          <code>/CE</code>, <code>/OE</code>, and <code>/WE</code> behavior that
+          permits a selected EEPROM to drive the CPU data bus.
+        </p>
+
+        <p>
+          <a href="bus-and-decode.html">Bus and Decode</a>, firmware ROM cycle,
+          bank, and byte-lane selection; and
+          <a href="datasheets/AT28C256.pdf">AT28C256 datasheet</a>, section 2.
+        </p>
+      </section>
+
+      <section id="eeprom-control-signals">
+        <h2>8. EEPROM Control-Signal Architecture</h2>
+
+        <p>
+          Each AT28C256 has three active-low control inputs:
+          <code>/CE</code>, <code>/OE</code>, and <code>/WE</code>. They have
+          separate jobs. The device reads only when <code>/CE</code> and
+          <code>/OE</code> are low and <code>/WE</code> is high. Its outputs are
+          high-impedance when either <code>/CE</code> or <code>/OE</code> is
+          high.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            AT28C256 firmware control connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">AT28C256 input</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/CE</code>, pin 20</td>
+              <td>
+                The device-specific <code>ROM0_UDS_n</code>,
+                <code>ROM0_LDS_n</code>, <code>ROM1_UDS_n</code>, or
+                <code>ROM1_LDS_n</code> signal
+              </td>
+              <td>Selects the participating EEPROM and byte lane.</td>
+            </tr>
+            <tr>
+              <td><code>/OE</code>, pin 22</td>
+              <td>
+                <code>ROM_OE_n = READ_n</code>, shared by all four EEPROMs
+              </td>
+              <td>Enables EEPROM data outputs only during a CPU read cycle.</td>
+            </tr>
+            <tr>
+              <td><code>/WE</code>, pin 27</td>
+              <td>+5 V on all four EEPROMs</td>
+              <td>Permanently disables EEPROM programming.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Chip Enable</h3>
+
+        <p>
+          The byte-specific decoder outputs already include firmware-cycle,
+          firmware-half, and CPU byte-lane qualification. They connect directly
+          to the matching AT28C256 <code>/CE</code> pin:
+        </p>
+
+        <pre><code>ROM0_UDS_n -> ROM0_HI /CE
+ROM0_LDS_n -> ROM0_LO /CE
+ROM1_UDS_n -> ROM1_HI /CE
+ROM1_LDS_n -> ROM1_LO /CE</code></pre>
+
+        <h3>Output Enable</h3>
+
+        <p>
+          <code>ROM_OE_n</code> is a local name for the existing
+          <code>READ_n</code> net. It adds no inverter or buffer:
+        </p>
+
+        <pre><code>ROM_OE_n = READ_n = NOT R/W
+
+R/W = 1: READ_n = 0, EEPROM /OE inputs low
+R/W = 0: READ_n = 1, EEPROM /OE inputs high</code></pre>
+
+        <p>
+          During a CPU read, a selected EEPROM can drive its byte lane. During a
+          CPU write, <code>READ_n</code> holds every EEPROM <code>/OE</code>
+          high, so the CPU is the only defined data-bus driver. An EEPROM whose
+          <code>/CE</code> is inactive remains high-impedance even while the
+          shared <code>READ_n</code> signal is low.
+        </p>
+
+        <h3>Write Enable</h3>
+
+        <p>Every EEPROM <code>/WE</code> pin connects directly to +5 V:</p>
+
+        <pre><code>ROM0_HI /WE -> +5 V
+ROM0_LO /WE -> +5 V
+ROM1_HI /WE -> +5 V
+ROM1_LO /WE -> +5 V</code></pre>
+
+        <p>
+          No CPU control signal, address-decode output, or motherboard logic
+          signal connects to an EEPROM <code>/WE</code> input. Since a byte or
+          page write needs a low pulse on <code>/WE</code> or
+          <code>/CE</code> with the other write condition satisfied and
+          <code>/OE</code> high, the permanent high <code>/WE</code> connection
+          prevents the CPU from initiating a programming cycle.
+        </p>
+
+        <p>
+          Microchip, <a href="datasheets/AT28C256.pdf">AT28C256 datasheet</a>,
+          sections 2 and 6; and
+          <a href="bus-and-decode.html">Bus and Decode</a>, firmware bank,
+          byte-lane, and read qualification.
+        </p>
+        <section id="firmware-write-policy">
+          <h3>Firmware Write Policy</h3>
+
+          <p>
+            The motherboard firmware store is hardware read-only during normal
+            operation. The MC68EC000 cannot program, erase, or otherwise modify
+            the four AT28C256 EEPROMs because every <code>/WE</code> input is
+            permanently inactive.
+          </p>
+
+          <pre><code>all AT28C256 /WE inputs = +5 V</code></pre>
+
+          <p>
+            Firmware updates require an external EEPROM-programming procedure.
+            This document does not define the programming fixture, socket
+            choice, or removal procedure.
+          </p>
+
+          <p>
+            A CPU write to a firmware address cannot create an EEPROM
+            programming pulse. <code>READ_n</code> is high during that write, so
+            EEPROM output drivers are disabled and do not contend with the CPU
+            on the data bus.
+          </p>
+
+          <p>
+            Firmware writes have defined bus behavior. The firmware interface
+            does not assert <code>ROM_DTACK_n</code> for a write; the
+            motherboard timeout therefore ends the unacknowledged cycle with
+            <code>/BERR</code>. A firmware write neither completes normally nor
+            alters EEPROM contents.
+          </p>
+
+          <p>
+            <a href="bus-and-decode.html">Bus and Decode</a>, firmware write and
+            completion behavior; and
+            <a href="datasheets/AT28C256.pdf">AT28C256 datasheet</a>, section 6.
+          </p>
+        </section>
+      </section>
+
+      <section id="read-cycle-behavior">
+        <h2>9. Read-Cycle Behavior</h2>
+        <p>
+          Firmware reads use the AT28C256 asynchronous interface. Each EEPROM
+          receives its own byte-specific <code>/CE</code>; all four share
+          <code>ROM_OE_n</code>. Every <code>/WE</code> stays high.
+        </p>
+        <pre><code>ROM_OE_n = READ_n = NOT R/W
+
+CPU read:  R/W = 1, /OE = 0, /WE = 1
+CPU write: R/W = 0, /OE = 1, /WE = 1</code></pre>
+        <p>
+          A device drives data only with <code>/CE = 0</code>,
+          <code>/OE = 0</code>, and <code>/WE = 1</code>. An unselected EEPROM
+          stays high-impedance even when the common output enable is low. This
+          follows the AT28C256 operating-mode table, section 6.1.
+        </p>
+        <p>
+          A 16-bit read asserts both byte strobes: the selected HI device drives
+          <code>D15..D8</code> and the LO device drives <code>D7..D0</code>. An
+          even-address byte read uses HI; an odd-address byte read uses LO. The
+          firmware subsystem leaves the other lane undriven on a byte read.
+        </p>
+        <h3>Read Access Timing</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            AT28C256-15 read limits
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Limit</th>
+              <th scope="col">Measured from</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>tACC</code></td>
+              <td>150 ns maximum</td>
+              <td>Last address transition to valid output</td>
+            </tr>
+            <tr>
+              <td><code>tCE</code></td>
+              <td>150 ns maximum</td>
+              <td><code>/CE</code> assertion to valid output</td>
+            </tr>
+            <tr>
+              <td><code>tOE</code></td>
+              <td>70 ns maximum</td>
+              <td><code>/OE</code> assertion to valid output</td>
+            </tr>
+            <tr>
+              <td><code>tDF</code></td>
+              <td>50 ns maximum</td>
+              <td>
+                <code>/CE</code> or <code>/OE</code> release to high-impedance;
+                characterized at 5 pF
+              </td>
+            </tr>
+            <tr>
+              <td><code>tOH</code></td>
+              <td>0 ns minimum</td>
+              <td>First address or enable change to output change</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          These are parallel requirements with different starting events.
+          Evaluate each selected EEPROM at its pins:
+        </p>
+        <pre><code>t_data_valid = max(t_address_valid + 150 ns,
+                   t_CE_low        + 150 ns,
+                   t_OE_low        +  70 ns)</code></pre>
+        <p>
+          The read-waveform note allows <code>/CE</code> to follow the address
+          by <code>tACC - tCE</code> without extending address access time. That
+          allowance is zero for the -15 part. Decode delay adds to the path
+          through chip enable; it cannot be absorbed into the 150 ns address
+          specification.
+        </p>
+        <pre><code>CPU address and control
+  -> address / overlay decode -> half select -> byte select
+  -> EEPROM /CE -> valid EEPROM data -> valid CPU data
+
+Selected read request -> clocked delay -> ROM_DTACK_n
+  -> shared completion tree -> CPU /DTACK -> CPU data sampling</code></pre>
+        <p>
+          The delay runs alongside the EEPROM access. It does not detect data
+          validity. Section 11 checks that it waits long enough. Source:
+          <a href="datasheets/AT28C256.pdf">AT28C256, sections 6.2-6.5</a>.
+        </p>
+      </section>
+
+      <section id="rom-dtack-generation">
+        <h2>10. ROM /DTACK Generation</h2>
+        <p>
+          <code>ROM_DTACK_n</code> acknowledges a selected firmware read after
+          its data has had time to settle. It is one completion input to the
+          <code>U_DTACK_A</code> <code>SN74F21N</code> stage of the shared
+          acknowledgement tree in
+          <a href="bus-and-decode.html">Bus and Decode</a>. Firmware writes
+          receive no ROM acknowledgement and reach the motherboard timeout,
+          which asserts <code>/BERR</code>. The timeout and all other responders
+          must preserve the firmware address ownership defined in Bus and
+          Decode.
+        </p>
+        <h3>Read-Request Qualification</h3>
+        <p>
+          The names below are aliases for the existing byte-select wires. They
+          do not add another decode stage.
+        </p>
+        <pre><code>ROM0_HI_CE_n = ROM0_UDS_n
+ROM0_LO_CE_n = ROM0_LDS_n
+ROM1_HI_CE_n = ROM1_UDS_n
+ROM1_LO_CE_n = ROM1_LDS_n
+
+ROM_BYTE_CYCLE_n = ROM0_HI_CE_n AND ROM0_LO_CE_n
+                   AND ROM1_HI_CE_n AND ROM1_LO_CE_n
+ROM_READ_REQ_n = ROM_BYTE_CYCLE_n OR ROM_OE_n
+ROM_READ_ACTIVE = NOT ROM_READ_REQ_n</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Read-request truth table
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Any EEPROM selected?</th>
+              <th scope="col">R/W</th>
+              <th scope="col">ROM_BYTE_CYCLE_n</th>
+              <th scope="col">ROM_OE_n</th>
+              <th scope="col">ROM_READ_REQ_n</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Yes</td>
+              <td>1 (read)</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+            </tr>
+            <tr>
+              <td>Yes</td>
+              <td>0 (write)</td>
+              <td>0</td>
+              <td>1</td>
+              <td>1</td>
+            </tr>
+            <tr>
+              <td>No</td>
+              <td>Either</td>
+              <td>1</td>
+              <td>Either</td>
+              <td>1</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>Selected Delay Architecture</h3>
+        <p>
+          Use two <code>SN74AHCT74N</code> dual flip-flops as a four-stage shift
+          register on a buffered 10 MHz clock. Stage 1 samples
+          <code>ROM_READ_ACTIVE</code>; each later stage samples the preceding
+          stage. Clear all stages between bus cycles and during board reset. Tie
+          every asynchronous preset high.
+        </p>
+        <pre><code>ROM_CLK = CPU_CLK_10 via U_DRAM_CLK_BUF spare channel
+ROM_AS_ACTIVE = NOT AS_n
+ROM_SHIFT_CLR_n = RESET_n AND ROM_AS_ACTIVE
+
+On each rising ROM_CLK edge, when ROM_SHIFT_CLR_n = 1:
+  Q1 &lt;- ROM_READ_ACTIVE
+  Q2 &lt;- Q1
+  Q3 &lt;- Q2
+  Q4 &lt;- Q3
+
+When ROM_SHIFT_CLR_n = 0:
+  Q1 = Q2 = Q3 = Q4 = 0
+
+ROM_ACK_BLOCK_n = ROM_READ_REQ_n OR Q4_n
+ROM_DTACK_n = AS_n OR ROM_ACK_BLOCK_n</code></pre>
+        <p>
+          All four assignments use the old stage values. In normal operation,
+          the first sampled 1 reaches Q4 after three further clock periods. The
+          request must stay active throughout the read. A write or a cycle with
+          no selected byte keeps <code>ROM_ACK_BLOCK_n</code> high. The final OR
+          gate releases the acknowledgement directly from <code>AS_n</code>,
+          without waiting for the shift register to clear.
+        </p>
+        <p>
+          This is not a fixed CPU wait count. The decoded request is not
+          phase-aligned with the clock. Stage 1 can violate setup time; stages
+          2-4 provide settling time. Recovery at clear release, clock skew, and
+          metastability are on the verification list before the calculated
+          latency is treated as a hardware guarantee. No RC delay or chain of
+          nominal gate delays sets the read duration.
+        </p>
+        <h3>Through-Hole Gate and Pin Map</h3>
+        <p>
+          These are new local reference designators. All parts use +5 V and
+          ground. The existing <code>READ_n</code> inverter and byte-select
+          gates remain upstream.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Local logic allocation, PDIP packages
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Device / gate</th>
+              <th scope="col">Input connections</th>
+              <th scope="col">Output / use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_ROM_SELECT</code> CD74HCT21E, gate 1</td>
+              <td>Pins 1, 2, 4, 5: the four CE aliases in the order above</td>
+              <td>Pin 6: <code>ROM_BYTE_CYCLE_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_OR</code> SN74AHCT32N, gate 1</td>
+              <td>
+                Pin 1: <code>ROM_BYTE_CYCLE_n</code>; pin 2:
+                <code>ROM_OE_n</code>
+              </td>
+              <td>Pin 3: <code>ROM_READ_REQ_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_INV</code> SN74HCT04N, gate 1</td>
+              <td>Pin 1: <code>ROM_READ_REQ_n</code></td>
+              <td>Pin 2: <code>ROM_READ_ACTIVE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_INV</code> gate 2</td>
+              <td>Pin 3: <code>AS_n</code></td>
+              <td>Pin 4: <code>ROM_AS_ACTIVE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_CLEAR</code> SN74HCT08N, gate 1</td>
+              <td>
+                Pin 1: <code>RESET_n</code>; pin 2: <code>ROM_AS_ACTIVE</code>
+              </td>
+              <td>Pin 3: <code>ROM_SHIFT_CLR_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_DELAY_A</code> SN74AHCT74N</td>
+              <td>
+                Pin 2 (1D): <code>ROM_READ_ACTIVE</code>; pin 12 (2D): pin 5
+                (Q1)
+              </td>
+              <td>Pin 5: Q1; pin 9: Q2</td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_DELAY_B</code> SN74AHCT74N</td>
+              <td>
+                Pin 2 (1D): U_ROM_DELAY_A pin 9 (Q2); pin 12 (2D): pin 5 (Q3)
+              </td>
+              <td>Pin 5: Q3; pin 9: Q4; pin 8: Q4_n</td>
+            </tr>
+            <tr>
+              <td>Both delay packages</td>
+              <td>
+                Pins 3, 11: <code>ROM_CLK</code>; pins 1, 13:
+                <code>ROM_SHIFT_CLR_n</code>; pins 4, 10: +5 V
+              </td>
+              <td>Unused complementary outputs open</td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_OR</code> gate 2</td>
+              <td>Pin 4: <code>ROM_READ_REQ_n</code>; pin 5: Q4_n</td>
+              <td>Pin 6: <code>ROM_ACK_BLOCK_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_ROM_OR</code> gate 3</td>
+              <td>
+                Pin 9: <code>AS_n</code>; pin 10: <code>ROM_ACK_BLOCK_n</code>
+              </td>
+              <td>Pin 8: <code>ROM_DTACK_n</code></td>
+            </tr>
+            <tr>
+              <td><code>ROM_DTACK_n</code> destination</td>
+              <td><code>U_ROM_OR</code> gate 3 output</td>
+              <td>
+                Bus and Decode <code>U_DTACK_A</code> <code>SN74F21N</code> pin
+                2
+              </td>
+            </tr>
+            <tr>
+              <td><code>ROM_CLK</code> source</td>
+              <td>
+                <code>U_DRAM_CLK_BUF</code> <code>CD74ACT244E</code> pin 5, a
+                spare channel fed from <code>DRAM_CLK_10</code>
+              </td>
+              <td>
+                Pins 3 and 11 of both delay packages; see
+                <a href="dram.html#clock-distribution">dram.html</a>
+              </td>
+            </tr>
+            <tr>
+              <td>Supply pins</td>
+              <td>14-pin logic: pin 14 = +5 V, pin 7 = GND</td>
+              <td>One 100 nF bypass capacitor per package</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Tie unused HCT21 inputs 9, 10, 12, 13 low; leave pin 8 open and its NC
+          pins 3 and 11 unconnected. Tie unused inverter inputs 5, 9, 11, 13 and
+          unused HCT08 inputs 4, 5, 9, 10, 12, 13 low; leave their outputs open.
+          <code>U_ROM_OR</code> gate 4 is unused: tie inputs 12 and 13 low and
+          leave output pin 11 open.
+        </p>
+        <h3>Motherboard Integration</h3>
+        <p>
+          <code>ROM_DTACK_n</code> connects to <code>U_DTACK_A</code> pin 2 in
+          <a href="bus-and-decode.html">Bus and Decode</a>, the input its
+          completion tree already reserves for the firmware ROM. That tree uses
+          two <code>SN74F21N</code> AND stages and a dedicated
+          <code>SN74F32N</code> timeout mask (<code>U_OR_DTACK</code>), so the
+          shared acknowledgement-release path is 17.2 ns and no HCT final gate
+          is moved. Do not connect two push-pull outputs together.
+        </p>
+        <p>
+          <code>ROM_CLK</code> uses a spare channel of
+          <code>U_DRAM_CLK_BUF</code>, with pin 15 fed from
+          <code>DRAM_CLK_10</code> and pin 5 driving the four flip-flop clocks,
+          so <code>CPU_CLK_10</code> loading in
+          <a href="clock-and-reset.html">Clock and Reset</a> is unchanged. The
+          20 MHz divider node is unused by the ROM circuit. See
+          <a href="dram.html#clock-distribution">dram.html</a> for the buffer
+          pin assignment.
+        </p>
+        <p>
+          Sources:
+          <a href="datasheets/sn74ahct74.pdf">SN74AHCT74, sections 5 and 6</a>,
+          <a href="datasheets/sn74ahct32.pdf">SN74AHCT32, sections 5 and 6</a>,
+          <a href="datasheets/cd74hct21.pdf">CD74HCT21</a>,
+          <a href="datasheets/sn54hct04.pdf">SN74HCT04</a>,
+          <a href="datasheets/sn74hct08.pdf">SN74HCT08</a>, and
+          <a href="datasheets/cd74act244.pdf">CD74ACT244</a>.
+        </p>
+      </section>
+
+      <section id="read-timing-verification">
+        <h2>11. Read Timing Verification</h2>
+        <p>
+          Use the 10 MHz column of
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, section 10.14, pages 10-24 through 10-26</a
+          >, which explicitly covers the MC68EC000. The generic processor table
+          in section 10.9 is not the source for these bus limits. The separate
+          clock-waveform questions in Clock and Reset still apply.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC68EC000 read-cycle constraints at 10 MHz
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Manual parameter</th>
+              <th scope="col">Requirement</th>
+              <th scope="col">Design consequence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>#6 / #6A</td>
+              <td>
+                Address / function code valid within 35 ns of their specified
+                clock edges
+              </td>
+              <td>
+                Add CPU output delay to decode delay; the launch edges differ.
+              </td>
+            </tr>
+            <tr>
+              <td>#9 / #12</td>
+              <td>
+                Read strobes assert / negate 3-35 ns after their specified edges
+              </td>
+              <td>Check actual strobe timing at the CPU pins.</td>
+            </tr>
+            <tr>
+              <td>#15</td>
+              <td>AS and DS inactive for at least 105 ns</td>
+              <td>Delay stages must clear before another cycle.</td>
+            </tr>
+            <tr>
+              <td>#27</td>
+              <td>Read data setup to sampling clock low: 5 ns minimum</td>
+              <td>Data must settle before the final sampling edge.</td>
+            </tr>
+            <tr>
+              <td>#47</td>
+              <td>Asynchronous input setup: 5 ns minimum</td>
+              <td>
+                DTACK arriving too late for an edge must remain valid for a
+                later edge.
+              </td>
+            </tr>
+            <tr>
+              <td>#28</td>
+              <td>AS / DS negation to DTACK negation: 110 ns maximum</td>
+              <td>
+                Use the direct AS release path and the FAST shared completion
+                tree.
+              </td>
+            </tr>
+            <tr>
+              <td>#28A</td>
+              <td>Clock high to DTACK negation: 110 ns maximum</td>
+              <td>
+                Also check the applicable cycle waveform; the AS-relative
+                calculation alone does not prove this bound.
+              </td>
+            </tr>
+            <tr>
+              <td>#29</td>
+              <td>Data hold after AS / DS negation: 0 ns minimum</td>
+              <td>Keep address and enables valid through CPU sampling.</td>
+            </tr>
+            <tr>
+              <td>#29A</td>
+              <td>
+                Data high-impedance after AS / DS negation: 150 ns maximum
+              </td>
+              <td>
+                Include byte-select release and EEPROM output-disable time.
+              </td>
+            </tr>
+            <tr>
+              <td>#31</td>
+              <td>DTACK assertion to data valid: 65 ns maximum</td>
+              <td>
+                This design places data before DTACK; see note 5 for its
+                relationship to #27 and #47.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>Worst-Case Paths</h3>
+        <p>
+          Logic calculations use 4.5 V, loads at or below 50 pF, and the -40 to
+          +85 C limits. The board clock chain limits the complete system to 0-70
+          C. EEPROM read access is specified with the section 6.5 100 pF test
+          load; output disable has a separate 5 pF condition. Trace delay,
+          threshold differences, clock skew, and excess loading are not included
+          in the sums below.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Read and completion budget
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Path / check</th>
+              <th scope="col">Calculation</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Address decode to EEPROM /CE</td>
+              <td>177 + 30 + 30 ns</td>
+              <td>237 ns from the longest address path</td>
+            </tr>
+            <tr>
+              <td>Function-code decode to EEPROM /CE</td>
+              <td>60 + 30 + 42 + 30 + 30 + 30 + 30 ns</td>
+              <td>252 ns from the longest qualification path</td>
+            </tr>
+            <tr>
+              <td>Address / function-code path through EEPROM</td>
+              <td>237 + 150; 252 + 150 ns</td>
+              <td>387 ns / 402 ns from those respective CPU pin events</td>
+            </tr>
+            <tr>
+              <td>R/W to EEPROM output via /OE</td>
+              <td>25 + 70 ns</td>
+              <td>95 ns; also satisfy address and /CE access</td>
+            </tr>
+            <tr>
+              <td>CE to stage-1 D</td>
+              <td>34 + 9 + 25 ns</td>
+              <td>68 ns maximum</td>
+            </tr>
+            <tr>
+              <td>AHCT74 timing at 50 pF</td>
+              <td>
+                CLK-to-Q 10 ns max; clear-to-Q 13 ns max; data setup 5 ns; hold
+                0 ns
+              </td>
+              <td>
+                Clear recovery 3.5 ns; minimum CLK and clear pulse width 5 ns
+              </td>
+            </tr>
+            <tr>
+              <td>Normal shift delay after stage 1 captures a read</td>
+              <td>3 x 99.990 ns</td>
+              <td>
+                299.970 ns before stage 4, excluding propagation; conditional on
+                valid sequential timing
+              </td>
+            </tr>
+            <tr>
+              <td>Stage-to-stage setup</td>
+              <td>99.990 - 10 - 5 ns</td>
+              <td>84.990 ns available for clock skew and interconnect</td>
+            </tr>
+            <tr>
+              <td>Stage 4 to local ROM_DTACK_n</td>
+              <td>10 + 9 + 9 ns</td>
+              <td>28 ns after the fourth clock edge</td>
+            </tr>
+            <tr>
+              <td>Shared completion tree in Bus and Decode</td>
+              <td>5.3 + 5.3 + 6.6 ns</td>
+              <td>17.2 ns maximum, two SN74F21N plus the SN74F32N mask</td>
+            </tr>
+            <tr>
+              <td>AS negation to CPU DTACK negation</td>
+              <td>9 + 5.3 + 5.3 + 6.6 ns</td>
+              <td>26.2 ns; 83.8 ns remains under #28 before board delay</td>
+            </tr>
+            <tr>
+              <td>AS negation to cleared delay stages</td>
+              <td>25 + 30 + 13 ns</td>
+              <td>
+                68 ns; 37 ns remains before the 105 ns minimum next-cycle
+                boundary
+              </td>
+            </tr>
+            <tr>
+              <td>DS negation to EEPROM high-impedance</td>
+              <td>30 + 50 ns</td>
+              <td>
+                80 ns at the EEPROM disable-test condition; loaded-bus release
+                remains unverified
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The 99.990 ns period is the tolerance-only fast corner of the
+          project's 40 MHz +/-100 ppm source divided by four. This is slightly
+          above the CPU's nominal 10 MHz rating. It does not establish a new
+          processor speed rating or include clock aging and jitter.
+        </p>
+        <p>
+          For an ordinary stable read, each selected CE is low and the address
+          is valid before the request reaches stage 1. Three further periods
+          provide about 300 ns against a 150 ns EEPROM access requirement. Check
+          both CEs on a word read: the AND merge detects the first selected
+          lane, so the later lane's assertion must also fall within that budget.
+          Address, lane selects, and direction must stay stable until
+          completion.
+        </p>
+        <pre><code>For every selected byte lane:
+  max(t_address + 150, t_CE + 150, t_OE + 70)
+      + board_data_delay + 5 ns &lt;= CPU_data_sampling_time
+
+For acknowledgement recognition:
+  CPU_DTACK_low_time + 5 ns &lt;= chosen_CPU_falling_edge
+
+For release:
+  26.2 ns + board_control_delay &lt;= 110 ns</code></pre>
+        <p>
+          A conservative normal-operation estimate from stable CPU decode inputs
+          to CPU DTACK is
+          <code>252 + 68 + 5 + 400.040 + 10 + 18 + 17.2 = 770.240 ns</code>,
+          before board delay. It allows one clock period to capture the request,
+          then three more to reach stage 4. It is far below the documented 51.1
+          us timeout boundary. It is not a metastability bound or a measured CPU
+          bus-cycle duration.
+        </p>
+        <p>
+          Four flip-flops do not mean four CPU wait states. Decode delay,
+          request phase, clock-buffer delay, and the 17.2 ns completion tree
+          determine which falling edge recognizes DTACK. Count wait states
+          against the S4 sampling point in the CPU bus waveform after these
+          phases have been resolved. No zero-wait or fixed-wait claim is made.
+        </p>
+
+        <h3>Metastability and Clear Recovery</h3>
+        <p>
+          <code>ROM_READ_ACTIVE</code> is asynchronous to <code>ROM_CLK</code>,
+          so a stage-1 sample can fall in the setup or hold window and drive
+          <code>U_ROM_DELAY_A</code> stage 1 metastable. The
+          <code>SN74AHCT74N</code> datasheet does not publish the metastability
+          time constants, so a numeric MTBF stays a bench measurement. The
+          consequence is bounded on paper.
+        </p>
+        <ul>
+          <li>
+            The request is level-held for the whole bus cycle:
+            <code>ROM_READ_REQ_n</code> stays low until
+            <code>AS_n</code> negates. A missed or metastable stage-1 sample is
+            re-presented on the next <code>ROM_CLK</code> edge.
+          </li>
+          <li>
+            <code>ROM_ACK_BLOCK_n = ROM_READ_REQ_n OR Q4_n</code> and
+            <code>ROM_DTACK_n = AS_n OR ROM_ACK_BLOCK_n</code>.
+            <code>ROM_DTACK_n</code> cannot assert while
+            <code>ROM_READ_REQ_n</code> or <code>AS_n</code> is high, so a
+            stage-1 error can only postpone the acknowledgement, never assert it
+            early or falsely.
+          </li>
+          <li>
+            Three <code>ROM_CLK</code> periods separate stage 1 from stage 4,
+            and each stage has the 84.990 ns stage-to-stage window from the
+            budget table to settle. Each added stage multiplies the resolution
+            time before <code>Q4</code> is first used.
+          </li>
+          <li>
+            Worst case, an unresolved stage-1 sample adds one
+            <code>ROM_CLK</code> period of latency. That is far inside the 51.1
+            us bus-timeout boundary, so the cycle still ends with
+            <code>/DTACK</code>, not <code>/BERR</code>.
+          </li>
+        </ul>
+        <p>
+          <code>ROM_SHIFT_CLR_n</code> releases when <code>AS_n</code> asserts
+          at the start of the cycle. If that release violates the 3.5 ns
+          clear-recovery time before a <code>ROM_CLK</code> edge, stage 1 may
+          hold an indeterminate value for that one edge. The level-held request
+          and the qualified acknowledgement make this the same one-period case
+          as above. The open item is the numeric failure rate.
+        </p>
+
+        <h3>Acknowledgement Assertion and Release</h3>
+        <p>
+          <code>ROM_DTACK_n</code> reaches the CPU through the Bus and Decode
+          tree: two <code>SN74F21N</code> stages then the <code>SN74F32N</code>
+          timeout mask.
+        </p>
+        <ul>
+          <li>
+            Assertion: the fourth clock edge to <code>ROM_DTACK_n</code> low is
+            <code>10 + 9 + 9 = 28 ns</code> (<code>SN74AHCT74N</code> CLK-to-Q
+            and <code>U_ROM_OR</code> gates 2 and 3). The FAST tree adds
+            <code>5.5 + 5.5 + 6.3 = 17.3 ns</code> <code>tPHL</code>, for
+            <code>45.3 ns</code> from that edge before board delay. The CPU
+            recognizes it on the next falling edge that meets the 5 ns
+            <code>#47</code> setup; a late arrival costs one wait state, which
+            is allowed.
+          </li>
+          <li>
+            Release: <code>AS_n</code> high to <code>ROM_DTACK_n</code> high is
+            <code>9 ns</code> through <code>U_ROM_OR</code> gate 3, then
+            <code>5.3 + 5.3 + 6.6 = 17.2 ns</code> <code>tPLH</code> through the
+            tree. <code>26.2 ns</code> total against the 110 ns
+            <code>#28</code> limit leaves 83.8 ns for board delay.
+          </li>
+          <li>
+            <code>ROM_DTACK_n</code> is the single push-pull output of
+            <code>U_ROM_OR</code> gate 3 driving one <code>U_DTACK_A</code>
+            input. It is not wire-ORed.
+          </li>
+        </ul>
+        <p>
+          The open item is measuring these two edges at the CPU pins with the
+          other completion inputs present.
+        </p>
+
+        <h3>Reset and Abort Clearing</h3>
+        <ul>
+          <li>
+            <code>ROM_SHIFT_CLR_n = RESET_n AND ROM_AS_ACTIVE</code>. Either
+            <code>RESET_n</code> low or <code>AS_n</code> high forces all four
+            stages to 0 asynchronously, so <code>Q4</code> falls,
+            <code>ROM_ACK_BLOCK_n</code> rises, and <code>ROM_DTACK_n</code>
+            rises before the next cycle.
+          </li>
+          <li>
+            A timeout or aborted cycle negates <code>AS_n</code>, which releases
+            <code>ROM_DTACK_n</code> through its <code>AS_n</code> term and
+            clears the shift register at the same time. No stale
+            <code>Q4</code> survives into the next cycle.
+          </li>
+          <li>
+            Reset during a read holds the stages cleared while
+            <code>RESET_n</code> is low. The first <code>ROM_CLK</code> edge
+            after release starts a fresh capture; the chain retains no state of
+            its own.
+          </li>
+          <li>
+            <code>AS</code> negation to cleared stages is
+            <code>25 + 30 + 13 = 68 ns</code>, inside the 105 ns minimum
+            <code>AS</code> / <code>DS</code>-inactive interval of
+            <code>#15</code>, so the chain is always clear before the next
+            request can be sampled.
+          </li>
+        </ul>
+        <p>
+          The open item is capturing consecutive reads, reset during a read, and
+          aborted cycles on the board to confirm the analysis.
+        </p>
+
+        <h3>Checks Needed Before Timing Sign-Off</h3>
+        <p>
+          These items need the assembled board. The analysis above bounds the
+          behavior each one measures.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Remaining verification work
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Evidence needed</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Metastability rate</td>
+              <td>
+                Measure the stage-1 synchronizer failure rate, or obtain the
+                <code>SN74AHCT74N</code> time constants, and change the
+                synchronizer if the rate is inadequate. The failure mode is
+                bounded to added latency by the analysis above.
+              </td>
+            </tr>
+            <tr>
+              <td>Interstage hold</td>
+              <td>
+                AHCT74 CLK-to-Q minimum is 1 ns and hold is 0 ns. Keep
+                destination clock skew below the minimum data-path delay,
+                including routing.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock quality</td>
+              <td>
+                Confirm frequency, high/low widths, and edge rates at the CPU
+                and all four delay clocks. <code>ROM_CLK</code> is two cascaded
+                <code>CD74ACT244E</code> channels from <code>CPU_CLK_10</code>;
+                check the added <code>DRAM_CLK_10</code> pin-15 load and the CPU
+                clock-limit issue.
+              </td>
+            </tr>
+            <tr>
+              <td>Cycle termination</td>
+              <td>
+                Measure #28 (26.2 ns by calculation), applicable #28A timing,
+                #29, and #29A at the CPU pins. Exercise consecutive ROM reads,
+                ROM-to-RAM reads, and ROM-to-write transitions.
+              </td>
+            </tr>
+            <tr>
+              <td>Completion edges at the CPU</td>
+              <td>
+                Measure the <code>ROM_DTACK_n</code> assertion and release edges
+                at the CPU <code>/DTACK</code> pin with the other completion
+                inputs present, against the 45.3 ns and 26.2 ns calculated paths
+                plus board delay.
+              </td>
+            </tr>
+            <tr>
+              <td>Bus loading and release</td>
+              <td>
+                Account for all motherboard receivers, sockets, traces, and
+                probes; the 5 pF tDF characterization does not prove release on
+                the assembled bus.
+              </td>
+            </tr>
+            <tr>
+              <td>Wait count</td>
+              <td>
+                Capture permanent and alias byte/word reads to record the
+                wait-state count against the S4 sample point. Reset-during-read
+                and aborted-cycle clearing is covered by the analysis above;
+                confirm it on the board.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Sources:
+          <a href="bus-and-decode.html"
+            >Bus and Decode, timing and timeout tables</a
+          >,
+          <a href="clock-and-reset.html"
+            >Clock and Reset, clock tolerance and loading</a
+          >, and the device datasheets linked in sections 9 and 10.
+        </p>
+      </section>
+
+      <section id="boot-vector-verification">
+        <h2>12. Boot-Vector Verification</h2>
+        <p>
+          Reset enables the low-address ROM overlay. The CPU reads the initial
+          supervisor stack pointer from bytes 0-3 and the initial program
+          counter from bytes 4-7. On the 16-bit bus these are four word reads,
+          all from
+          <code>ROM0_HI</code> and <code>ROM0_LO</code> with both strobes
+          active. The 68000 stores the most significant byte first.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Reset-vector byte placement
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">CPU word address</th>
+              <th scope="col">ROM0 chip address</th>
+              <th scope="col">HI byte</th>
+              <th scope="col">LO byte</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$000000</code></td>
+              <td><code>$0000</code></td>
+              <td>SSP[31:24]</td>
+              <td>SSP[23:16]</td>
+              <td>Initial SSP, upper word</td>
+            </tr>
+            <tr>
+              <td><code>$000002</code></td>
+              <td><code>$0001</code></td>
+              <td>SSP[15:8]</td>
+              <td>SSP[7:0]</td>
+              <td>Initial SSP, lower word</td>
+            </tr>
+            <tr>
+              <td><code>$000004</code></td>
+              <td><code>$0002</code></td>
+              <td>PC[31:24]</td>
+              <td>PC[23:16]</td>
+              <td>Initial PC, upper word</td>
+            </tr>
+            <tr>
+              <td><code>$000006</code></td>
+              <td><code>$0003</code></td>
+              <td>PC[15:8]</td>
+              <td>PC[7:0]</td>
+              <td>Initial PC, lower word</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          For a 128 KiB image <code>F</code>, split the programmer files as
+          follows. Indices and lengths are bytes; each output is exactly 32 KiB.
+        </p>
+        <pre><code>ROM0_HI[i] = F[0x00000 + 2*i]
+ROM0_LO[i] = F[0x00001 + 2*i]
+ROM1_HI[i] = F[0x10000 + 2*i]
+ROM1_LO[i] = F[0x10001 + 2*i]
+0 &lt;= i &lt; 0x8000</code></pre>
+        <p>
+          The initial SSP must be even and allow downward stack writes into
+          initialized writable RAM. With the documented contiguous 4 MiB RAM,
+          <code>$00400000</code> is a possible top-of-RAM value: the first push
+          writes below it. This is an example, not an assigned firmware value.
+          RAM initialization and refresh must work before stack use.
+        </p>
+        <p>
+          Prefer an even reset PC in the permanent range
+          <code>$00FE0000-$00FFFFFF</code>, pointing past the vector data to
+          executable code. Execute from that permanent mapping before writing
+          the overlay-disable register at <code>$E80001</code>. Low memory then
+          becomes RAM; initialize its exception vectors before enabling
+          interrupts or operations that may take an exception.
+        </p>
+        <p>
+          The wiring and image-split equations establish vector placement. No
+          firmware binary or programmed-chip readback is present here, so actual
+          SSP, reset PC, instruction bytes, and checksums remain unchecked. Read
+          back each programmed device and reassemble the four files; the result
+          must match the original image byte for byte. On hardware, capture the
+          four vector fetches and the first instruction fetch.
+        </p>
+        <p>
+          Sources:
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, sections 2, 5 and 6 (data organization, bus
+            operation and reset)</a
+          >, <a href="memory-map.html">Memory Map</a>, and
+          <a href="system-control.html">System Control</a>.
+        </p>
+      </section>
+
+      <section id="electrical-compatibility-and-fanout">
+        <h2>13. Electrical Compatibility and Fanout</h2>
+        <p>
+          Use the motherboard's regulated 5 V +/-5% rail. This lies within the
+          EEPROM and HCT/AHCT 4.5-5.5 V operating ranges. All interfaces here
+          use TTL-compatible input thresholds: high at 2.0 V or above, low at
+          0.8 V or below.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Static voltage margins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Driver -&gt; receiver</th>
+              <th scope="col">Driver VOH / VOL</th>
+              <th scope="col">High / low margin</th>
+              <th scope="col">Rated output current</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>MC68EC000 -&gt; EEPROM</td>
+              <td>4.00 V min / 0.50 V max</td>
+              <td>2.00 V / 0.30 V</td>
+              <td>400 uA source; 3.2 mA sink on address outputs</td>
+            </tr>
+            <tr>
+              <td>HCT -&gt; EEPROM or AHCT</td>
+              <td>3.84 V min / 0.33 V max</td>
+              <td>1.84 V / 0.47 V</td>
+              <td>4 mA source / sink at 4.5 V</td>
+            </tr>
+            <tr>
+              <td>AHCT -&gt; HCT or CPU</td>
+              <td>3.80 V min / 0.44 V max</td>
+              <td>1.80 V / 0.36 V</td>
+              <td>8 mA source / sink at 4.5 V</td>
+            </tr>
+            <tr>
+              <td>EEPROM -&gt; MC68EC000</td>
+              <td>2.40 V min / 0.45 V max</td>
+              <td>0.40 V / 0.35 V</td>
+              <td>400 uA source / 2.1 mA sink</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The EEPROM-to-CPU high margin is only 0.40 V at its rated source
+          current. Include every disabled output, receiver, pull resistor, and
+          expansion-bus connection when calculating load. Do not use the output
+          current rating as a capacitance limit.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            ROM-related fanout budget
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Known load</th>
+              <th scope="col">Remaining accounting</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Each CPU A1..A15</td>
+              <td>Four EEPROM inputs: 40 uA leakage, 24 pF</td>
+              <td>
+                Add all other address receivers and routing against the CPU 130
+                pF output-load limit.
+              </td>
+            </tr>
+            <tr>
+              <td>Each EEPROM /CE</td>
+              <td>One EEPROM plus one HCT21 input: 11 uA, 16 pF</td>
+              <td>34 pF remains under a 50 pF logic timing target.</td>
+            </tr>
+            <tr>
+              <td>READ_n / ROM_OE_n</td>
+              <td>Four EEPROM inputs plus one AHCT32 input: 41 uA, 34 pF</td>
+              <td>
+                Add other existing READ_n consumers; only 16 pF remains before
+                those loads.
+              </td>
+            </tr>
+            <tr>
+              <td>Each CPU data bit during ROM read</td>
+              <td>
+                CPU input up to 20 pF plus the inactive same-lane EEPROM output
+                up to 12 pF; leakage budget at least 20 + 10 uA
+              </td>
+              <td>
+                Add RAM, peripherals, buffers, sockets and traces; compare with
+                the EEPROM 100 pF access test load.
+              </td>
+            </tr>
+            <tr>
+              <td>CPU_CLK_10</td>
+              <td>Unchanged; the ROM circuit adds no CPU_CLK_10 load</td>
+              <td>
+                <code>ROM_CLK</code> comes from a spare
+                <code>U_DRAM_CLK_BUF</code> channel off
+                <code>DRAM_CLK_10</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>DRAM_CLK_10</td>
+              <td>Adds one CD74ACT244E input (pin 15): 1 uA, 10 pF</td>
+              <td>
+                Accounted for in
+                <a href="dram.html#clock-distribution">dram.html</a> against the
+                CD74ACT244E 50 pF load.
+              </td>
+            </tr>
+            <tr>
+              <td>ROM_CLK</td>
+              <td>Four AHCT74 clock inputs: 4 uA, 40 pF</td>
+              <td>
+                10 pF remains for routing and probing at the
+                <code>U_DRAM_CLK_BUF</code> pin 5 output.
+              </td>
+            </tr>
+            <tr>
+              <td>ROM_SHIFT_CLR_n</td>
+              <td>Four AHCT74 clear inputs: 4 uA, 40 pF</td>
+              <td>10 pF remains for routing at the HCT08 output.</td>
+            </tr>
+            <tr>
+              <td>Stage outputs Q1..Q3; Q4_n</td>
+              <td>One AHCT input each: 1 uA, 10 pF</td>
+              <td>Account for routing; do not add LEDs directly.</td>
+            </tr>
+            <tr>
+              <td>AS_n</td>
+              <td>New HCT04 input and AHCT32 input: 2 uA, 20 pF</td>
+              <td>Add to existing CPU control-net loads.</td>
+            </tr>
+            <tr>
+              <td>CPU DTACK_n</td>
+              <td>CPU input: 2.5 uA, up to 20 pF</td>
+              <td>
+                Include test points and any other receiver within the AHCT32 50
+                pF timing load.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          EEPROM capacitances are characterized at 1 MHz and 25 C; they are not
+          production-tested limits over every condition. The CPU's 20 pF input
+          figure is periodically sampled. These are design budgets, not
+          measurements of the assembled board.
+        </p>
+        <p>
+          One byte lane has two EEPROM outputs connected, but only one may
+          drive. At least the inactive device's capacitance loads the active
+          output. Avoid passive pull-downs that consume the EEPROM's small
+          high-state current budget. Buffer expansion connections as specified
+          in Bus and Decode.
+        </p>
+        <p>
+          Budget up to 50 mA active supply current per EEPROM under the
+          datasheet test condition, or 200 mA for four devices as a conservative
+          allocation, plus output and logic current. Do not assume the 200 uA
+          CMOS standby value from a TTL-high CE alone; it requires CE near VCC.
+          The TTL standby limit is 3 mA per device.
+        </p>
+        <p>
+          Sources:
+          <a href="datasheets/AT28C256.pdf">AT28C256, sections 4.2-4.4</a>,
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, section 10.13</a
+          >, and the HCT/AHCT electrical tables linked in section 10.
+        </p>
+      </section>
+
+      <section id="decoupling-pcb-notes">
+        <h2>14. Decoupling / PCB Notes</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Local power and layout connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Connection / placement</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Each AT28C256</td>
+              <td>
+                Pin 28 to +5 V; pin 14 to ground; pin 27 (/WE) directly to +5 V.
+              </td>
+            </tr>
+            <tr>
+              <td>EEPROM bypass capacitors</td>
+              <td>
+                One 100 nF ceramic per device between pins 28 and 14, with short
+                connections to the supply and ground planes.
+              </td>
+            </tr>
+            <tr>
+              <td>Logic bypass capacitors</td>
+              <td>
+                One 100 nF ceramic at each logic package, including both delay
+                packages. <code>U_DRAM_CLK_BUF</code> keeps its own bypass in
+                dram.html.
+              </td>
+            </tr>
+            <tr>
+              <td>Local bulk capacitance</td>
+              <td>
+                Provide 4.7-10 uF near the EEPROM group as an initial board
+                value; check supply droop during switching.
+              </td>
+            </tr>
+            <tr>
+              <td>Sockets and labels</td>
+              <td>
+                Label ROM0/ROM1 and HI/LO, show pin 1 clearly, and include
+                socket capacitance in the bus load. Program devices externally
+                with board power off during removal or insertion.
+              </td>
+            </tr>
+            <tr>
+              <td>Address and data routes</td>
+              <td>
+                Keep the two devices on each byte lane close to the bus.
+                Minimize stubs and preserve a continuous ground return.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock routes</td>
+              <td>
+                Route <code>ROM_CLK</code> from <code>U_DRAM_CLK_BUF</code> pin
+                5 to the four flip-flops with short, closely matched paths.
+                Check hold skew and AHCT input transition-rate limits.
+              </td>
+            </tr>
+            <tr>
+              <td>Enable and completion routes</td>
+              <td>
+                Keep CE-to-request branches short. Route the direct
+                AS-to-ROM_DTACK gate near the completion logic; board delay must
+                stay within the 83.8 ns #28 margin.
+              </td>
+            </tr>
+            <tr>
+              <td>Probe points</td>
+              <td>
+                Provide ground-adjacent points for AS_n, ROM_CLK,
+                ROM_READ_REQ_n, Q4, ROM_DTACK_n and CPU DTACK_n. Include probe
+                capacitance in timing checks.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The capacitor values are starting layout choices. Verify the 5 V rail
+          at the EEPROM pins during word reads and bus turnaround. Do not attach
+          an LED or long header stub directly to a data, clock, or completion
+          net. Use a buffered diagnostic output if a permanent indicator is
+          needed.
+        </p>
+      </section>
+
+      <section id="internal-signal-reference">
+        <h2>15. Internal Signal Reference</h2>
+        <p>
+          Aliases below identify the same wire. Q1-Q4 are active-high stored
+          states; their names do not indicate CPU wait-state numbers.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Firmware signals and ownership
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source / definition</th>
+              <th scope="col">Destination / meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>A1..A15</code></td>
+              <td>CPU word-address bits</td>
+              <td>All EEPROM A0..A14 inputs</td>
+            </tr>
+            <tr>
+              <td><code>A16 / A16_n</code></td>
+              <td>CPU bit / decoder inverter</td>
+              <td>Firmware-half selection</td>
+            </tr>
+            <tr>
+              <td><code>ROM_CYCLE_n</code></td>
+              <td>
+                Permanent ROM or enabled boot alias, qualified by normal bus
+                cycle
+              </td>
+              <td>Upstream half-select gates</td>
+            </tr>
+            <tr>
+              <td><code>ROM_BANK0_n / ROM_BANK1_n</code></td>
+              <td>ROM_CYCLE_n OR A16 / A16_n</td>
+              <td>Upstream byte-select gates</td>
+            </tr>
+            <tr>
+              <td><code>UDS_n / LDS_n</code></td>
+              <td>CPU byte strobes</td>
+              <td>HI / LO selection</td>
+            </tr>
+            <tr>
+              <td><code>ROM0_UDS_n / ROM0_HI_CE_n</code></td>
+              <td>Same wire; half 0 upper select</td>
+              <td>ROM0_HI pin 20 and U_ROM_SELECT pin 1</td>
+            </tr>
+            <tr>
+              <td><code>ROM0_LDS_n / ROM0_LO_CE_n</code></td>
+              <td>Same wire; half 0 lower select</td>
+              <td>ROM0_LO pin 20 and U_ROM_SELECT pin 2</td>
+            </tr>
+            <tr>
+              <td><code>ROM1_UDS_n / ROM1_HI_CE_n</code></td>
+              <td>Same wire; half 1 upper select</td>
+              <td>ROM1_HI pin 20 and U_ROM_SELECT pin 4</td>
+            </tr>
+            <tr>
+              <td><code>ROM1_LDS_n / ROM1_LO_CE_n</code></td>
+              <td>Same wire; half 1 lower select</td>
+              <td>ROM1_LO pin 20 and U_ROM_SELECT pin 5</td>
+            </tr>
+            <tr>
+              <td><code>READ_n / ROM_OE_n</code></td>
+              <td>Same wire; NOT R/W</td>
+              <td>All EEPROM pin 22 inputs; U_ROM_OR pin 2</td>
+            </tr>
+            <tr>
+              <td><code>ROM_BYTE_CYCLE_n</code></td>
+              <td>AND of the four final chip enables</td>
+              <td>Low when at least one EEPROM is selected</td>
+            </tr>
+            <tr>
+              <td><code>ROM_READ_REQ_n</code></td>
+              <td>ROM_BYTE_CYCLE_n OR ROM_OE_n</td>
+              <td>Low for a selected read; request only</td>
+            </tr>
+            <tr>
+              <td><code>ROM_READ_ACTIVE</code></td>
+              <td>NOT ROM_READ_REQ_n</td>
+              <td>Stage 1 D input</td>
+            </tr>
+            <tr>
+              <td><code>AS_n / ROM_AS_ACTIVE</code></td>
+              <td>CPU strobe / local inversion</td>
+              <td>Direct acknowledgement release / clear qualification</td>
+            </tr>
+            <tr>
+              <td><code>RESET_n</code></td>
+              <td>Conditioned motherboard reset</td>
+              <td>Forces delay stages clear</td>
+            </tr>
+            <tr>
+              <td><code>ROM_SHIFT_CLR_n</code></td>
+              <td>RESET_n AND ROM_AS_ACTIVE</td>
+              <td>All four asynchronous clear inputs</td>
+            </tr>
+            <tr>
+              <td><code>CPU_CLK_10 / ROM_CLK</code></td>
+              <td>
+                CPU clock / <code>U_DRAM_CLK_BUF</code> spare channel off
+                <code>DRAM_CLK_10</code>
+              </td>
+              <td>Clock source / four delay clocks</td>
+            </tr>
+            <tr>
+              <td><code>Q1 / Q2 / Q3 / Q4</code></td>
+              <td>Four successive sampled read states</td>
+              <td>Delay chain; Q4 means the read has traversed all stages</td>
+            </tr>
+            <tr>
+              <td><code>Q4_n</code></td>
+              <td>Complementary output of stage 4</td>
+              <td>High until delayed read completion</td>
+            </tr>
+            <tr>
+              <td><code>ROM_ACK_BLOCK_n</code></td>
+              <td>ROM_READ_REQ_n OR Q4_n</td>
+              <td>Blocks premature, unselected, or write acknowledgement</td>
+            </tr>
+            <tr>
+              <td><code>ROM_DTACK_n</code></td>
+              <td>AS_n OR ROM_ACK_BLOCK_n</td>
+              <td>To <code>U_DTACK_A</code> pin 2 in Bus and Decode</td>
+            </tr>
+            <tr>
+              <td><code>DTACK_RAW_n</code></td>
+              <td>Bus and Decode SN74F21N completion tree</td>
+              <td><code>U_OR_DTACK</code> SN74F32N input</td>
+            </tr>
+            <tr>
+              <td><code>TIMEOUT_ACTIVE</code></td>
+              <td>Existing motherboard timeout</td>
+              <td>Masks all successful completion after timeout</td>
+            </tr>
+            <tr>
+              <td><code>DTACK_n</code></td>
+              <td>DTACK_RAW_n OR TIMEOUT_ACTIVE</td>
+              <td>CPU acknowledgement; one push-pull driver only</td>
+            </tr>
+            <tr>
+              <td><code>BERR_n</code></td>
+              <td>Existing motherboard timeout/error path</td>
+              <td>CPU bus error for unanswered firmware writes</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

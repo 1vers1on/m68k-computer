@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - System Control, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>System Control</h1>
+      <p>
+        Motherboard control and debug registers in I/O slot 4,
+        <code>$E80000</code> through <code>$E9FFFF</code>.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <p>
+        This block controls the boot ROM overlay and stores the debug byte. The
+        <a href="bus-and-decode.html">bus and address decode document</a>
+        defines the decoder, write qualification, and overlay flip-flop at
+        revision 1.0. This page summarizes the register behavior and the parts
+        specific to this block.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0; the decoder, write qualification, and overlay flip-flop
+          are fixed in the
+          <a href="bus-and-decode.html">bus and address decode document</a>
+        </dd>
+        <dt>Address range</dt>
+        <dd><code>$E80000</code>-<code>$E9FFFF</code> (I/O slot 4)</dd>
+        <dt>Data path</dt>
+        <dd>Lower byte <code>D7..D0</code>, selected by <code>LDS_n</code></dd>
+        <dt>Debug display</dt>
+        <dd>
+          Seven-segment decoder specified in the
+          <a href="debug-display.html">debug display document</a>
+        </dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#access-rules">Access Rules</a></li>
+        <li><a href="#registers">Registers</a></li>
+        <li><a href="#boot-overlay-control">Boot Overlay Control</a></li>
+        <li><a href="#debug-register">Debug Register</a></li>
+      </ol>
+    </nav>
+    <main>
+      <section id="access-rules">
+        <h2>1. Access Rules</h2>
+        <p>
+          The block responds to <code>IO4_n</code> qualified by
+          <code>LDS_n</code>, so every register sits at an odd address on the
+          lower data byte. <code>U_SYSREG</code> decodes CPU address lines
+          <code>A3..A1</code> into eight register selects and ignores
+          <code>A16..A4</code>, so the eight registers repeat every 16 bytes
+          through the 128 KiB slot. Software uses the canonical addresses
+          <code>$E80001</code> through <code>$E8000F</code>.
+        </p>
+        <p>
+          A lower-byte write to any of the eight registers is acknowledged.
+          Writes to <code>SYSREG2</code> through <code>SYSREG7</code> are
+          acknowledged and ignored. Reads from this block and upper-byte-only
+          accesses are not acknowledged and end in a bus error at the timeout.
+          The <a href="bus-and-decode.html">bus and address decode document</a>
+          gives the decoder connections and the
+          <code>SYSREG_DTACK_n</code> equations.
+        </p>
+      </section>
+      <section id="registers">
+        <h2>2. Registers</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            System control registers in I/O slot 4
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Register</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E80001</code></td>
+              <td>SYSREG0 / SYSCTRL</td>
+              <td>Any write disables the boot ROM overlay.</td>
+            </tr>
+            <tr>
+              <td><code>$E80003</code></td>
+              <td>SYSREG1 / DEBUG</td>
+              <td>
+                Write-only 8-bit hexadecimal debug display register. The upper
+                and lower nibbles are continuously shown on two internal
+                seven-segment displays.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E80005</code></td>
+              <td>SYSREG2</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E80007</code></td>
+              <td>SYSREG3</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E80009</code></td>
+              <td>SYSREG4</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E8000B</code></td>
+              <td>SYSREG5</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E8000D</code></td>
+              <td>SYSREG6</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E8000F</code></td>
+              <td>SYSREG7</td>
+              <td>Reserved.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The frozen register map is in the
+          <a href="memory-map.html">memory map</a>. The reserved registers leave
+          room for later motherboard controls and status without a new I/O slot.
+        </p>
+      </section>
+      <section id="boot-overlay-control">
+        <h2>3. Boot Overlay Control</h2>
+        <p>
+          After reset the firmware EEPROM also appears at the bottom of the
+          address space so the CPU can fetch its reset vectors. A write to
+          <code>SYSREG0 / SYSCTRL</code> removes that alias and reveals DRAM
+          bank 0. The written value is ignored.
+        </p>
+        <p>The decoded write is qualified into an active-low pulse.</p>
+        <pre><code>OVERLAY_WRITE_n = SYSREG0_n OR R/W</code></pre>
+        <p>
+          <code>U_OVERLAY</code>, an <code>SN74HCT74N</code>, holds the overlay
+          state on its asynchronous inputs. <code>RESET_n</code> drives the
+          preset and enables the overlay; <code>OVERLAY_WRITE_n</code> drives
+          the clear and disables it. The register is one-way. Software cannot
+          restore the overlay, and only a board reset sets it again. The
+          <a href="clock-and-reset.html#boot-overlay-reset"
+            >boot-overlay reset checks</a
+          >
+          cover a reset that arrives during an overlay-clear write.
+        </p>
+        <p>
+          The <a href="memory-map.html">memory map</a> lists the addresses this
+          write affects, and the
+          <a href="firmware-rom.html">firmware ROM document</a> describes the
+          bring-up sequence that ends with it.
+        </p>
+      </section>
+      <section id="debug-register">
+        <h2>4. Debug Register</h2>
+        <p>
+          A write to <code>SYSREG1 / DEBUG</code> stores <code>D7..D0</code> in
+          <code>U_DEBUG</code>, an <code>SN74HCT574N</code> with its output
+          enable tied low. The decoded write is qualified and then inverted to
+          make the clock edge.
+        </p>
+        <pre><code>DEBUG_WRITE_n = SYSREG1_n OR R/W
+DEBUG_CLK     = NOT DEBUG_WRITE_n</code></pre>
+        <p>
+          A spare <code>SN74HCT04</code> gate produces <code>DEBUG_CLK</code>,
+          so <code>U_DEBUG</code> captures on the leading edge of the qualified
+          write while the CPU still drives the data bus. The stored byte leaves
+          on <code>DEBUG_Q7..DEBUG_Q0</code>. Its two nibbles feed the
+          <a href="debug-display.html">debug display circuit</a>, which converts
+          each to a hexadecimal digit. The register is write-only; a read ends
+          in a bus error like the rest of the block.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

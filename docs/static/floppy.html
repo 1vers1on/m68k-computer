@@ -1,0 +1,1599 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Floppy Controller, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>Floppy Controller</h1>
+      <p>
+        This document defines the Intel 82077AA-1 floppy controller, its
+        MC68EC000 bus adapter, and the signal and power connections for two
+        Mitsumi D359M3D drives.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; board layout and assembled-system
+          checks remain
+        </dd>
+        <dt>Controller</dt>
+        <dd>Intel 82077AA-1, 68-pin PLCC</dd>
+        <dt>Bus connection</dt>
+        <dd>
+          I/O slot 1, <code>$E20000-$E3FFFF</code>, on
+          <code>D7..D0</code>
+        </dd>
+        <dt>Canonical registers</dt>
+        <dd><code>$E20001-$E2000F</code>, odd byte addresses</dd>
+        <dt>Drives</dt>
+        <dd>Two Mitsumi D359M3D 3.5-inch, 1.44 MB drives</dd>
+        <dt>Media format</dt>
+        <dd>
+          1,474,560 bytes: 80 cylinders, two heads, 18 sectors per track, and
+          512 bytes per sector
+        </dd>
+        <dt>Transfer method</dt>
+        <dd>Interrupt-driven programmed I/O through the 16-byte FIFO</dd>
+        <dt>Interrupt connection</dt>
+        <dd>MC68901 GPIP5, rising edge, vector <code>$47</code></dd>
+        <dt>Drive cable</dt>
+        <dd>One internal 34-conductor PC cable with a drive-select twist</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#bus-interface">Bus Interface</a></li>
+        <li><a href="#register-map">Register Map</a></li>
+        <li><a href="#clock-reset-mode">Clock, Reset, and Mode Straps</a></li>
+        <li><a href="#drive-interface">Drive Interface</a></li>
+        <li><a href="#cable">Signal Connector and Cable</a></li>
+        <li><a href="#power">Drive Power</a></li>
+        <li><a href="#interrupts">Interrupts and Programmed I/O</a></li>
+        <li><a href="#firmware">Firmware Contract</a></li>
+        <li><a href="#pins">Package and Pin Maps</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#acceptance">Assembled-System Acceptance</a></li>
+        <li><a href="#signals">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The 82077AA-1 controls both installed D359M3D drives. The controller
+          supplies the data separator, write precompensation, drive-control
+          outputs, status logic, and a 16-byte FIFO. The motherboard adds a
+          lower-byte host adapter, a standard twisted drive cable, and two
+          separately fused drive-power outputs.
+        </p>
+        <p>
+          The <a href="memory-map.html">Memory Map</a> owns I/O slot 1 and the
+          canonical register addresses.
+          <a href="bus-and-decode.html">Bus and Address Decode</a> owns
+          <code>IO1_n</code>, the completion tree, and bus-timeout behavior. The
+          <a href="mfp.html#interrupts">MFP</a> owns GPIP5 and vector
+          <code>$47</code>. The
+          <a href="clock-and-reset.html">Clock and Reset</a> design owns
+          <code>PERIPH_RESET_n</code>, and the MFP clock divider supplies
+          <code>MFP_CLK_5</code> to the bus-response sequencer.
+        </p>
+        <p>
+          Signal names ending in <code>_n</code>, and names written with a
+          leading slash, are active low. The logic supply is +5 V. Every IC
+          family selected by this page existed before 1994.
+        </p>
+      </section>
+      <section id="architecture">
+        <h2>2. Architecture</h2>
+        <pre><code>MC68EC000 lower byte                  Intel 82077AA-1
+
+D7..D0 &lt;--------------------------&gt; DB7..DB0
+A3..A1 ----------------------------&gt; A2..A0
+IO1_n + LDS_n --&gt; FDC_CYCLE --&gt; FDC_CS_n --&gt; CS
+R/W + FDC_CYCLE --&gt; FDC_RD_n ------&gt; RD
+R/W + FDC_CYCLE --&gt; FDC_WR_n ------&gt; WR
+MFP_CLK_5 --&gt; response sequencer --&gt; FDC_DTACK_n
+PERIPH_RESET_n --&gt; inverter -------&gt; RESET
+INT --------------------------------&gt; MC68901 GPIP5
+
+24 MHz crystal ---------------------&gt; X1, X2
+
+82077AA-1 drive interface
+    |
+    +-- output damping resistors
+    +-- 34-pin motherboard header
+            |
+            +-- drive 1 before twist: Mitsumi D359M3D
+            |
+            +-- cable twist
+                    |
+                    +-- drive 0 and boot drive: Mitsumi D359M3D
+
++5 V  -- RXEF110 --&gt; drive 0 mini-Berg pin 1
++12 V -- RXEF050 --&gt; drive 0 mini-Berg pin 4
++5 V  -- RXEF110 --&gt; drive 1 mini-Berg pin 1
++12 V -- RXEF050 --&gt; drive 1 mini-Berg pin 4</code></pre>
+        <p>
+          The controller runs in PS/2 mode with its internal drive buffers
+          enabled. Both drives retain their factory PC configuration: drive
+          select 1 on cable pin 12 and disk-change on pin 34. The cable twist
+          maps the far drive to controller drive 0 without modifying either
+          drive.
+        </p>
+      </section>
+      <section id="bus-interface">
+        <h2>3. Bus Interface</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Floppy-controller processor-bus connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Motherboard signal</th>
+              <th scope="col">Adapter or controller connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>82077AA-1 <code>DB7..DB0</code></td>
+              <td>Transfers commands, status, and disk data.</td>
+            </tr>
+            <tr>
+              <td><code>A3..A1</code></td>
+              <td>82077AA-1 <code>A2..A0</code></td>
+              <td>Selects one of eight host-interface locations.</td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>U_FDC_CTRL and U_FDC_INV</td>
+              <td>Selects a controller read or write.</td>
+            </tr>
+            <tr>
+              <td><code>IO1_n</code></td>
+              <td>U_FDC_REQ</td>
+              <td>Selects I/O slot 1 during a normal bus cycle.</td>
+            </tr>
+            <tr>
+              <td><code>LDS_n</code></td>
+              <td>U_FDC_REQ</td>
+              <td>Restricts the interface to the lower byte lane.</td>
+            </tr>
+            <tr>
+              <td><code>MFP_CLK_5</code></td>
+              <td>U_FDC_SEQ clock</td>
+              <td>Times the fixed host response.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_DTACK_n</code></td>
+              <td>U_FDC_CTRL output</td>
+              <td>Returns completion to the motherboard tree.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Cycle Qualification</h3>
+        <p>
+          One SN74F02N gate asserts <code>FDC_CYCLE</code> only while slot 1 and
+          the lower byte lane are selected.
+        </p>
+        <pre><code>FDC_CYCLE = NOT (IO1_n OR LDS_n)</code></pre>
+        <p>
+          An upper-byte-only access reaches the motherboard timeout. A word
+          access completes because it includes the lower lane, but only
+          <code>D7..D0</code> carry valid controller data. Firmware shall use
+          byte accesses at odd addresses.
+        </p>
+
+        <h3>Read and Write Strobes</h3>
+        <p>
+          U_FDC_INV produces <code>FDC_RW_n</code> and <code>FDC_CS_n</code>.
+          Two U_FDC_CTRL NAND gates convert the qualified processor cycle into
+          the controller's active-low strobes.
+        </p>
+        <pre><code>FDC_RW_n = NOT R/W
+FDC_CS_n = NOT FDC_CYCLE
+FDC_RD_n = NOT (FDC_CYCLE AND R/W)
+FDC_WR_n = NOT (FDC_CYCLE AND FDC_RW_n)</code></pre>
+
+        <h3>Fixed Completion Response</h3>
+        <p>
+          U_FDC_SEQ is a CD74HCT164E clocked at 5 MHz. Its serial inputs are
+          high and its active-low clear connects to <code>FDC_CYCLE</code>.
+          Three rising clock edges shift a high level to QC. This holds
+          <code>FDC_RD_n</code> or <code>FDC_WR_n</code> active for at least two
+          complete 200 ns clock periods before the adapter returns completion.
+        </p>
+        <pre><code>FDC_ACK_READY = U_FDC_SEQ.QC
+FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
+        <p>
+          Releasing either <code>IO1_n</code> or <code>LDS_n</code> clears the
+          sequencer asynchronously, negates the selected host strobe, and
+          releases <code>FDC_DTACK_n</code>. A new access starts from the
+          cleared state.
+        </p>
+      </section>
+      <section id="register-map">
+        <h2>4. Register Map</h2>
+        <p>
+          Processor address lines <code>A1..A3</code> become controller address
+          bits 0 through 2. The canonical address for controller location
+          <var>n</var> is <code>$E20001 + 2n</code>. Address lines
+          <code>A16..A4</code> do not enter the local decode, so the 16-byte
+          pattern repeats throughout slot 1.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Canonical 82077AA-1 register addresses in PS/2 mode
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">CPU address</th>
+              <th scope="col">A2..A0</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E20001</code></td>
+              <td><code>000</code></td>
+              <td>Status Register A</td>
+              <td>Not defined</td>
+            </tr>
+            <tr>
+              <td><code>$E20003</code></td>
+              <td><code>001</code></td>
+              <td>Status Register B</td>
+              <td>Not defined</td>
+            </tr>
+            <tr>
+              <td><code>$E20005</code></td>
+              <td><code>010</code></td>
+              <td>Digital Output Register</td>
+              <td>Digital Output Register</td>
+            </tr>
+            <tr>
+              <td><code>$E20007</code></td>
+              <td><code>011</code></td>
+              <td>Tape Drive Register</td>
+              <td>Tape Drive Register</td>
+            </tr>
+            <tr>
+              <td><code>$E20009</code></td>
+              <td><code>100</code></td>
+              <td>Main Status Register</td>
+              <td>Data Rate Select Register</td>
+            </tr>
+            <tr>
+              <td><code>$E2000B</code></td>
+              <td><code>101</code></td>
+              <td>FIFO data</td>
+              <td>FIFO data</td>
+            </tr>
+            <tr>
+              <td><code>$E2000D</code></td>
+              <td><code>110</code></td>
+              <td>Reserved</td>
+              <td>Reserved</td>
+            </tr>
+            <tr>
+              <td><code>$E2000F</code></td>
+              <td><code>111</code></td>
+              <td>Digital Input Register</td>
+              <td>Configuration Control Register</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Firmware shall not access the reserved location or use writes that the
+          table marks as undefined. The Tape Drive Register remains zero because
+          neither installed device is a tape drive.
+        </p>
+      </section>
+      <section id="clock-reset-mode">
+        <h2>5. Clock, Reset, and Mode Straps</h2>
+        <h3>24 MHz Reference</h3>
+        <p>
+          Y_FDC is a 24 MHz parallel-resonant, fundamental-mode crystal between
+          <code>X1</code> and <code>X2</code>. C_FDC_X1 and C_FDC_X2 are 22 pF
+          C0G capacitors from the corresponding crystal pins to ground, matching
+          Intel's application circuit. Select a crystal with no more than 40
+          ohms series resistance, less than 5 pF shunt capacitance, and a total
+          frequency error within +/-0.1%.
+        </p>
+        <p>
+          The oscillator requires 10 ms after +5 V reaches 4.5 V before the
+          controller can rely on its internal timing. The motherboard's 250 ms
+          power-on reset covers this interval.
+        </p>
+
+        <h3>Hardware Reset</h3>
+        <p>
+          One U_FDC_INV channel converts active-low
+          <code>PERIPH_RESET_n</code> to the controller's active-high
+          <code>FDC_RESET</code>. The 82077AA-1 requires 170 crystal periods,
+          about 7.1 us, after its oscillator is stable. The processor RESET
+          instruction supplies about 12.4 us through the peripheral-reset
+          domain, and the power-on and manual-reset pulses are longer.
+        </p>
+        <pre><code>FDC_RESET = NOT PERIPH_RESET_n</code></pre>
+        <p>
+          Reset stops an active disk command and can corrupt a sector if it
+          occurs during a write. Firmware must reinitialize the data rate, FIFO,
+          mechanical timing, and non-DMA mode after every reset.
+        </p>
+
+        <h3>PS/2 Mode</h3>
+        <p>
+          <code>IDENT</code> connects to ground, <code>MFM</code> remains open,
+          and <code>INVERT</code> connects to ground. The controller samples
+          IDENT low and MFM high during hardware reset, selecting PS/2 mode.
+          This mode exposes Status Registers A and B, keeps INT and DRQ enabled
+          independently of the DOR DMA-gate bit, and makes
+          <code>DENSEL_n</code> low at 500 kbit/s as expected by a PC 3.5-inch
+          drive.
+        </p>
+        <p>
+          <code>PLL0</code> connects to +5 V for floppy operation.
+          <code>DRV2</code> also connects to +5 V so Status Register A reports
+          that the second drive is installed. <code>DACK</code> and
+          <code>TC</code> connect to +5 V, their inactive level in PS/2 mode.
+          <code>DRQ</code> remains unconnected.
+        </p>
+      </section>
+      <section id="drive-interface">
+        <h2>6. Drive Interface</h2>
+        <p>
+          With <code>INVERT</code> grounded, the 82077AA-1 drives and receives
+          the standard active-low floppy-cable signals directly. Ten 33 ohm
+          series resistors sit at the controller outputs to damp cable edges.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Controller outputs to the 34-pin header
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">82077AA-1 output</th>
+              <th scope="col">Header pin</th>
+              <th scope="col">Cable function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>DENSEL_n</code></td>
+              <td>2</td>
+              <td>Low selects the 500 kbit/s high-density mode.</td>
+            </tr>
+            <tr>
+              <td><code>ME0_n</code></td>
+              <td>10</td>
+              <td>Motor enable for drive 0 after the cable twist.</td>
+            </tr>
+            <tr>
+              <td><code>DS1_n</code></td>
+              <td>12</td>
+              <td>Drive select for drive 1 before the cable twist.</td>
+            </tr>
+            <tr>
+              <td><code>DS0_n</code></td>
+              <td>14</td>
+              <td>Drive select for drive 0 after the cable twist.</td>
+            </tr>
+            <tr>
+              <td><code>ME1_n</code></td>
+              <td>16</td>
+              <td>Motor enable for drive 1 before the cable twist.</td>
+            </tr>
+            <tr>
+              <td><code>DIR_n</code></td>
+              <td>18</td>
+              <td>Head step direction.</td>
+            </tr>
+            <tr>
+              <td><code>STEP_n</code></td>
+              <td>20</td>
+              <td>Head step pulse.</td>
+            </tr>
+            <tr>
+              <td><code>WRDATA_n</code></td>
+              <td>22</td>
+              <td>Encoded write data.</td>
+            </tr>
+            <tr>
+              <td><code>WE_n</code></td>
+              <td>24</td>
+              <td>Write gate.</td>
+            </tr>
+            <tr>
+              <td><code>HDSEL_n</code></td>
+              <td>32</td>
+              <td>Low selects side 1.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          RP_FDC_IN is a five-resistor isolated SIP network. Each 10 kohm
+          resistor pulls one returned signal to +5 V at the controller end of
+          the cable. Intel recommends about 10 kohms for PS/2-mode 3.5-inch
+          drives because their outputs become high impedance when deselected.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Drive returns to the controller
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Header pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">82077AA-1 input</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>8</td>
+              <td><code>INDEX_n</code></td>
+              <td><code>INDX</code></td>
+            </tr>
+            <tr>
+              <td>26</td>
+              <td><code>TRK0_n</code></td>
+              <td><code>TRK0</code></td>
+            </tr>
+            <tr>
+              <td>28</td>
+              <td><code>WP_n</code></td>
+              <td><code>WP</code></td>
+            </tr>
+            <tr>
+              <td>30</td>
+              <td><code>RDDATA_n</code></td>
+              <td><code>RDDATA</code></td>
+            </tr>
+            <tr>
+              <td>34</td>
+              <td><code>DSKCHG_n</code></td>
+              <td><code>DSKCHG</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The D359M3D PC configuration puts disk-change on pin 34. No drive
+          modification is required. The 82077AA-1 has no external READY input
+          for its legacy polling sequence; it treats ready as asserted
+          internally. Firmware uses disk-change, index, command results, and
+          timeouts to detect missing or unusable media.
+        </p>
+        <p>
+          The required 1.44 MB format uses MFM at 500 kbit/s, 80 cylinders, two
+          heads, 18 sectors per track, and 512 bytes per sector. Its exact
+          formatted capacity is 1,474,560 bytes, or 1.40625 MiB. The D359M3D
+          also supports 250 kbit/s media, but 720 KiB operation is optional
+          software behavior rather than a board requirement. The 1 Mbit/s
+          perpendicular mode is not used.
+        </p>
+      </section>
+      <section id="cable">
+        <h2>7. Signal Connector and Cable</h2>
+        <p>
+          J_FDC is one keyed, shrouded, 2-by-17, 2.54 mm motherboard header. Pin
+          3 is omitted as the polarization key. Every other odd-numbered pin is
+          ground. The cable stays inside the enclosure and has one untwisted
+          drive connector followed by a twist in conductors 10 through 16 and a
+          final drive connector.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            J_FDC motherboard-header pinout
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Direction at motherboard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>Ground</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>DENSEL_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Key; pin omitted</td>
+              <td>None</td>
+            </tr>
+            <tr>
+              <td>4, 6</td>
+              <td>Reserved; not connected</td>
+              <td>None</td>
+            </tr>
+            <tr>
+              <td>5, 7, 9, 11, 13, 15, 17, 19</td>
+              <td>Ground</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td><code>INDEX_n</code></td>
+              <td>Input</td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td><code>ME0_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td><code>DS1_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td><code>DS0_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>16</td>
+              <td><code>ME1_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>18</td>
+              <td><code>DIR_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>20</td>
+              <td><code>STEP_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>21, 23, 25, 27, 29, 31, 33</td>
+              <td>Ground</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>22</td>
+              <td><code>WRDATA_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>24</td>
+              <td><code>WE_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>26</td>
+              <td><code>TRK0_n</code></td>
+              <td>Input</td>
+            </tr>
+            <tr>
+              <td>28</td>
+              <td><code>WP_n</code></td>
+              <td>Input</td>
+            </tr>
+            <tr>
+              <td>30</td>
+              <td><code>RDDATA_n</code></td>
+              <td>Input</td>
+            </tr>
+            <tr>
+              <td>32</td>
+              <td><code>HDSEL_n</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>34</td>
+              <td><code>DSKCHG_n</code></td>
+              <td>Input</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Both drives stay configured as PC drive select 1. The connector before
+          the twist is controller drive 1. The final connector after the twist
+          is controller drive 0 and the boot drive. The motor-enable conductors
+          twist with the select conductors, so each DOR motor bit follows its
+          assigned drive.
+        </p>
+      </section>
+      <section id="power">
+        <h2>8. Drive Power</h2>
+        <p>
+          J_FDD0_POWER and J_FDD1_POWER are keyed four-contact mini-Berg power
+          headers. Each connector has its own +5 V and +12 V resettable fuse.
+          The D359M3D specification calls for +5 V only, so its +12 V contact
+          draws no normal current. Supplying the standard +12 V contact keeps
+          the motherboard connector compatible with ordinary 3.5-inch drive
+          power cables.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Drive-power connector pinout
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Protection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>+5 V</td>
+              <td>One RXEF110 per drive, 1.10 A hold at 20 C</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Ground</td>
+              <td>Direct ground return</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Ground</td>
+              <td>Direct ground return</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>+12 V</td>
+              <td>One RXEF050 per drive, 0.50 A hold at 20 C</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Each post-fuse +5 V branch has 470 uF and 100 nF to ground beside its
+          connector. Each post-fuse +12 V branch has 47 uF and 100 nF. The
+          D359M3D data sheet gives 1.6 W typical operating power and 0.04 W
+          typical standby power from +5 V, corresponding to about 320 mA and 8
+          mA. The 1.10 A hold rating leaves room for motor startup current.
+        </p>
+        <p>
+          The fuses protect the connector branches; they do not set the system
+          supply rating. The upstream rails, traces, and input connector must
+          carry the sum of both drive branches and the rest of the computer.
+          Drive power is not hot-pluggable.
+        </p>
+      </section>
+      <section id="interrupts">
+        <h2>9. Interrupts and Programmed I/O</h2>
+        <p>
+          The 82077AA-1 push-pull <code>INT</code> output connects directly to
+          MC68901 GPIP5 as <code>FDC_INT</code>. The MFP detects its rising edge
+          and supplies vector <code>$47</code> during the processor's level-6
+          interrupt acknowledge. No pull-up is fitted.
+        </p>
+        <p>
+          Non-DMA mode uses INT and the Main Status Register's RQM bit for FIFO
+          service. During a read, INT rises when the FIFO reaches its programmed
+          service level or contains the last bytes of a sector. During a write,
+          INT rises when the FIFO can accept data. It also rises when a seek or
+          recalibrate completes and when a data command enters its result phase.
+        </p>
+        <p>
+          The interrupt handler reads the Main Status Register before choosing
+          an action. When RQM and NON-DMA are set, it transfers bytes in the
+          direction selected by DIO until RQM clears. A seek or recalibrate
+          completion requires Sense Interrupt Status. A data-command result
+          phase requires the command's complete result-byte sequence. The
+          handler must not issue Sense Interrupt Status for a FIFO data request.
+        </p>
+        <p>
+          The CONFIGURE command enables the FIFO, disables legacy drive polling,
+          enables implied seeks, and selects an eight-byte threshold. At 500
+          kbit/s the controller data sheet gives about 126.5 us between an
+          eight-byte service request and FIFO overrun or underrun. The handler
+          still transfers until RQM clears instead of assuming that every
+          interrupt represents exactly eight bytes.
+        </p>
+      </section>
+      <section id="firmware">
+        <h2>10. Firmware Contract</h2>
+        <h3>Initialization</h3>
+        <ol>
+          <li>
+            Wait until the motherboard releases reset and the controller's 24
+            MHz oscillator has been stable for at least 10 ms.
+          </li>
+          <li>
+            Write the Digital Output Register with bit 2 high to release the
+            controller core. Keep both motor bits low and select drive 0.
+          </li>
+          <li>
+            Write <code>$00</code> to the Configuration Control Register for 500
+            kbit/s operation.
+          </li>
+          <li>
+            Issue CONFIGURE bytes <code>$13, $00, $57, $00</code>. This enables
+            implied seeks, enables the FIFO, disables drive polling, selects an
+            eight-byte threshold, and starts write precompensation at track 0.
+          </li>
+          <li>
+            Issue SPECIFY bytes <code>$03, $DF, $11</code>. At 500 kbit/s this
+            selects a 3 ms step interval, 240 ms head-unload time, 16 ms
+            head-load time, and non-DMA operation.
+          </li>
+          <li>
+            Recalibrate drive 0 and drive 1 separately. Complete each operation
+            with Sense Interrupt Status and verify that the present cylinder is
+            zero.
+          </li>
+        </ol>
+        <p>
+          If firmware cannot issue CONFIGURE before the reset polling sequence
+          raises INT, it shall issue four Sense Interrupt Status commands to
+          drain the controller's queued reset status before continuing.
+        </p>
+
+        <h3>Drive Selection and Motors</h3>
+        <p>
+          A Digital Output Register value of <code>$1C</code> selects drive 0,
+          releases controller reset, and runs motor 0. <code>$2D</code> does the
+          same for drive 1. The DMA-gate bit in these compatibility values has
+          no effect in PS/2 mode. Firmware shall wait at least 500 ms after
+          starting a stopped motor before writing.
+        </p>
+        <p>
+          Firmware may leave one motor running while selecting the other drive
+          by retaining the first motor-enable bit in the DOR. It shall turn each
+          motor off after the final access.
+        </p>
+
+        <h3>Full-Sector Transfers</h3>
+        <p>
+          The board does not generate DMA acknowledge or terminal count.
+          Firmware transfers complete 512-byte sectors and uses the command's
+          EOT parameter to enter the result phase normally. For one sector, EOT
+          equals the requested sector number. Multi-sector operations may end at
+          sector 18. Partial-sector transfers are outside this hardware
+          contract.
+        </p>
+        <p>
+          Before each FIFO access, firmware shall require RQM to be one and DIO
+          to match the transfer direction. Every wait for RQM, INT, index, seek
+          completion, or result bytes needs a finite software timeout. A timeout
+          resets and reinitializes the controller before another command is
+          attempted.
+        </p>
+
+        <h3>Required 1.44 MB Parameters</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Required disk geometry and controller values
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Encoding</td>
+              <td>MFM</td>
+            </tr>
+            <tr>
+              <td>Data rate</td>
+              <td>500 kbit/s; CCR bits <code>00</code></td>
+            </tr>
+            <tr>
+              <td>Cylinders</td>
+              <td>80, numbered 0 through 79</td>
+            </tr>
+            <tr>
+              <td>Heads</td>
+              <td>2, numbered 0 and 1</td>
+            </tr>
+            <tr>
+              <td>Sectors per track</td>
+              <td>18, numbered 1 through 18</td>
+            </tr>
+            <tr>
+              <td>Sector size code</td>
+              <td><code>N = 2</code>, 512 bytes</td>
+            </tr>
+            <tr>
+              <td>End of track</td>
+              <td><code>EOT = 18</code> for a transfer through track end</td>
+            </tr>
+            <tr>
+              <td>Format gap</td>
+              <td><code>GPL = $54</code></td>
+            </tr>
+            <tr>
+              <td>Format fill byte</td>
+              <td><code>$F6</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="pins">
+        <h2>11. Package and Pin Maps</h2>
+        <h3>Intel 82077AA-1</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_FDC 68-pin PLCC connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">Controller signals</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1, 2, 26, 31, 41</td>
+              <td>WP, TRK0, INDX, DSKCHG, RDDATA</td>
+              <td>
+                <code>WP_n</code>, <code>TRK0_n</code>, <code>INDEX_n</code>,
+                <code>DSKCHG_n</code>, and
+                <code>RDDATA_n</code>
+              </td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>DACK</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>4, 5, 6</td>
+              <td>RD, WR, CS</td>
+              <td>
+                <code>FDC_RD_n</code>, <code>FDC_WR_n</code>, and
+                <code>FDC_CS_n</code>
+              </td>
+            </tr>
+            <tr>
+              <td>7, 8, 10</td>
+              <td>A0, A1, A2</td>
+              <td>CPU <code>A1</code>, <code>A2</code>, <code>A3</code></td>
+            </tr>
+            <tr>
+              <td>11, 13, 14, 15, 17, 19, 20, 22</td>
+              <td>DB0..DB7</td>
+              <td>CPU <code>D0..D7</code>, in order</td>
+            </tr>
+            <tr>
+              <td>18, 40, 60, 68</td>
+              <td>VCC</td>
+              <td>+5 V; one 100 nF capacitor at each pin</td>
+            </tr>
+            <tr>
+              <td>9, 12, 16, 21, 36, 50, 54, 59, 65</td>
+              <td>GND</td>
+              <td>Ground plane</td>
+            </tr>
+            <tr>
+              <td>23</td>
+              <td>INT</td>
+              <td><code>FDC_INT</code> to MC68901 GPIP5</td>
+            </tr>
+            <tr>
+              <td>24</td>
+              <td>DRQ</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>25</td>
+              <td>TC</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>27</td>
+              <td>IDENT</td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>28, 29</td>
+              <td>DRATE0, DRATE1</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>30</td>
+              <td>DRV2</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>32</td>
+              <td>RESET</td>
+              <td><code>FDC_RESET</code></td>
+            </tr>
+            <tr>
+              <td>33, 34</td>
+              <td>X1, X2</td>
+              <td>Y_FDC and its two 22 pF load capacitors</td>
+            </tr>
+            <tr>
+              <td>35</td>
+              <td>INVERT</td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>37, 38</td>
+              <td>LOFIL, HIFIL</td>
+              <td>4.7 nF C0G capacitor directly between the pins</td>
+            </tr>
+            <tr>
+              <td>39</td>
+              <td>PLL0</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>42, 43, 44, 47</td>
+              <td>NC</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>45</td>
+              <td>AVSS</td>
+              <td>Ground plane beside the analog bypass return</td>
+            </tr>
+            <tr>
+              <td>46</td>
+              <td>AVCC</td>
+              <td>+5 V through FB_FDC_AVCC; 100 nF and 1 uF to AVSS</td>
+            </tr>
+            <tr>
+              <td>48</td>
+              <td>MFM</td>
+              <td>Not connected; internal pull-up selects PS/2 mode</td>
+            </tr>
+            <tr>
+              <td>49, 51, 52, 53, 55, 56</td>
+              <td>DENSEL, HDSEL, WE, WRDATA, STEP, DIR</td>
+              <td>Corresponding J_FDC signals through 33 ohm resistors</td>
+            </tr>
+            <tr>
+              <td>57, 58, 61, 62</td>
+              <td>ME0, DS0, ME1, DS1</td>
+              <td>Corresponding J_FDC signals through 33 ohm resistors</td>
+            </tr>
+            <tr>
+              <td>63, 64, 66, 67</td>
+              <td>ME2, DS2, ME3, DS3</td>
+              <td>Not connected</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Adapter Packages</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Floppy bus-adapter package assignments
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Assignment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_FDC_REQ</code></td>
+              <td>SN74F02N</td>
+              <td>Lower-byte cycle qualification.</td>
+            </tr>
+            <tr>
+              <td><code>U_FDC_INV</code></td>
+              <td>SN74F04N</td>
+              <td>R/W and peripheral-reset inversion.</td>
+            </tr>
+            <tr>
+              <td><code>U_FDC_CTRL</code></td>
+              <td>SN74F00N</td>
+              <td>Read strobe, write strobe, and completion gate.</td>
+            </tr>
+            <tr>
+              <td><code>U_FDC_SEQ</code></td>
+              <td>CD74HCT164E</td>
+              <td>Three-edge 5 MHz completion delay.</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Used adapter-logic channels
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Inputs</th>
+              <th scope="col">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>U_FDC_REQ gate 1</td>
+              <td>Pin 2: <code>IO1_n</code>; pin 3: <code>LDS_n</code></td>
+              <td>Pin 1: <code>FDC_CYCLE</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_INV gate 1</td>
+              <td>Pin 1: CPU <code>R/W</code></td>
+              <td>Pin 2: <code>FDC_RW_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_INV gate 2</td>
+              <td>Pin 3: <code>PERIPH_RESET_n</code></td>
+              <td>Pin 4: <code>FDC_RESET</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_INV gate 3</td>
+              <td>Pin 5: <code>FDC_CYCLE</code></td>
+              <td>Pin 6: <code>FDC_CS_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_CTRL gate 1</td>
+              <td>
+                Pin 1: <code>FDC_CYCLE</code>; pin 2: CPU <code>R/W</code>
+              </td>
+              <td>Pin 3: <code>FDC_RD_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_CTRL gate 2</td>
+              <td>
+                Pin 4: <code>FDC_CYCLE</code>; pin 5:
+                <code>FDC_RW_n</code>
+              </td>
+              <td>Pin 6: <code>FDC_WR_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_CTRL gate 3</td>
+              <td>
+                Pin 9: <code>FDC_CYCLE</code>; pin 10:
+                <code>FDC_ACK_READY</code>
+              </td>
+              <td>Pin 8: <code>FDC_DTACK_n</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every 14-pin gate package uses pin 14 for +5 V and pin 7 for ground.
+          Ground U_FDC_REQ pins 5, 6, 8, 9, 11, and 12; U_FDC_INV pins 9, 11,
+          and 13; and U_FDC_CTRL pins 12 and 13. Leave their unused outputs
+          open. U_FDC_SEQ pin 14 connects to +5 V and pin 7 to ground. Pins 1
+          and 2 connect to +5 V, pin 8 to <code>MFP_CLK_5</code>, pin 9 to
+          <code>FDC_CYCLE</code>, and pin 5 produces <code>FDC_ACK_READY</code>.
+          Its other outputs remain open.
+        </p>
+      </section>
+      <section id="timing">
+        <h2>12. Timing and Electrical Checks</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            82077AA-1 host-interface timing
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Controller requirement</th>
+              <th scope="col">Design behavior</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Address setup to RD or WR</td>
+              <td>5 ns minimum</td>
+              <td>
+                The processor address is valid before LDS asserts; the adapter
+                adds request and NAND-gate delay before either strobe.
+              </td>
+            </tr>
+            <tr>
+              <td>RD or WR pulse width</td>
+              <td>90 ns minimum</td>
+              <td>
+                Completion waits for QC after three 5 MHz edges, giving at least
+                400 ns before acknowledgement.
+              </td>
+            </tr>
+            <tr>
+              <td>Read data valid from RD</td>
+              <td>80 ns maximum</td>
+              <td>At least 320 ns remains before completion can assert.</td>
+            </tr>
+            <tr>
+              <td>Write-data setup to WR completion</td>
+              <td>70 ns minimum</td>
+              <td>
+                Processor write data stays valid through the delayed strobe.
+              </td>
+            </tr>
+            <tr>
+              <td>Command-inactive interval</td>
+              <td>60 ns minimum</td>
+              <td>
+                Consecutive processor cycles include an inactive interval;
+                firmware also waits for RQM before another FIFO access.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The sequencer delay is 400 to 600 ns from cycle qualification before
+          gate delay, below the motherboard's 51.1 us normal-cycle timeout.
+        </p>
+
+        <h3>Completion Release</h3>
+        <p>
+          U_FDC_CTRL adds at most 6 ns when releasing
+          <code>FDC_DTACK_n</code>. The motherboard tree adds 5.3 ns in its
+          group SN74F21, 5.3 ns in the final SN74F21, and 6.6 ns in the timeout
+          mask. The 23.2 ns component total leaves 86.8 ns for routing and
+          loading under the MC68EC000's 110 ns release limit.
+        </p>
+        <pre><code>U_FDC_CTRL release            6.0 ns maximum
+group SN74F21                 5.3 ns maximum
+final SN74F21                 5.3 ns maximum
+timeout-mask SN74F32          6.6 ns maximum
+------------------------------------------------
+component total              23.2 ns
+MC68EC000 limit             110.0 ns
+board allowance              86.8 ns</code></pre>
+
+        <h3>Logic Levels and Loading</h3>
+        <p>
+          The 82077AA-1 host inputs use TTL thresholds: no more than 0.8 V for
+          low and at least 2.0 V for high. Its host data outputs guarantee no
+          more than 0.4 V at 12 mA and at least 3.0 V at a 4 mA source load.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Floppy-subsystem electrical loads
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Added load</th>
+              <th scope="col">Check</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>One 82077AA-1 bidirectional pin, 20 pF maximum</td>
+              <td>Include in the assembled processor-bus measurement.</td>
+            </tr>
+            <tr>
+              <td><code>A3..A1</code></td>
+              <td>One 82077AA-1 input, 10 pF maximum</td>
+              <td>Include in the address-bus capacitance total.</td>
+            </tr>
+            <tr>
+              <td><code>MFP_CLK_5</code></td>
+              <td>One CD74HCT164E clock input, 10 pF maximum</td>
+              <td>
+                The net also drives the MFP divider's second stage and the MIDI
+                local clock buffer.
+              </td>
+            </tr>
+            <tr>
+              <td><code>FDC_INT</code></td>
+              <td>One MC68901 GPIP input</td>
+              <td>No pull-up; both endpoints use TTL-compatible levels.</td>
+            </tr>
+            <tr>
+              <td>Drive return signals</td>
+              <td>10 kohm pull-up and one controller input per signal</td>
+              <td>Verify inactive levels and selected-drive edges at J_FDC.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          C_FDC_FILTER connects directly between HIFIL and LOFIL. It has no
+          ground connection. Use a 4.7 nF C0G or other low-leakage capacitor.
+          Intel gives about 500 us settling time for 5 nF after a data-rate
+          change, so firmware shall wait 1 ms before starting a transfer.
+        </p>
+        <p>
+          Each digital VCC pin has a 100 nF ceramic capacitor to its nearest
+          ground pin. U_FDC also has 4.7 uF beside the package. FB_FDC_AVCC
+          feeds AVCC from +5 V, with 100 nF and 1 uF returned to AVSS. Every
+          adapter IC has a 100 nF capacitor at its supply pins.
+        </p>
+      </section>
+      <section id="parts">
+        <h2>13. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Floppy subsystem parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Quantity</th>
+              <th scope="col">Reference or part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC</code>, Intel 82077AA-1</td>
+              <td>Floppy controller.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Mitsumi D359M3D</td>
+              <td>Installed 3.5-inch, 1.44 MB drives.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_REQ</code>, SN74F02N</td>
+              <td>Cycle qualification.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_INV</code>, SN74F04N</td>
+              <td>R/W, chip-select, and reset inversion.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_CTRL</code>, SN74F00N</td>
+              <td>Host strobes and completion.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_SEQ</code>, CD74HCT164E</td>
+              <td>Bus-response delay.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>Y_FDC</code>, 24 MHz crystal</td>
+              <td>Controller reference.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>J_FDC</code>, keyed 2-by-17 shrouded header</td>
+              <td>Internal drive cable.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>34-conductor PC floppy cable, three connectors</td>
+              <td>Two-drive cable with conductors 10 through 16 twisted.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Four-contact keyed mini-Berg headers</td>
+              <td>Drive power.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>RXEF110</td>
+              <td>Separate +5 V drive protection.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>RXEF050</td>
+              <td>Separate +12 V drive protection.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>Five-element isolated 10 kohm SIP</td>
+              <td>Drive-return pull-ups.</td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td>33 ohm, 5%</td>
+              <td>Drive-control source damping.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>4.7 nF C0G</td>
+              <td>HIFIL-to-LOFIL filter.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>22 pF C0G</td>
+              <td>Crystal load capacitors.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>
+                Ferrite bead, at least 100 ohm at 100 MHz, at least 100 mA, and
+                no more than 0.5 ohm DC resistance
+              </td>
+              <td>AVCC supply isolation.</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td>100 nF / 50 V X7R</td>
+              <td>IC bypassing and post-fuse rail bypassing.</td>
+            </tr>
+            <tr>
+              <td>1 each</td>
+              <td>1 uF / 10 V and 4.7 uF / 10 V</td>
+              <td>AVCC filtering and controller-package bulk bypass.</td>
+            </tr>
+            <tr>
+              <td>2 each</td>
+              <td>470 uF / 10 V and 47 uF / 25 V</td>
+              <td>Post-fuse drive-rail capacitance.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Intel documented the enhanced 82077AA feature set by the first quarter
+          of 1991. The 74F00, 74F02, and 74F04 appear in Fairchild's 1980 FAST
+          data book, and HCT164 logic was established during the 1980s. Later
+          data-sheet revisions do not change the family-date rule. The two
+          D359M3D drives are user-selected parts.
+        </p>
+      </section>
+      <section id="layout">
+        <h2>14. Board Layout</h2>
+        <ul>
+          <li>
+            Put J_FDC at the board edge facing the drive bays. Mark pin 1 and
+            the missing pin 3 on copper and silkscreen, then verify the key
+            against the cable socket.
+          </li>
+          <li>
+            Put the ten 33 ohm resistors beside U_FDC and the five input
+            pull-ups at the controller end of the cable.
+          </li>
+          <li>
+            Keep Y_FDC, both 22 pF capacitors, and their ground returns inside a
+            small loop at pins 33 and 34.
+          </li>
+          <li>
+            Put C_FDC_FILTER directly between pins 37 and 38. Keep both filter
+            pins short, clean, and away from the crystal and cable traces.
+          </li>
+          <li>
+            Put FB_FDC_AVCC and the AVCC capacitors beside pins 45 and 46. Join
+            AVSS to the plane without sharing a narrow drive-current return.
+          </li>
+          <li>
+            Route every floppy-cable signal beside its odd-pin ground return.
+            Avoid stubs between U_FDC, the pull-ups, and J_FDC.
+          </li>
+          <li>
+            Place each pair of resettable fuses beside its power header. Use
+            wide upstream and post-fuse copper.
+          </li>
+          <li>
+            Mark +5 V, both ground pins, and +12 V at each mini-Berg header.
+            Check the footprint from the cable mating face.
+          </li>
+          <li>
+            Measure the loaded <code>MFP_CLK_5</code> waveform at U_FDC_SEQ and
+            include the route and probe in the MFP clock-load check.
+          </li>
+          <li>
+            Measure the routed <code>FDC_DTACK_n</code> release path and keep
+            its board contribution below 86.8 ns.
+          </li>
+        </ul>
+      </section>
+      <section id="acceptance">
+        <h2>15. Assembled-System Acceptance</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Floppy subsystem acceptance checks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Pass condition</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Reset and version</td>
+              <td>VERSION returns <code>$90</code> after initialization.</td>
+            </tr>
+            <tr>
+              <td>Register bus</td>
+              <td>
+                Canonical byte addresses reach the intended registers; an
+                upper-byte-only access reaches bus error.
+              </td>
+            </tr>
+            <tr>
+              <td>Host timing</td>
+              <td>
+                RD and WR exceed 90 ns, read data precedes completion, and
+                completion releases within the processor's 110 ns limit.
+              </td>
+            </tr>
+            <tr>
+              <td>Drive assignment</td>
+              <td>
+                The far connector is drive 0, the connector before the twist is
+                drive 1, and the unselected drive stays inactive.
+              </td>
+            </tr>
+            <tr>
+              <td>Motor control</td>
+              <td>Each DOR motor bit starts only its assigned drive.</td>
+            </tr>
+            <tr>
+              <td>Disk change</td>
+              <td>Removing and reinserting media changes DIR bit 7.</td>
+            </tr>
+            <tr>
+              <td>Read and write</td>
+              <td>
+                Both drives format, write, verify, and reread every sector of a
+                1.44 MB test disk without controller errors.
+              </td>
+            </tr>
+            <tr>
+              <td>Media interchange</td>
+              <td>
+                Each drive reads a disk written by the other, and a reference PC
+                reads disks written by both drives.
+              </td>
+            </tr>
+            <tr>
+              <td>FIFO service</td>
+              <td>
+                Repeated full-track transfers complete without missed GPIP5
+                edges, overrun, or underrun.
+              </td>
+            </tr>
+            <tr>
+              <td>Power protection</td>
+              <td>
+                Both drives start together without rail collapse. A branch fault
+                trips its fuse without resetting the other drive.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="signals">
+        <h2>16. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Floppy subsystem signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>FDC_CYCLE</code></td>
+              <td>U_FDC_REQ</td>
+              <td>U_FDC_INV, U_FDC_CTRL, and U_FDC_SEQ clear.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_CS_n</code></td>
+              <td>U_FDC_INV</td>
+              <td>U_FDC CS.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_RW_n</code></td>
+              <td>U_FDC_INV</td>
+              <td>U_FDC_CTRL write-strobe gate.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_RD_n</code></td>
+              <td>U_FDC_CTRL</td>
+              <td>U_FDC RD.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_WR_n</code></td>
+              <td>U_FDC_CTRL</td>
+              <td>U_FDC WR.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_ACK_READY</code></td>
+              <td>U_FDC_SEQ QC</td>
+              <td>U_FDC_CTRL completion gate.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_DTACK_n</code></td>
+              <td>U_FDC_CTRL</td>
+              <td>Motherboard completion tree.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_RESET</code></td>
+              <td>U_FDC_INV</td>
+              <td>U_FDC RESET.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_INT</code></td>
+              <td>U_FDC INT</td>
+              <td>MC68901 GPIP5.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>DENSEL_n</code>, <code>ME0_n</code>, <code>ME1_n</code>,
+                <code>DS0_n</code>, <code>DS1_n</code>, <code>DIR_n</code>,
+                <code>STEP_n</code>, <code>WRDATA_n</code>, <code>WE_n</code>,
+                <code>HDSEL_n</code>
+              </td>
+              <td>U_FDC through 33 ohm resistors</td>
+              <td>J_FDC and both drives.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>INDEX_n</code>, <code>TRK0_n</code>, <code>WP_n</code>,
+                <code>RDDATA_n</code>,
+                <code>DSKCHG_n</code>
+              </td>
+              <td>Selected drive and RP_FDC_IN</td>
+              <td>U_FDC inputs.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="sources">
+        <h2>17. Sources</h2>
+        <ul>
+          <li>
+            Intel,
+            <a href="datasheets/82077AA.pdf"
+              ><cite>82077AA CHMOS Single-Chip Floppy Disk Controller</cite></a
+            >, order number 290166-007, May 1994. Host registers, PS/2 mode,
+            FIFO behavior, drive interface, electrical limits, and timing.
+          </li>
+          <li>
+            Mitsumi,
+            <a href="datasheets/144-FDD.pdf"
+              ><cite
+                >3.5-inch Compact Floppy Disk Drive D359M3D, D353M3D</cite
+              ></a
+            >. Capacity, data rates, access times, +5 V power, and dimensions.
+          </li>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >, processor bus cycles and timing.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74f00.pdf"><cite>SN74F00</cite></a
+            >, <a href="datasheets/sn74f02.pdf"><cite>SN74F02</cite></a
+            >, <a href="datasheets/sn74f04.pdf"><cite>SN74F04</cite></a
+            >, and
+            <a href="datasheets/cd74hc164.pdf"><cite>CD74HCT164</cite></a>
+            data sheets.
+          </li>
+          <li>
+            Fairchild,
+            <a href="datasheets/fairchild-fast-1980.pdf"
+              ><cite>FAST Data Book</cite></a
+            >, 1980. Family-date reference for the selected FAST gates.
+          </li>
+          <li>
+            Littelfuse,
+            <a
+              href="https://www.littelfuse.com/assetdocs/littelfuse_ptc_radial_leaded_rxef_datasheet?assetguid=e9a7b6b3-79ce-478c-a39a-0a70ee48ccec"
+              ><cite>RXEF Series PolySwitch Resettable Devices</cite></a
+            >. Drive-branch fuse ratings.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

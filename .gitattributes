@@ -1,0 +1,49 @@
+* text=auto eol=lf
+
+*.html   text
+*.css    text
+*.js     text
+*.md     text
+*.txt    text
+*.svg    text
+*.json   text
+*.xml    text
+*.csv    text
+*.c      text
+*.h      text
+*.s      text
+*.asm    text
+*.inc    text
+*.v      text
+*.sv     text
+*.vhd    text
+*.vhdl   text
+*.ucf    text
+*.xdc    text
+*.sdc    text
+*.tcl    text
+*.sh     text
+Makefile text
+
+*.sh     text eol=lf
+
+*.pdf    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.otf    binary
+*.zip    binary
+*.gz     binary
+*.bin    binary
+*.rom    binary
+*.hex    binary
+*.o      binary
+*.elf    binary
+
+*.c      diff=cpp
+*.h      diff=cpp

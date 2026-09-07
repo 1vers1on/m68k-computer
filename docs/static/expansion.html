@@ -1,0 +1,1574 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Expansion Slots, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Expansion Slots</h1>
+      <p>
+        This document defines the two front-loading expansion slots, their
+        electrical interface, connector pinout, address assignments, and card
+        requirements. <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; board layout and assembled-system
+          checks remain
+        </dd>
+        <dt>Slots</dt>
+        <dd>Two front-loading, power-off insertion slots</dd>
+        <dt>Connector</dt>
+        <dd>96-contact Type C DIN 41612, three rows of 32 contacts</dd>
+        <dt>Card format</dt>
+        <dd>100 mm by 160 mm, 1.6 mm thick, 3U Eurocard outline</dd>
+        <dt>Power</dt>
+        <dd>+5 V at 1.0 A and +12 V at 0.4 A maximum per slot</dd>
+        <dt>Bus mastering</dt>
+        <dd>Not supported</dd>
+      </dl>
+    </header>
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#addresses">Address Assignment</a></li>
+        <li><a href="#mechanical">Mechanical Interface</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#signals">Signal Rules</a></li>
+        <li><a href="#pinout">Connector Pinout</a></li>
+        <li><a href="#buffers">Address and Control Buffers</a></li>
+        <li><a href="#data">Data Bus</a></li>
+        <li><a href="#completion">Cycle Completion</a></li>
+        <li><a href="#interrupts">Interrupts</a></li>
+        <li><a href="#clock-reset">Clock and Reset</a></li>
+        <li><a href="#power">Power Distribution</a></li>
+        <li><a href="#card-rules">Card Requirements</a></li>
+        <li><a href="#software">Software Contract</a></li>
+        <li><a href="#example">Example 8-Bit Register Card</a></li>
+        <li><a href="#packages">Motherboard Package and Pin Map</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#acceptance">Assembled-System Acceptance</a></li>
+        <li><a href="#signal-reference">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The computer accepts two removable cards from the front of the
+          enclosure. Guide rails carry each card to a DIN 41612 connector at the
+          rear. Power must be off before a card is inserted or removed.
+        </p>
+        <p>
+          Each physical slot has one fixed 2 MiB memory window and one fixed 128
+          KiB I/O window. Moving a card between slots changes its addresses
+          without jumpers or configuration storage. A card may use either or
+          both windows, but it must not decode outside them.
+        </p>
+        <p>
+          The motherboard buffers every outgoing signal and gives each slot its
+          own data transceivers. Cards cannot request the bus, become bus
+          master, or perform DMA. An empty or nonresponding slot produces a bus
+          error through the existing 51.1 microsecond minimum timeout.
+        </p>
+      </section>
+      <section id="addresses">
+        <h2>2. Address Assignment</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Fixed expansion-slot address windows
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Slot</th>
+              <th scope="col">Memory range</th>
+              <th scope="col">Memory select</th>
+              <th scope="col">I/O range</th>
+              <th scope="col">I/O select</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>$400000-$5FFFFF</code></td>
+              <td><code>EXP_MEM2_n</code></td>
+              <td><code>$EC0000-$EDFFFF</code></td>
+              <td><code>IO6_n</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>$600000-$7FFFFF</code></td>
+              <td><code>EXP_MEM3_n</code></td>
+              <td><code>$EE0000-$EFFFFF</code></td>
+              <td><code>IO7_n</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The connectors call these pins <code>MEM_SEL_n</code> and
+          <code>IO_SEL_n</code>. Card schematics can use one connector symbol in
+          either slot. A card that decodes fewer local address bits mirrors its
+          registers or memory within its assigned window.
+        </p>
+        <p>
+          <code>EXP_MEM5_n</code>, <code>EXP_MEM6_n</code>, and
+          <code>IO9_n..IO14_n</code> remain reserved motherboard decode outputs.
+          They do not reach either connector, and accesses to their
+          unimplemented ranges time out under memory-map revision 1.0.
+        </p>
+      </section>
+      <section id="mechanical">
+        <h2>3. Mechanical Interface</h2>
+        <p>
+          Each card uses a 100 mm by 160 mm, 1.6 mm thick PCB with a 96-contact
+          right-angle male DIN 41612 connector on its rear edge. A 3U front
+          panel, approximately 128.4 mm high and 30.48 mm wide, gives each card
+          a 6 HP bay. Both bays need about 61 mm of chassis width.
+        </p>
+        <p>
+          The 6 HP pitch permits a 20 mm component envelope on the component
+          side and a 4 mm lead-and-solder envelope on the other side. Printed
+          upper and lower guide channels support the card edges. Print the
+          guides in PETG, ABS, or nylon rather than PLA.
+        </p>
+        <p>
+          Each front panel uses a printed pull handle and two cam ejectors on M3
+          pivots. The cams bear on reinforced chassis ledges, seat the connector
+          evenly, and break it free before the user pulls the handle. Captive M3
+          thumbscrews at the top and bottom retain the seated card. The cams
+          shall provide at least 3:1 mechanical advantage over their first 3 mm
+          of travel.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Selected connector pair
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Location</th>
+              <th scope="col">Part</th>
+              <th scope="col">Form</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Card</td>
+              <td>HARTING 09 03 196 2921</td>
+              <td>
+                Type C, 96-contact, performance-level-1 male, right-angle
+                through-hole
+              </td>
+            </tr>
+            <tr>
+              <td>Motherboard</td>
+              <td>HARTING 09 03 296 2824</td>
+              <td>
+                Type C, 96-contact, performance-level-1 female, straight
+                through-hole
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The pair is specified for at least 500 mating cycles and up to 90 N
+          insertion force. Use side-coding hardware so an expansion card cannot
+          enter another DIN bay. Both expansion slots use the same key. The
+          guides shall prevent one-row or one-position offset mating.
+        </p>
+      </section>
+      <section id="architecture">
+        <h2>4. Architecture</h2>
+        <pre><code>address/control --+-- slot 1 HCT244 banks --&gt; J_EXP1
+                  +-- slot 2 HCT244 banks --&gt; J_EXP2
+
+CPU D15..D0 &lt;--&gt; slot 1 HCT245 pair &lt;--&gt; J_EXP1
+             +--&gt; slot 2 HCT245 pair &lt;--&gt; J_EXP2
+
+J_EXP1 CARD_DTACK_n --+
+                       +-- FAST AND --&gt; EXP_DTACK_n --&gt; completion tree
+J_EXP2 CARD_DTACK_n --+
+
+J_EXP1 EXP_IRQ_n -----+
+                       +-- wired-OR --&gt; level-3 interrupt
+J_EXP2 EXP_IRQ_n -----+</code></pre>
+        <p>
+          Separate drivers remove one card's connector and trace capacitance
+          from the other card's signal path. The processor-side ports of the
+          data transceivers share <code>D15..D0</code>, but fixed nonoverlapping
+          selects enable only one slot. A card must still qualify every data
+          driver and completion output with its connector select.
+        </p>
+      </section>
+      <section id="signals">
+        <h2>5. Signal Rules</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Connector signal groups
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signals</th>
+              <th scope="col">Direction at card</th>
+              <th scope="col">Rule</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>A23..A1</code></td>
+              <td>Input</td>
+              <td>Buffered address. Byte strobes replace external A0.</td>
+            </tr>
+            <tr>
+              <td><code>D15..D0</code></td>
+              <td>Bidirectional</td>
+              <td>Drive requested lanes only during a selected read.</td>
+            </tr>
+            <tr>
+              <td><code>AS_n</code>, <code>UDS_n</code>, <code>LDS_n</code></td>
+              <td>Input</td>
+              <td>Active-low buffered bus strobes.</td>
+            </tr>
+            <tr>
+              <td><code>R_W</code></td>
+              <td>Input</td>
+              <td>High for read; low for write.</td>
+            </tr>
+            <tr>
+              <td><code>MEM_SEL_n</code>, <code>IO_SEL_n</code></td>
+              <td>Input</td>
+              <td>Active-low selects fixed by physical slot.</td>
+            </tr>
+            <tr>
+              <td><code>EXP_CLK_10</code></td>
+              <td>Input</td>
+              <td>
+                Buffered 10 MHz reference; frequency locked but not zero-skew to
+                CPU clock.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Input</td>
+              <td>Active-low reset, including processor RESET instruction.</td>
+            </tr>
+            <tr>
+              <td><code>CARD_DTACK_n</code></td>
+              <td>Open-collector output</td>
+              <td>Pull low only for a selected, ready transfer.</td>
+            </tr>
+            <tr>
+              <td><code>EXP_IRQ_n</code></td>
+              <td>Open-collector output</td>
+              <td>Shared level-sensitive interrupt request.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Bus logic uses +5 V TTL-compatible levels. Cards shall accept
+          <code>VIL &lt;= 0.8 V</code> and <code>VIH &gt;= 2.0 V</code> and
+          deliver <code>VOL &lt;= 0.4 V</code> at the specified open-collector
+          sink current. +12 V is power only and shall not touch a bus signal.
+        </p>
+      </section>
+      <section id="pinout">
+        <h2>6. Connector Pinout</h2>
+        <p>
+          This is the mating-interface view, not a solder-side view. Connector
+          drawings can reverse the visible order. Verify row letters, position
+          numbers, and pin-1 marks on both footprints before PCB release.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            J_EXP1 and J_EXP2 Type C DIN 41612 pinout
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Position</th>
+              <th scope="col">Row a</th>
+              <th scope="col">Row b</th>
+              <th scope="col">Row c</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">1</th>
+              <td>+5 V</td>
+              <td>GND</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <th scope="row">2</th>
+              <td><code>A1</code></td>
+              <td>GND</td>
+              <td><code>D0</code></td>
+            </tr>
+            <tr>
+              <th scope="row">3</th>
+              <td><code>A2</code></td>
+              <td>GND</td>
+              <td><code>D1</code></td>
+            </tr>
+            <tr>
+              <th scope="row">4</th>
+              <td><code>A3</code></td>
+              <td>GND</td>
+              <td><code>D2</code></td>
+            </tr>
+            <tr>
+              <th scope="row">5</th>
+              <td><code>A4</code></td>
+              <td>GND</td>
+              <td><code>D3</code></td>
+            </tr>
+            <tr>
+              <th scope="row">6</th>
+              <td><code>A5</code></td>
+              <td>GND</td>
+              <td><code>D4</code></td>
+            </tr>
+            <tr>
+              <th scope="row">7</th>
+              <td><code>A6</code></td>
+              <td>GND</td>
+              <td><code>D5</code></td>
+            </tr>
+            <tr>
+              <th scope="row">8</th>
+              <td><code>A7</code></td>
+              <td>GND</td>
+              <td><code>D6</code></td>
+            </tr>
+            <tr>
+              <th scope="row">9</th>
+              <td><code>A8</code></td>
+              <td>GND</td>
+              <td><code>D7</code></td>
+            </tr>
+            <tr>
+              <th scope="row">10</th>
+              <td><code>A9</code></td>
+              <td>GND</td>
+              <td><code>D8</code></td>
+            </tr>
+            <tr>
+              <th scope="row">11</th>
+              <td><code>A10</code></td>
+              <td>GND</td>
+              <td><code>D9</code></td>
+            </tr>
+            <tr>
+              <th scope="row">12</th>
+              <td><code>A11</code></td>
+              <td>GND</td>
+              <td><code>D10</code></td>
+            </tr>
+            <tr>
+              <th scope="row">13</th>
+              <td><code>A12</code></td>
+              <td>GND</td>
+              <td><code>D11</code></td>
+            </tr>
+            <tr>
+              <th scope="row">14</th>
+              <td><code>A13</code></td>
+              <td>GND</td>
+              <td><code>D12</code></td>
+            </tr>
+            <tr>
+              <th scope="row">15</th>
+              <td><code>A14</code></td>
+              <td>GND</td>
+              <td><code>D13</code></td>
+            </tr>
+            <tr>
+              <th scope="row">16</th>
+              <td><code>A15</code></td>
+              <td>GND</td>
+              <td><code>D14</code></td>
+            </tr>
+            <tr>
+              <th scope="row">17</th>
+              <td><code>A16</code></td>
+              <td>GND</td>
+              <td><code>D15</code></td>
+            </tr>
+            <tr>
+              <th scope="row">18</th>
+              <td><code>A17</code></td>
+              <td>GND</td>
+              <td><code>AS_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">19</th>
+              <td><code>A18</code></td>
+              <td>GND</td>
+              <td><code>R_W</code></td>
+            </tr>
+            <tr>
+              <th scope="row">20</th>
+              <td><code>A19</code></td>
+              <td>GND</td>
+              <td><code>UDS_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">21</th>
+              <td><code>A20</code></td>
+              <td>GND</td>
+              <td><code>LDS_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">22</th>
+              <td><code>A21</code></td>
+              <td>GND</td>
+              <td><code>MEM_SEL_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">23</th>
+              <td><code>A22</code></td>
+              <td>GND</td>
+              <td><code>IO_SEL_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">24</th>
+              <td><code>A23</code></td>
+              <td>GND</td>
+              <td><code>EXP_CLK_10</code></td>
+            </tr>
+            <tr>
+              <th scope="row">25</th>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>GND</td>
+              <td><code>CARD_DTACK_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">26</th>
+              <td><code>EXP_IRQ_n</code></td>
+              <td>GND</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">27</th>
+              <td>+5 V</td>
+              <td>GND</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <th scope="row">28</th>
+              <td>+5 V</td>
+              <td>GND</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <th scope="row">29</th>
+              <td>GND</td>
+              <td>GND</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">30</th>
+              <td>+12 V</td>
+              <td>GND</td>
+              <td>+12 V</td>
+            </tr>
+            <tr>
+              <th scope="row">31</th>
+              <td>+12 V</td>
+              <td>GND</td>
+              <td>+12 V</td>
+            </tr>
+            <tr>
+              <th scope="row">32</th>
+              <td>GND</td>
+              <td>GND</td>
+              <td>GND</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Row b is ground at every position. Six contacts carry +5 V, four carry
+          +12 V, and 37 carry ground. Parallel every contact assigned to the
+          same rail on both boards.
+        </p>
+      </section>
+      <section id="buffers">
+        <h2>7. Address and Control Buffers</h2>
+        <p>
+          Each slot uses four <code>SN74HCT244N</code> packages. Three carry
+          <code>A23..A1</code>; the fourth carries the strobes, direction,
+          selects, clock, and reset. Both output-enable pins on every package
+          are grounded. No card pin connects to a processor output or an
+          unbuffered motherboard select.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Per-slot HCT244 allocation
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Package</th>
+              <th scope="col">Channels</th>
+              <th scope="col">Signals</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Address low</td>
+              <td>1 through 8</td>
+              <td><code>A1..A8</code></td>
+            </tr>
+            <tr>
+              <td>Address middle</td>
+              <td>1 through 8</td>
+              <td><code>A9..A16</code></td>
+            </tr>
+            <tr>
+              <td>Address high</td>
+              <td>1 through 7</td>
+              <td><code>A17..A23</code></td>
+            </tr>
+            <tr>
+              <td>Address high</td>
+              <td>8</td>
+              <td>Ground input; leave output open</td>
+            </tr>
+            <tr>
+              <td>Control</td>
+              <td>1 through 8</td>
+              <td>
+                <code>AS_n</code>, <code>R_W</code>, <code>UDS_n</code>,
+                <code>LDS_n</code>, memory select, I/O select,
+                <code>EXP_CLK_ROOT</code>, <code>PERIPH_RESET_n</code>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Put a 33 ohm series resistor between every HCT244 output and its
+          connector contact. These 31 resistors per slot provide source damping
+          and limit current during accidental contention.
+        </p>
+      </section>
+      <section id="data">
+        <h2>8. Data Bus</h2>
+        <p>
+          Two <code>SN74HCT245N</code> packages serve each slot. Their A ports
+          face the card and their B ports face the CPU. Both DIR inputs connect
+          directly to motherboard <code>R_W</code>. A high read level selects
+          A-to-B; a low write level selects B-to-A.
+        </p>
+        <pre><code>EXP1_CYCLE_n = EXP_MEM2_n AND IO6_n
+EXP2_CYCLE_n = EXP_MEM3_n AND IO7_n
+
+R_W = 1: card A port --&gt; CPU B port
+R_W = 0: CPU B port  --&gt; card A port</code></pre>
+        <p>
+          Gates 1 and 2 of <code>U_EXP_GLUE</code>, an <code>SN74F08N</code>,
+          generate the active-low enables. Each enable drives both transceivers
+          for its slot. <code>R_W</code> is valid before the qualified select,
+          so direction is established before output enable. The motherboard
+          passes all 16 bits when selected; the card qualifies its own byte
+          lanes.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Card byte-lane behavior
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">UDS_n</th>
+              <th scope="col">LDS_n</th>
+              <th scope="col">Requested lane</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>0</td>
+              <td>1</td>
+              <td><code>D15..D8</code></td>
+              <td>Upper-byte device may respond.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>0</td>
+              <td><code>D7..D0</code></td>
+              <td>Lower-byte device may respond.</td>
+            </tr>
+            <tr>
+              <td>0</td>
+              <td>0</td>
+              <td>Both</td>
+              <td>
+                A 16-bit device uses both. An 8-bit device uses its own lane
+                only.
+              </td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>1</td>
+              <td>None</td>
+              <td>Do not drive data or completion.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Lower-lane 8-bit cards connect to <code>D7..D0</code>, respond to
+          <code>LDS_n</code>, and place canonical registers at odd addresses.
+          Upper-lane cards use <code>D15..D8</code>, <code>UDS_n</code>, and
+          even addresses.
+        </p>
+      </section>
+      <section id="completion">
+        <h2>9. Cycle Completion</h2>
+        <p>
+          Each connector has a separate <code>CARD_DTACK_n</code> net and a
+          motherboard 1 kohm, 5 percent pull-up. Cards use an open-collector or
+          open-drain output and never drive high. Gate 3 of
+          <code>U_EXP_GLUE</code> combines the inputs:
+        </p>
+        <pre><code>EXP_DTACK_n = EXP1_CARD_DTACK_n AND EXP2_CARD_DTACK_n</code></pre>
+        <p>
+          The push-pull result enters <code>U_DTACK_B</code> gate 1 in the
+          shared completion tree. A card may assert completion only while its
+          select and a supported byte strobe are active. For reads, requested
+          data must already be valid. For writes, the card must have accepted or
+          be ready to accept the data.
+        </p>
+        <p>
+          Release completion as soon as the select or all supported strobes
+          negate. A card that cannot finish within 50 microseconds leaves the
+          line high and lets the motherboard timeout produce a bus error. Every
+          completion output shall sink at least 8 mA at 0.4 V. One
+          <code>SN74LS07N</code> channel meets this rule.
+        </p>
+      </section>
+      <section id="interrupts">
+        <h2>10. Interrupts</h2>
+        <p>
+          Both connectors share <code>EXP_IRQ_n</code>. The existing 4.7 kohm
+          motherboard pull-up holds it high; either card can pull it low. It
+          enters the priority encoder at level 3 and receives autovector 27,
+          whose exception-vector address is <code>$00006C</code>.
+        </p>
+        <p>
+          A card keeps its request low until its driver clears every enabled
+          cause. The level-3 handler polls both installed drivers and repeats
+          while the line remains low. Interrupt assertion gives no permission to
+          drive data or completion; the motherboard terminates the acknowledge
+          with <code>/AVEC</code>.
+        </p>
+      </section>
+      <section id="clock-reset">
+        <h2>11. Clock and Reset</h2>
+        <p>
+          Gate 1 of <code>U_EXP_CLK_PHASE</code>, an <code>SN74F04N</code>,
+          reads the complementary 10 MHz divider output at
+          <code>U_CPU_CLK</code> pin 8. It produces <code>EXP_CLK_ROOT</code>, a
+          nominally in-phase copy of <code>CPU_CLK_10</code>. The per-slot
+          control HCT244s drive separate connector clocks from that root.
+        </p>
+        <p>
+          Pin 8 continues to drive pin 12 for toggle feedback. Include the F04
+          input in the divider feedback waveform check. Cards may use the
+          connector clock for state machines and baud-rate division, but shall
+          not assume specified edge skew from the CPU clock. A card-side buffer
+          is required for more than two clock loads.
+        </p>
+        <p>
+          <code>PERIPH_RESET_n</code> asserts for power-on reset, manual reset,
+          and the CPU RESET instruction. A card with active-high reset inverts
+          it locally. A device without reset shall keep bus outputs disabled
+          until its software initialization is complete.
+        </p>
+      </section>
+      <section id="power">
+        <h2>12. Power Distribution</h2>
+        <p>
+          Each slot has separate protection. An <code>RXEF250</code> radial
+          resettable fuse feeds +5 V, and an <code>RXEF110</code> feeds +12 V.
+          Cards may draw no more than 1.0 A continuously from +5 V and 0.4 A
+          from +12 V. Reduce those limits if measured fuse or enclosure
+          temperature requires it.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Per-slot power network
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Rail</th>
+              <th scope="col">Protection</th>
+              <th scope="col">Motherboard capacitance</th>
+              <th scope="col">Card limit</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>+5 V</td>
+              <td>RXEF250, 2.50 A hold at 20 C and 1.35 A at 70 C</td>
+              <td>100 uF / 10 V plus 100 nF after fuse</td>
+              <td>1.0 A</td>
+            </tr>
+            <tr>
+              <td>+12 V</td>
+              <td>RXEF110, 1.10 A hold at 20 C and 0.59 A at 70 C</td>
+              <td>47 uF / 25 V plus 100 nF after fuse</td>
+              <td>0.4 A</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The system supply shall cover the motherboard plus 2.0 A on +5 V and
+          0.8 A on +12 V with both slots full. A card shall not feed current
+          back into either rail. Put at least 47 uF on card +5 V, 10 uF on card
+          +12 V, and 100 nF at every IC. Do not exceed 1000 uF per card rail
+          without checking supply startup and fuse behavior again.
+        </p>
+        <p>
+          The connector has no make-first sequence. Label the front panel
+          <q>POWER OFF BEFORE REMOVING CARD</q>. Software shutdown does not make
+          live insertion or removal safe.
+        </p>
+      </section>
+      <section id="card-rules">
+        <h2>13. Card Requirements</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Mandatory card-interface limits
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Requirement</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>IC age</td>
+              <td>
+                Every IC design was commercially available by December 31, 1993.
+                Later datasheet revisions are allowed.
+              </td>
+            </tr>
+            <tr>
+              <td>Packages</td>
+              <td>ICs are through-hole. Passives may be surface-mount.</td>
+            </tr>
+            <tr>
+              <td>Address/control</td>
+              <td>
+                No more than 20 pF and two HCT-equivalent inputs per pin. Buffer
+                more fanout locally.
+              </td>
+            </tr>
+            <tr>
+              <td>Data</td>
+              <td>
+                No more than 20 pF per pin while unselected. Three-state every
+                inactive read driver.
+              </td>
+            </tr>
+            <tr>
+              <td>Completion</td>
+              <td>
+                No more than 50 pF; open-collector sink of at least 8 mA at 0.4
+                V.
+              </td>
+            </tr>
+            <tr>
+              <td>Interrupt</td>
+              <td>Open collector; no card pull-up; no more than 50 pF.</td>
+            </tr>
+            <tr>
+              <td>Bus hold</td>
+              <td>
+                No pull resistor, bus-hold cell, or terminator on data, selects,
+                or strobes.
+              </td>
+            </tr>
+            <tr>
+              <td>Bus mastering</td>
+              <td>
+                Never drive address, select, strobe, direction, clock, or reset
+                pins.
+              </td>
+            </tr>
+            <tr>
+              <td>External power</td>
+              <td>
+                Do not back-power either card rail from a front-panel connector.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Cards may use TTL, LS, F, HC, HCT, ACT, or another period-correct 5 V
+          family when the complete interface meets these limits. Plain HC inputs
+          are not suitable for motherboard signals guaranteed high at only 2.0
+          V. HCT inputs are the default.
+        </p>
+        <p>
+          Protect external ports against cable discharge and out-of-range
+          voltage at the front panel. Do not return cable-shield current through
+          a bus ground contact when the enclosure provides chassis ground.
+        </p>
+      </section>
+      <section id="software">
+        <h2>14. Software Contract</h2>
+        <p>
+          The bus has no enumeration register. System configuration identifies
+          the card and driver in each physical slot. Probing an empty slot
+          causes a bus error, so discovery code needs a temporary bus-error
+          handler or saved configuration.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Driver-visible slot bases
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Slot</th>
+              <th scope="col">Memory</th>
+              <th scope="col">Lower-byte I/O</th>
+              <th scope="col">Upper-byte I/O</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>$400000</code></td>
+              <td><code>$EC0001</code></td>
+              <td><code>$EC0000</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>$600000</code></td>
+              <td><code>$EE0001</code></td>
+              <td><code>$EE0000</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Drivers use byte operations for 8-bit registers unless a card defines
+          the unused word byte. The shared level-3 handler polls both card
+          drivers, clears every reported cause, and polls again if
+          <code>EXP_IRQ_n</code> stays low.
+        </p>
+      </section>
+      <section id="example">
+        <h2>15. Example 8-Bit Register Card</h2>
+        <p>
+          This lower-byte read/write latch tests either slot. It responds
+          throughout the slot's I/O window, so its canonical register is
+          <code>$EC0001</code> in slot 1 or <code>$EE0001</code> in slot 2. It
+          ignores <code>MEM_SEL_n</code> and does not request interrupts.
+        </p>
+        <pre><code>D7..D0 --&gt; HCT574 register --&gt; HCT244 read driver --&gt; D7..D0
+
+IO_SEL_n + LDS_n + R_W  --&gt; write strobe --&gt; HCT574 CLK
+IO_SEL_n + LDS_n + /R_W --&gt; read enable  --&gt; HCT244 OE_n
+IO_SEL_n + LDS_n -------&gt; three-stage HCT74 delay
+                                  |
+                                  +--&gt; HCT04 --&gt; LS07 --&gt; CARD_DTACK_n</code></pre>
+        <h3>Logic equations</h3>
+        <pre><code>NOT_R_W      = NOT R_W
+EX_WRITE_n   = IO_SEL_n OR LDS_n OR R_W
+EX_READ_n    = IO_SEL_n OR LDS_n OR NOT_R_W
+EX_ACCESS_n  = IO_SEL_n OR LDS_n
+EX_ACCESS    = NOT EX_ACCESS_n
+EX_ACK_CLR_n = EX_ACCESS AND PERIPH_RESET_n
+
+stage 1 D = 1; stage 2 D = stage 1 Q; stage 3 D = stage 2 Q
+all stage clocks = EXP_CLK_10; all CLR_n inputs = EX_ACK_CLR_n
+all PRE_n inputs = 1
+CARD_DTACK_n = open-collector copy of stage 3 /Q</code></pre>
+        <p>
+          <code>U_EX_REG</code> clocks on the rising edge of
+          <code>EX_WRITE_n</code> when the selected write ends. Its data has
+          been stable throughout the write strobe. <code>U_EX_READ</code> drives
+          only while the I/O select, lower strobe, and read direction are
+          active.
+        </p>
+        <p>
+          Three flip-flops in <code>U_EX_ACK_A</code> and
+          <code>U_EX_ACK_B</code>, both <code>SN74HCT74N</code> packages, shift
+          a one down the chain. Their asynchronous clear stays low while
+          unselected or reset. The third stage allows at least two full 10 MHz
+          periods for read data before its complementary output pulls completion
+          low. Select release clears the chain and releases completion without
+          waiting for a clock.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Example-card parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_EX_REG</code></td>
+              <td>SN74HCT574N</td>
+              <td>Eight-bit write register</td>
+            </tr>
+            <tr>
+              <td><code>U_EX_READ</code></td>
+              <td>SN74HCT244N</td>
+              <td>Lower-byte read driver</td>
+            </tr>
+            <tr>
+              <td><code>U_EX_OR</code></td>
+              <td>SN74HCT32N</td>
+              <td>Access qualification</td>
+            </tr>
+            <tr>
+              <td><code>U_EX_INV</code></td>
+              <td>SN74HCT04N</td>
+              <td>Direction and access inversions</td>
+            </tr>
+            <tr>
+              <td><code>U_EX_AND</code></td>
+              <td>SN74HCT08N</td>
+              <td>Acknowledgement clear</td>
+            </tr>
+            <tr>
+              <td><code>U_EX_ACK_A</code>, <code>U_EX_ACK_B</code></td>
+              <td>2 x SN74HCT74N</td>
+              <td>Three-clock response delay</td>
+            </tr>
+            <tr>
+              <td><code>U_EX_OC</code></td>
+              <td>SN74LS07N</td>
+              <td>Open-collector completion</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Ground unused logic inputs and leave their outputs open. Fit 100 nF at
+          every IC and 47 uF across card +5 V and ground. The example does not
+          use +12 V.
+        </p>
+        <h3>Example-card package connections</h3>
+        <p>
+          On <code>U_EX_OR</code>, pins 1 and 2 receive
+          <code>IO_SEL_n</code> and <code>LDS_n</code>; pin 3 is
+          <code>EX_ACCESS_n</code>. Pins 4 and 5 receive
+          <code>EX_ACCESS_n</code> and <code>R_W</code>; pin 6 is
+          <code>EX_WRITE_n</code>. Pins 9 and 10 receive
+          <code>EX_ACCESS_n</code> and <code>NOT_R_W</code>; pin 8 is
+          <code>EX_READ_n</code>. Ground pins 12 and 13 and leave pin 11 open.
+        </p>
+        <p>
+          <code>U_EX_INV</code> uses pins 1 to 2 for <code>R_W</code> to
+          <code>NOT_R_W</code> and pins 3 to 4 for <code>EX_ACCESS_n</code> to
+          <code>EX_ACCESS</code>. <code>U_EX_AND</code> uses pins 1 and 2 for
+          <code>EX_ACCESS</code> and <code>PERIPH_RESET_n</code>; pin 3 is
+          <code>EX_ACK_CLR_n</code>. Ground every remaining input on both
+          packages.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Example acknowledgement-chain pins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Stage</th>
+              <th scope="col">Connections</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1, U_EX_ACK_A first half</td>
+              <td>
+                1CLR pin 1 to <code>EX_ACK_CLR_n</code>; 1D pin 2 and 1PRE pin 4
+                to +5 V; 1CLK pin 3 to <code>EXP_CLK_10</code>; 1Q pin 5 to
+                stage-2 D
+              </td>
+            </tr>
+            <tr>
+              <td>2, U_EX_ACK_A second half</td>
+              <td>
+                2CLR pin 13 to <code>EX_ACK_CLR_n</code>; 2D pin 12 to stage-1
+                Q; 2PRE pin 10 to +5 V; 2CLK pin 11 to <code>EXP_CLK_10</code>;
+                2Q pin 9 to stage-3 D
+              </td>
+            </tr>
+            <tr>
+              <td>3, U_EX_ACK_B first half</td>
+              <td>
+                1CLR pin 1 to <code>EX_ACK_CLR_n</code>; 1D pin 2 to stage-2 Q;
+                1PRE pin 4 to +5 V; 1CLK pin 3 to <code>EXP_CLK_10</code>; 1/Q
+                pin 6 to U_EX_OC pin 1
+              </td>
+            </tr>
+            <tr>
+              <td>Unused U_EX_ACK_B half</td>
+              <td>
+                2CLR pin 13 and 2D pin 12 to ground; 2PRE pin 10 to +5 V; 2CLK
+                pin 11 to ground; outputs open
+              </td>
+            </tr>
+            <tr>
+              <td>Open-collector output</td>
+              <td>
+                U_EX_OC pin 1 from stage-3 1/Q; pin 2 to
+                <code>CARD_DTACK_n</code>; ground unused inputs
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>U_EX_REG</code> pin 1 is grounded, pin 11 receives
+          <code>EX_WRITE_n</code>, pins 19 through 12 receive connector
+          <code>D0..D7</code>, and pins 2 through 9 produce
+          <code>REG0..REG7</code>. Connect those register outputs to
+          <code>U_EX_READ</code> in the common HCT244 channel order from section
+          16. Its two output-enable pins receive <code>EX_READ_n</code>, and its
+          outputs drive connector <code>D0..D7</code>.
+        </p>
+      </section>
+      <section id="packages">
+        <h2>16. Motherboard Package and Pin Map</h2>
+        <p>
+          References ending in 1 belong to slot 1; references ending in 2 belong
+          to slot 2. The mappings are otherwise identical.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            SN74HCT244N common channel map
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Channel</th>
+              <th scope="col">Input</th>
+              <th scope="col">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>2</td>
+              <td>18</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>4</td>
+              <td>16</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>6</td>
+              <td>14</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>8</td>
+              <td>12</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>11</td>
+              <td>9</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>13</td>
+              <td>7</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>15</td>
+              <td>5</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>17</td>
+              <td>3</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Pins 1 and 19 are grounded, pin 20 is +5 V, and pin 10 is ground.
+          Assign channels in ascending order to each package's signal list in
+          section 7. References are <code>U_EXP_ADDR_LO1</code>,
+          <code>U_EXP_ADDR_MID1</code>, <code>U_EXP_ADDR_HI1</code>,
+          <code>U_EXP_CTRL1</code>, and the matching slot-2 names.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Per-slot SN74HCT245N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">Low package</th>
+              <th scope="col">High package</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1, DIR</td>
+              <td><code>R_W</code></td>
+              <td><code>R_W</code></td>
+            </tr>
+            <tr>
+              <td>19, OE_n</td>
+              <td><code>EXPx_CYCLE_n</code></td>
+              <td><code>EXPx_CYCLE_n</code></td>
+            </tr>
+            <tr>
+              <td>2..9, A1..A8</td>
+              <td>Connector <code>D0..D7</code></td>
+              <td>Connector <code>D8..D15</code></td>
+            </tr>
+            <tr>
+              <td>18..11, B1..B8</td>
+              <td>CPU <code>D0..D7</code></td>
+              <td>CPU <code>D8..D15</code></td>
+            </tr>
+            <tr>
+              <td>20 / 10</td>
+              <td>+5 V / ground</td>
+              <td>+5 V / ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_EXP_GLUE SN74F08N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Gate</th>
+              <th scope="col">Inputs</th>
+              <th scope="col">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1: pins 1, 2 to 3</td>
+              <td><code>EXP_MEM2_n</code>, <code>IO6_n</code></td>
+              <td><code>EXP1_CYCLE_n</code></td>
+            </tr>
+            <tr>
+              <td>2: pins 4, 5 to 6</td>
+              <td><code>EXP_MEM3_n</code>, <code>IO7_n</code></td>
+              <td><code>EXP2_CYCLE_n</code></td>
+            </tr>
+            <tr>
+              <td>3: pins 9, 10 to 8</td>
+              <td>
+                <code>EXP1_CARD_DTACK_n</code>, <code>EXP2_CARD_DTACK_n</code>
+              </td>
+              <td><code>EXP_DTACK_n</code></td>
+            </tr>
+            <tr>
+              <td>4: pins 12, 13 to 11</td>
+              <td>Ground both</td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>Power</td>
+              <td>Pin 14 to +5 V</td>
+              <td>Pin 7 to ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_EXP_CLK_PHASE SN74F04N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1 to 2</td>
+              <td><code>U_CPU_CLK</code> pin 8 to <code>EXP_CLK_ROOT</code></td>
+            </tr>
+            <tr>
+              <td>3, 5, 9, 11, 13</td>
+              <td>Ground unused inputs</td>
+            </tr>
+            <tr>
+              <td>4, 6, 8, 10, 12</td>
+              <td>Leave outputs open</td>
+            </tr>
+            <tr>
+              <td>14 / 7</td>
+              <td>+5 V / ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Give every logic package 100 nF and 1 uF between its supply pins. Put
+          the 100 nF part beside the package.
+        </p>
+      </section>
+      <section id="timing">
+        <h2>17. Timing and Electrical Checks</h2>
+        <h3>Outgoing and data paths</h3>
+        <p>
+          At 4.5 V and 50 pF, the SN74HCT244 has 42 ns maximum propagation delay
+          over the chosen temperature range. The card's 20 pF limit leaves 30 pF
+          for connector, resistor, trace, socket, and probe. Under the same
+          conditions, the commercial SN74HCT245 has 28 ns maximum data delay and
+          58 ns maximum enable time. A card includes that delay and places read
+          data before it asserts completion.
+        </p>
+        <h3>Completion assertion</h3>
+        <p>
+          Assertion is a falling edge at every node, so each stage uses its
+          high-to-low maximum.
+        </p>
+        <pre><code>U_EXP_GLUE F08, tPHL                 6.3 ns
+two F21 completion levels, tPHL     11.0 ns
+F32 timeout mask, tPHL               6.3 ns
+component subtotal                  23.6 ns</code></pre>
+        <p>
+          This excludes card, connector, and trace delay. A synchronous card
+          asserts after its data is stable and holds both through the
+          processor's terminating edge.
+        </p>
+        <h3>Completion release</h3>
+        <p>
+          With 50 pF card load, another 50 pF for the connector path and probe,
+          a 1.05 kohm maximum pull-up, and a 4.75 V rail, an ideal RC node
+          reaches the FAST 2.0 V threshold in 57.4 ns:
+        </p>
+        <pre><code>t = -1050 ohms * 100 pF * ln(1 - 2.0 / 4.75) = 57.4 ns</code></pre>
+        <p>
+          Release is a rising edge at every node, so each stage uses its
+          low-to-high maximum: 6.6 ns through the F08, 10.6 ns through two F21
+          levels, and 6.6 ns through the F32. The 81.2 ns total leaves 28.8 ns
+          for board delay against the CPU's 110 ns completion-release limit. If
+          measurement misses the limit, reduce capacitance or lower the pull-up
+          after checking card sink current.
+        </p>
+        <pre><code>RC to the 2.0 V FAST threshold      57.4 ns
+U_EXP_GLUE F08, tPLH                 6.6 ns
+two F21 completion levels, tPLH     10.6 ns
+F32 timeout mask, tPLH               6.6 ns
+------------------------------------------------
+component total                     81.2 ns
+MC68EC000 limit                    110.0 ns
+board allowance                     28.8 ns</code></pre>
+        <h3>DC levels</h3>
+        <p>
+          Two slot-buffer inputs add at most 2 uA DC load to each CPU signal. At
+          4.5 V, an HCT244 guarantees at least 3.84 V while sourcing 6 mA and no
+          more than 0.33 V while sinking 6 mA. Margins to the card's 2.0 V and
+          0.8 V thresholds are 1.84 V high and 0.47 V low before interconnect
+          drop.
+        </p>
+      </section>
+      <section id="parts">
+        <h2>18. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Motherboard expansion-interface parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Qty</th>
+              <th scope="col">Part</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>8</td>
+              <td>SN74HCT244N</td>
+              <td>Address and control buffering</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>SN74HCT245N</td>
+              <td>Two 16-bit data paths</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74F08N</td>
+              <td>Enables and completion combination</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74F04N</td>
+              <td>Expansion-clock root</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>HARTING 09 03 296 2824</td>
+              <td>DIN receptacles</td>
+            </tr>
+            <tr>
+              <td>2 each</td>
+              <td>RXEF250 and RXEF110</td>
+              <td>Slot rail protection</td>
+            </tr>
+            <tr>
+              <td>62</td>
+              <td>33 ohm, 5 percent</td>
+              <td>Series damping</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>1 kohm, 5 percent, 0.125 W</td>
+              <td>Completion pull-ups</td>
+            </tr>
+            <tr>
+              <td>14 each</td>
+              <td>100 nF and 1 uF ceramic</td>
+              <td>Logic decoupling</td>
+            </tr>
+            <tr>
+              <td>2 each</td>
+              <td>100 uF / 10 V and 47 uF / 25 V</td>
+              <td>Slot bulk capacitance</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>100 nF ceramic</td>
+              <td>Post-fuse rail bypass</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every listed IC design predates 1994. HCT logic was established in the
+          1980s; the HCT245 and HCT574 documents date their designs to 1984,
+          HCT32 to 1988, and LS07 to no later than 1990. The FAST family appears
+          in the 1980 Fairchild data book. Later datasheet revisions do not
+          change the period rule.
+        </p>
+      </section>
+      <section id="layout">
+        <h2>19. Board Layout</h2>
+        <ul>
+          <li>
+            Place each slot's buffers behind its connector and every 33 ohm
+            resistor at its driver.
+          </li>
+          <li>
+            Join row-b contacts to a ground plane with short vias; use wide
+            pours for power and ground.
+          </li>
+          <li>
+            Record routed completion capacitance and delay, then repeat the 110
+            ns release check with a probe.
+          </li>
+          <li>
+            Model guides, ejectors, reaction ledges, captive fasteners, and
+            connector alignment before fixing motherboard holes.
+          </li>
+        </ul>
+      </section>
+      <section id="acceptance">
+        <h2>20. Assembled-System Acceptance</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Expansion-interface acceptance checks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Required result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Insertion</td>
+              <td>
+                Cards seat evenly and cannot mate one row or position off.
+              </td>
+            </tr>
+            <tr>
+              <td>Retention</td>
+              <td>Front controls and cables do not move a retained card.</td>
+            </tr>
+            <tr>
+              <td>Power</td>
+              <td>
+                Maximum card load stays in every device's supply range; a slot
+                short trips its own fuse.
+              </td>
+            </tr>
+            <tr>
+              <td>Address isolation</td>
+              <td>
+                Each slot responds only in its assigned windows; reserved ranges
+                bus-error.
+              </td>
+            </tr>
+            <tr>
+              <td>Byte lanes</td>
+              <td>
+                Upper, lower, and word tests show no drive on unrequested lanes.
+              </td>
+            </tr>
+            <tr>
+              <td>Empty slot</td>
+              <td>Access ends in a timeout bus error without contention.</td>
+            </tr>
+            <tr>
+              <td>Completion</td>
+              <td>
+                Read data precedes assertion; release reaches CPU
+                <code>/DTACK</code> high within 110 ns.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock and reset</td>
+              <td>
+                Both connectors receive a clean 10 MHz clock and every defined
+                reset pulse.
+              </td>
+            </tr>
+            <tr>
+              <td>Interrupt</td>
+              <td>
+                Either or both cards request level 3; the line releases after
+                every cause clears.
+              </td>
+            </tr>
+            <tr>
+              <td>Cross-slot isolation</td>
+              <td>
+                One card causes no false select, data drive, completion, or
+                interrupt in the other.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="signal-reference">
+        <h2>21. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Expansion-interface internal signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Consumer</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>EXP1_CYCLE_n</code></td>
+              <td>F08 gate 1</td>
+              <td>Slot-1 transceiver enables</td>
+            </tr>
+            <tr>
+              <td><code>EXP2_CYCLE_n</code></td>
+              <td>F08 gate 2</td>
+              <td>Slot-2 transceiver enables</td>
+            </tr>
+            <tr>
+              <td><code>EXP1_CARD_DTACK_n</code></td>
+              <td>J_EXP1 c25 and pull-up</td>
+              <td>F08 gate 3</td>
+            </tr>
+            <tr>
+              <td><code>EXP2_CARD_DTACK_n</code></td>
+              <td>J_EXP2 c25 and pull-up</td>
+              <td>F08 gate 3</td>
+            </tr>
+            <tr>
+              <td><code>EXP_DTACK_n</code></td>
+              <td>F08 gate 3</td>
+              <td><code>U_DTACK_B</code> gate 1</td>
+            </tr>
+            <tr>
+              <td><code>EXP_CLK_ROOT</code></td>
+              <td>F04 gate 1</td>
+              <td>Both slot control buffers</td>
+            </tr>
+            <tr>
+              <td><code>EXP_CLK_10</code></td>
+              <td>One slot control buffer</td>
+              <td>One connector</td>
+            </tr>
+            <tr>
+              <td><code>EXP_IRQ_n</code></td>
+              <td>Both cards and 4.7 kohm pull-up</td>
+              <td>Level-3 encoder input</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+      <section id="sources">
+        <h2>22. Sources</h2>
+        <ul>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >, bus cycles, byte strobes, timing, reset, and interrupts.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hct244.pdf"><cite>SN74HCT244</cite></a> and
+            <a href="datasheets/sn74hct245.pdf"><cite>SN74HCT245</cite></a
+            >, buffering and transceiver limits.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74f08.pdf"><cite>SN74F08</cite></a
+            >, <a href="datasheets/sn74f04.pdf"><cite>SN74F04</cite></a
+            >, and <a href="datasheets/sn74ls07.pdf"><cite>SN74LS07</cite></a
+            >, glue and open-collector timing.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hct32.pdf"><cite>SN74HCT32</cite></a
+            >, <a href="datasheets/sn74hct08.pdf"><cite>SN74HCT08</cite></a
+            >, <a href="datasheets/sn54hct04.pdf"><cite>SN74HCT04</cite></a
+            >, <a href="datasheets/sn74hct574.pdf"><cite>SN74HCT574</cite></a
+            >, and <a href="datasheets/sn74hct74.pdf"><cite>SN74HCT74</cite></a
+            >, example-card logic.
+          </li>
+          <li>
+            HARTING,
+            <a
+              href="https://www.harting.com/en-US/p/DIN-Signal-C096MS-30C1-1-09031962921"
+              ><cite>DIN-Signal C096MS-3,0C1-1</cite></a
+            >
+            and the
+            <a
+              href="https://b2b.harting.com/files/livebooks/en/PRD0200000100063/downloads/livebook.pdf"
+              ><cite>DIN 41612 Type C catalog</cite></a
+            >.
+          </li>
+          <li>
+            Littelfuse,
+            <a
+              href="https://www.littelfuse.com/assetdocs/littelfuse_ptc_radial_leaded_rxef_datasheet?assetguid=e9a7b6b3-79ce-478c-a39a-0a70ee48ccec"
+              ><cite>RXEF Series Radial Leaded PPTC Datasheet</cite></a
+            >, current ratings and temperature derating.
+          </li>
+          <li>
+            The project <a href="memory-map.html">Memory Map</a>,
+            <a href="bus-and-decode.html">Bus and Address Decode</a>,
+            <a href="interrupts.html">Interrupts</a>, and
+            <a href="clock-and-reset.html">Clock and Reset</a> documents define
+            the matching interfaces.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

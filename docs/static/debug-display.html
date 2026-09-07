@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Debug Display, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Debug Display</h1>
+      <p>
+        Motherboard hexadecimal display logic for the stored debug byte.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; brightness and package temperature
+          remain assembled-board checks
+        </dd>
+        <dt>Decoder</dt>
+        <dd>Two ATF16V8BQL-15PU devices, static, no display multiplexing</dd>
+        <dt>Displays</dt>
+        <dd>
+          Two Kingbright SA56-11EWA 0.56 inch red common-anode seven-segment
+          digits
+        </dd>
+        <dt>Source register</dt>
+        <dd>
+          <code>U_DEBUG</code>, written through <code>SYSREG1 / DEBUG</code> at
+          <code>$E80003</code>
+        </dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#input">Input</a></li>
+        <li><a href="#decoder-selection">Decoder Selection</a></li>
+        <li>
+          <a href="#display-and-segment-naming">Display and Segment Naming</a>
+        </li>
+        <li><a href="#hexadecimal-truth-table">Hexadecimal Truth Table</a></li>
+        <li><a href="#gal-logic">GAL Logic</a></li>
+        <li><a href="#gal-connections">GAL Connections</a></li>
+        <li><a href="#display-connections">Display Connections</a></li>
+        <li><a href="#segment-current">Segment Current</a></li>
+        <li>
+          <a href="#reset-and-power-on-behavior">Reset and Power-On Behavior</a>
+        </li>
+        <li><a href="#fanout">Fanout</a></li>
+        <li><a href="#timing">Timing</a></li>
+        <li>
+          <a href="#decoupling-and-placement">Decoupling and Placement</a>
+        </li>
+        <li><a href="#parts-added">Parts Added</a></li>
+        <li>
+          <a href="#assembled-board-acceptance-check"
+            >Assembled-System Acceptance</a
+          >
+        </li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+    <main>
+      <section id="input">
+        <h2>1. Input</h2>
+        <p>
+          The display receives <code>DEBUG_Q7..DEBUG_Q0</code> from
+          <code>U_DEBUG</code>. The latch and qualified write timing are defined
+          in <a href="bus-and-decode.html">Bus and Decode</a>. The debug
+          register is described in
+          <a href="system-control.html">System Control</a>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Nibble to digit mapping
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Display</th>
+              <th scope="col">Nibble</th>
+              <th scope="col">GAL inputs</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Left digit</th>
+              <td><code>DEBUG_Q7..DEBUG_Q4</code></td>
+              <td>
+                <code>N3=DEBUG_Q7</code>, <code>N2=DEBUG_Q6</code>,
+                <code>N1=DEBUG_Q5</code>,
+                <code>N0=DEBUG_Q4</code>
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">Right digit</th>
+              <td><code>DEBUG_Q3..DEBUG_Q0</code></td>
+              <td>
+                <code>N3=DEBUG_Q3</code>, <code>N2=DEBUG_Q2</code>,
+                <code>N1=DEBUG_Q1</code>,
+                <code>N0=DEBUG_Q0</code>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Each nibble displays one hexadecimal digit. The glyph set includes
+          <code>0</code> through <code>9</code> and <code>A</code> through
+          <code>F</code>.
+        </p>
+      </section>
+
+      <section id="decoder-selection">
+        <h2>2. Decoder Selection</h2>
+        <p>
+          Two <code>ATF16V8BQL-15PU</code> programmable logic devices implement
+          the hexadecimal decoders. <code>U_HEX_LEFT</code> handles the upper
+          nibble. <code>U_HEX_RIGHT</code> handles the lower nibble. Both
+          devices use the same programmed logic image.
+        </p>
+        <p>
+          The decoder is static. It does not multiplex the displays and does not
+          require a scan clock. Each GAL produces seven active-low segment
+          outputs. The outputs directly sink the display segment current.
+        </p>
+        <p>
+          The display is the one place on the board where an SPLD replaces
+          discrete 74-series decode gates: sixteen glyphs across seven segments
+          costs far more gates than it saves. The system-register decode, write
+          qualification, and the <code>U_DEBUG</code> latch are all discrete
+          logic, described in
+          <a href="bus-and-decode.html">Bus and Address Decode</a>.
+        </p>
+        <pre><code>DEBUG_Q7..DEBUG_Q4 -&gt; U_HEX_LEFT  -&gt; seven 680 ohm resistors -&gt; left digit
+DEBUG_Q3..DEBUG_Q0 -&gt; U_HEX_RIGHT -&gt; seven 680 ohm resistors -&gt; right digit</code></pre>
+      </section>
+
+      <section id="display-and-segment-naming">
+        <h2>3. Display and Segment Naming</h2>
+        <p>
+          <code>DS_DEBUG_LEFT</code> and <code>DS_DEBUG_RIGHT</code> are
+          Kingbright <code>SA56-11EWA</code> 0.56 inch high-efficiency red
+          common-anode displays. Both common-anode pins connect to +5 V. The
+          decimal point is unused.
+        </p>
+        <pre><code>  -- a --
+ |       |
+ f       b
+ |       |
+  -- g --
+ |       |
+ e       c
+ |       |
+  -- d --</code></pre>
+        <p>
+          Segment outputs use the names <code>SEG_A_n</code> through
+          <code>SEG_G_n</code>. A low output lights the corresponding segment.
+        </p>
+      </section>
+
+      <section id="hexadecimal-truth-table">
+        <h2>4. Hexadecimal Truth Table</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Nibble to seven-segment pattern
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Value</th>
+              <th scope="col">Segments lit</th>
+              <th scope="col">Glyph</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">0</th>
+              <td>a b c d e f</td>
+              <td>0</td>
+            </tr>
+            <tr>
+              <th scope="row">1</th>
+              <td>b c</td>
+              <td>1</td>
+            </tr>
+            <tr>
+              <th scope="row">2</th>
+              <td>a b d e g</td>
+              <td>2</td>
+            </tr>
+            <tr>
+              <th scope="row">3</th>
+              <td>a b c d g</td>
+              <td>3</td>
+            </tr>
+            <tr>
+              <th scope="row">4</th>
+              <td>b c f g</td>
+              <td>4</td>
+            </tr>
+            <tr>
+              <th scope="row">5</th>
+              <td>a c d f g</td>
+              <td>5</td>
+            </tr>
+            <tr>
+              <th scope="row">6</th>
+              <td>a c d e f g</td>
+              <td>6</td>
+            </tr>
+            <tr>
+              <th scope="row">7</th>
+              <td>a b c</td>
+              <td>7</td>
+            </tr>
+            <tr>
+              <th scope="row">8</th>
+              <td>a b c d e f g</td>
+              <td>8</td>
+            </tr>
+            <tr>
+              <th scope="row">9</th>
+              <td>a b c d f g</td>
+              <td>9</td>
+            </tr>
+            <tr>
+              <th scope="row">A</th>
+              <td>a b c e f g</td>
+              <td>A</td>
+            </tr>
+            <tr>
+              <th scope="row">B</th>
+              <td>c d e f g</td>
+              <td>b</td>
+            </tr>
+            <tr>
+              <th scope="row">C</th>
+              <td>a d e f</td>
+              <td>C</td>
+            </tr>
+            <tr>
+              <th scope="row">D</th>
+              <td>b c d e g</td>
+              <td>d</td>
+            </tr>
+            <tr>
+              <th scope="row">E</th>
+              <td>a d e f g</td>
+              <td>E</td>
+            </tr>
+            <tr>
+              <th scope="row">F</th>
+              <td>a e f g</td>
+              <td>F</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Lowercase-looking <code>b</code> and <code>d</code> distinguish the
+          seven-segment forms from <code>8</code> and <code>0</code>.
+        </p>
+      </section>
+
+      <section id="gal-logic">
+        <h2>5. GAL Logic</h2>
+        <p>
+          The GALs operate in simple combinational mode. The equations below
+          list the nibble values for which each active-low segment output is
+          high, which means that segment is off.
+        </p>
+        <pre><code>SEG_A_n = 1 for 1, 4, B, D
+SEG_B_n = 1 for 5, 6, B, C, E, F
+SEG_C_n = 1 for 2, C, E, F
+SEG_D_n = 1 for 1, 4, 7, A, F
+SEG_E_n = 1 for 1, 3, 4, 5, 7, 9
+SEG_F_n = 1 for 1, 2, 3, 7, D
+SEG_G_n = 1 for 0, 1, 7, C</code></pre>
+        <p>
+          The widest output, <code>SEG_E_n</code>, needs six canonical product
+          terms. Simple mode gives every output eight, so no minimization is
+          required to fit. Seven of the eight macrocells drive segments; the
+          eighth is pin 19, described below.
+        </p>
+        <p>
+          The pin and equation body in CUPL form follows. Add the standard
+          header and <code>DEVICE g16v8;</code> to compile it to the JEDEC image
+          used for both devices. Every output is combinational and none needs
+          output-enable control, so the fitter selects simple mode, in which
+          pins 15 and 16 are permanently enabled outputs. <code>N0</code> is the
+          least significant nibble bit. Each output is the sum of the minterms
+          that switch its segment off; every other nibble value lights the
+          segment. The listing is canonical, so the fitter minimizes it before
+          programming.
+        </p>
+        <pre><code>PIN  2 = N0 ;   PIN  3 = N1 ;   PIN  4 = N2 ;   PIN  5 = N3 ;
+
+PIN 18 = SEG_A_n ;
+PIN 17 = SEG_B_n ;
+PIN 16 = SEG_C_n ;
+PIN 15 = SEG_D_n ;
+PIN 14 = SEG_E_n ;
+PIN 13 = SEG_F_n ;
+PIN 12 = SEG_G_n ;
+PIN 19 = SPARE ;
+
+SEG_A_n = (!N3 &amp; !N2 &amp; !N1 &amp;  N0)    /* 1 */
+        # (!N3 &amp;  N2 &amp; !N1 &amp; !N0)    /* 4 */
+        # ( N3 &amp; !N2 &amp;  N1 &amp;  N0)    /* B */
+        # ( N3 &amp;  N2 &amp; !N1 &amp;  N0) ;  /* D */
+
+SEG_B_n = (!N3 &amp;  N2 &amp; !N1 &amp;  N0)    /* 5 */
+        # (!N3 &amp;  N2 &amp;  N1 &amp; !N0)    /* 6 */
+        # ( N3 &amp; !N2 &amp;  N1 &amp;  N0)    /* B */
+        # ( N3 &amp;  N2 &amp; !N1 &amp; !N0)    /* C */
+        # ( N3 &amp;  N2 &amp;  N1 &amp; !N0)    /* E */
+        # ( N3 &amp;  N2 &amp;  N1 &amp;  N0) ;  /* F */
+
+SEG_C_n = (!N3 &amp; !N2 &amp;  N1 &amp; !N0)    /* 2 */
+        # ( N3 &amp;  N2 &amp; !N1 &amp; !N0)    /* C */
+        # ( N3 &amp;  N2 &amp;  N1 &amp; !N0)    /* E */
+        # ( N3 &amp;  N2 &amp;  N1 &amp;  N0) ;  /* F */
+
+SEG_D_n = (!N3 &amp; !N2 &amp; !N1 &amp;  N0)    /* 1 */
+        # (!N3 &amp;  N2 &amp; !N1 &amp; !N0)    /* 4 */
+        # (!N3 &amp;  N2 &amp;  N1 &amp;  N0)    /* 7 */
+        # ( N3 &amp; !N2 &amp;  N1 &amp; !N0)    /* A */
+        # ( N3 &amp;  N2 &amp;  N1 &amp;  N0) ;  /* F */
+
+SEG_E_n = (!N3 &amp; !N2 &amp; !N1 &amp;  N0)    /* 1 */
+        # (!N3 &amp; !N2 &amp;  N1 &amp;  N0)    /* 3 */
+        # (!N3 &amp;  N2 &amp; !N1 &amp; !N0)    /* 4 */
+        # (!N3 &amp;  N2 &amp; !N1 &amp;  N0)    /* 5 */
+        # (!N3 &amp;  N2 &amp;  N1 &amp;  N0)    /* 7 */
+        # ( N3 &amp; !N2 &amp; !N1 &amp;  N0) ;  /* 9 */
+
+SEG_F_n = (!N3 &amp; !N2 &amp; !N1 &amp;  N0)    /* 1 */
+        # (!N3 &amp; !N2 &amp;  N1 &amp; !N0)    /* 2 */
+        # (!N3 &amp; !N2 &amp;  N1 &amp;  N0)    /* 3 */
+        # (!N3 &amp;  N2 &amp;  N1 &amp;  N0)    /* 7 */
+        # ( N3 &amp;  N2 &amp; !N1 &amp;  N0) ;  /* D */
+
+SEG_G_n = (!N3 &amp; !N2 &amp; !N1 &amp; !N0)    /* 0 */
+        # (!N3 &amp; !N2 &amp; !N1 &amp;  N0)    /* 1 */
+        # (!N3 &amp;  N2 &amp;  N1 &amp;  N0)    /* 7 */
+        # ( N3 &amp;  N2 &amp; !N1 &amp; !N0) ;  /* C */
+
+SPARE = 'b'1 ;</code></pre>
+        <p>
+          Pins 1 and 11 are tied low and unused. <code>SPARE</code> on pin 19 is
+          a constant-high output left unconnected.
+        </p>
+      </section>
+
+      <section id="gal-connections">
+        <h2>6. GAL Connections</h2>
+        <p>
+          The table applies to both <code>U_HEX_LEFT</code> and
+          <code>U_HEX_RIGHT</code>. Pins 2 through 5 carry the local nibble.
+          Unused dedicated inputs are tied low. Pin 19 is left unconnected and
+          is programmed as a constant-high unused output.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            ATF16V8BQL-15PU pin assignment
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Device pin</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">1</th>
+              <td>I/CLK</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">2</th>
+              <td>I1</td>
+              <td><code>N0</code></td>
+            </tr>
+            <tr>
+              <th scope="row">3</th>
+              <td>I2</td>
+              <td><code>N1</code></td>
+            </tr>
+            <tr>
+              <th scope="row">4</th>
+              <td>I3</td>
+              <td><code>N2</code></td>
+            </tr>
+            <tr>
+              <th scope="row">5</th>
+              <td>I4</td>
+              <td><code>N3</code></td>
+            </tr>
+            <tr>
+              <th scope="row">6</th>
+              <td>I5</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">7</th>
+              <td>I6</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">8</th>
+              <td>I7</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">9</th>
+              <td>I8</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">10</th>
+              <td>GND</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">11</th>
+              <td>I9/OE</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <th scope="row">12</th>
+              <td>I/O</td>
+              <td><code>SEG_G_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">13</th>
+              <td>I/O</td>
+              <td><code>SEG_F_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">14</th>
+              <td>I/O</td>
+              <td><code>SEG_E_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">15</th>
+              <td>I/O</td>
+              <td><code>SEG_D_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">16</th>
+              <td>I/O</td>
+              <td><code>SEG_C_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">17</th>
+              <td>I/O</td>
+              <td><code>SEG_B_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">18</th>
+              <td>I/O</td>
+              <td><code>SEG_A_n</code></td>
+            </tr>
+            <tr>
+              <th scope="row">19</th>
+              <td>I/O</td>
+              <td>NC; program as constant high</td>
+            </tr>
+            <tr>
+              <th scope="row">20</th>
+              <td>VCC</td>
+              <td>+5 V</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="display-connections">
+        <h2>7. Display Connections</h2>
+        <p>
+          One 680 ohm resistor is placed in series with each segment cathode.
+          The same connection table applies to both displays.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            SA56-11EWA connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Display pin</th>
+              <th scope="col">Function</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">1</th>
+              <td>e</td>
+              <td><code>SEG_E_n</code> through 680 ohm</td>
+            </tr>
+            <tr>
+              <th scope="row">2</th>
+              <td>d</td>
+              <td><code>SEG_D_n</code> through 680 ohm</td>
+            </tr>
+            <tr>
+              <th scope="row">3</th>
+              <td>Common anode</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <th scope="row">4</th>
+              <td>c</td>
+              <td><code>SEG_C_n</code> through 680 ohm</td>
+            </tr>
+            <tr>
+              <th scope="row">5</th>
+              <td>Decimal point</td>
+              <td>NC</td>
+            </tr>
+            <tr>
+              <th scope="row">6</th>
+              <td>b</td>
+              <td><code>SEG_B_n</code> through 680 ohm</td>
+            </tr>
+            <tr>
+              <th scope="row">7</th>
+              <td>a</td>
+              <td><code>SEG_A_n</code> through 680 ohm</td>
+            </tr>
+            <tr>
+              <th scope="row">8</th>
+              <td>Common anode</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <th scope="row">9</th>
+              <td>f</td>
+              <td><code>SEG_F_n</code> through 680 ohm</td>
+            </tr>
+            <tr>
+              <th scope="row">10</th>
+              <td>g</td>
+              <td><code>SEG_G_n</code> through 680 ohm</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Segment resistor designators
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Segment</th>
+              <th scope="col">Left resistor</th>
+              <th scope="col">Right resistor</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">a</th>
+              <td><code>R_DEBUG_LA</code></td>
+              <td><code>R_DEBUG_RA</code></td>
+            </tr>
+            <tr>
+              <th scope="row">b</th>
+              <td><code>R_DEBUG_LB</code></td>
+              <td><code>R_DEBUG_RB</code></td>
+            </tr>
+            <tr>
+              <th scope="row">c</th>
+              <td><code>R_DEBUG_LC</code></td>
+              <td><code>R_DEBUG_RC</code></td>
+            </tr>
+            <tr>
+              <th scope="row">d</th>
+              <td><code>R_DEBUG_LD</code></td>
+              <td><code>R_DEBUG_RD</code></td>
+            </tr>
+            <tr>
+              <th scope="row">e</th>
+              <td><code>R_DEBUG_LE</code></td>
+              <td><code>R_DEBUG_RE</code></td>
+            </tr>
+            <tr>
+              <th scope="row">f</th>
+              <td><code>R_DEBUG_LF</code></td>
+              <td><code>R_DEBUG_RF</code></td>
+            </tr>
+            <tr>
+              <th scope="row">g</th>
+              <td><code>R_DEBUG_LG</code></td>
+              <td><code>R_DEBUG_RG</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="segment-current">
+        <h2>8. Segment Current</h2>
+        <p>
+          The motherboard supply is 5 V +/-5%, or 4.75 V to 5.25 V. The
+          SA56-11EWA data sheet gives a typical segment forward voltage of 1.9 V
+          and a maximum of 2.3 V at 10 mA. The ATF16V8BQL data sheet guarantees
+          <code>VOL &lt;= 0.5 V</code> at <code>IOL = 24 mA</code> with minimum
+          VCC.
+        </p>
+        <pre><code>R_seg = (VCC - Vf_segment - VOL) / I_segment
+
+Using R_seg = 680 ohm:
+
+I_segment = (5.00 V - 1.90 V - 0.50 V) / 680 ohm
+          = 3.82 mA</code></pre>
+        <p>A low-supply, high-forward-voltage calculation gives:</p>
+        <pre><code>I_segment = (4.75 V - 2.30 V - 0.50 V) / 680 ohm
+          = 2.87 mA</code></pre>
+        <p>
+          The display data sheet does not specify a minimum forward voltage. A
+          precise worst-case maximum LED current cannot be calculated from that
+          data. A resistor-only upper bound can still be calculated by assuming
+          zero LED and driver voltage drop. With a 1% low 680 ohm resistor:
+        </p>
+        <pre><code>R_min = 680 ohm * 0.99
+      = 673.2 ohm
+
+I_segment &lt; 5.25 V / 673.2 ohm
+          &lt; 7.80 mA</code></pre>
+        <p>
+          This bound remains below the GAL output test current of 24 mA. The
+          expected operating current is about 3 to 4 mA per lit segment.
+          Brightness remains an assembled-board check because the display data
+          sheet specifies luminous intensity at 10 mA.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Segment current values
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">VCC nominal</th>
+              <td>5.00 V</td>
+            </tr>
+            <tr>
+              <th scope="row">VCC range</th>
+              <td>4.75 V to 5.25 V</td>
+            </tr>
+            <tr>
+              <th scope="row">Display Vf typical at 10 mA</th>
+              <td>1.9 V</td>
+            </tr>
+            <tr>
+              <th scope="row">Display Vf maximum at 10 mA</th>
+              <td>2.3 V</td>
+            </tr>
+            <tr>
+              <th scope="row">GAL VOL maximum at IOL = 24 mA</th>
+              <td>0.5 V</td>
+            </tr>
+            <tr>
+              <th scope="row">Segment resistor</th>
+              <td>680 ohm, 1%</td>
+            </tr>
+            <tr>
+              <th scope="row">Nominal calculated segment current</th>
+              <td>3.82 mA</td>
+            </tr>
+            <tr>
+              <th scope="row">Low-VCC, high-Vf calculation</th>
+              <td>2.87 mA</td>
+            </tr>
+            <tr>
+              <th scope="row">Resistor-only upper bound</th>
+              <td>&lt; 7.80 mA</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Displaying <code>88</code> lights all fourteen segments. At the
+          nominal calculation above, the LED load is about 53.5 mA.
+        </p>
+        <pre><code>I_88 = 14 * 3.82 mA
+     = 53.5 mA</code></pre>
+        <p>
+          The resistor-only upper bound for all fourteen segments is 109.2 mA.
+          The ATF16V8BQL-15 standby supply current is 15 mA maximum per device
+          with the outputs open. Reserving both GAL supply-current maxima plus
+          the resistor-only LED-current bound gives a conservative debug-display
+          +5 V allocation below 139.2 mA.
+        </p>
+        <p>
+          The GAL data sheet specifies individual output loading but does not
+          provide a separate guaranteed simultaneous package-wide sink-current
+          rating for this use. Confirm the <code>88</code> condition on the
+          assembled board and check device temperature and the +5 V rail.
+        </p>
+      </section>
+
+      <section id="reset-and-power-on-behavior">
+        <h2>9. Reset and Power-On Behavior</h2>
+        <p>
+          No display blanking is fitted. <code>U_DEBUG</code> has no reset and
+          its stored value is indeterminate at power-on. The GALs decode that
+          value immediately, so the two displays show an indeterminate
+          hexadecimal value until firmware writes <code>$E80003</code>.
+        </p>
+        <p>
+          Reset-only blanking would hide the value only while reset is asserted.
+          It would not initialize <code>U_DEBUG</code>. The design therefore
+          leaves the display active and requires firmware to write a known debug
+          value during initialization.
+        </p>
+      </section>
+
+      <section id="fanout">
+        <h2>10. Fanout</h2>
+        <p>
+          Each <code>DEBUG_Qx</code> output drives one ATF16V8BQL input and an
+          optional passive test pad. No display signal is shared between the two
+          GALs.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            DEBUG_Q fanout budget
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Loads per DEBUG_Q output</th>
+              <td>1 GAL input</td>
+            </tr>
+            <tr>
+              <th scope="row">ATF16V8BQL CIN</th>
+              <td>8 pF maximum</td>
+            </tr>
+            <tr>
+              <th scope="row">ATF16V8BQL IIH</th>
+              <td>10 uA maximum</td>
+            </tr>
+            <tr>
+              <th scope="row">ATF16V8BQL IIL magnitude</th>
+              <td>100 uA maximum</td>
+            </tr>
+            <tr>
+              <th scope="row">SN74HCT574 output drive</th>
+              <td>+/-6 mA at 5 V</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The static input current is well below the <code>SN74HCT574</code>
+          output rating. No buffer is required. PCB routing and a passive test
+          pad add capacitance but do not create a DC fanout problem.
+        </p>
+      </section>
+
+      <section id="timing">
+        <h2>11. Timing</h2>
+        <p>
+          The <code>ATF16V8BQL-15</code> input-to-combinational-output
+          propagation delay is 15 ns maximum. A debug-register write can change
+          several latch outputs at once, so an intermediate segment pattern may
+          exist while the GAL settles. The transition is too short to be visible
+          and does not affect the stored value.
+        </p>
+        <p>
+          The display has no refresh oscillator and no periodic switching after
+          the debug byte becomes stable.
+        </p>
+      </section>
+
+      <section id="decoupling-and-placement">
+        <h2>12. Decoupling and Placement</h2>
+        <p>
+          Place one 100 nF capacitor and one 1 uF capacitor in parallel between
+          VCC and GND at <code>U_HEX_LEFT</code>. Place another 100 nF and 1 uF
+          pair at <code>U_HEX_RIGHT</code>. Keep each pair close to the package.
+        </p>
+        <p>
+          Place <code>DS_DEBUG_LEFT</code> and <code>DS_DEBUG_RIGHT</code> next
+          to each other at a visible motherboard edge. Place the upper-nibble
+          digit on the left. Mark the pair <code>DEBUG HI LO</code> on the
+          silkscreen.
+        </p>
+      </section>
+
+      <section id="parts-added">
+        <h2>13. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Debug display parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Quantity</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">
+                <code>U_HEX_LEFT</code>, <code>U_HEX_RIGHT</code>
+              </th>
+              <td>ATF16V8BQL-15PU</td>
+              <td>2</td>
+              <td>Hexadecimal segment decoder and segment sink</td>
+            </tr>
+            <tr>
+              <th scope="row">
+                <code>DS_DEBUG_LEFT</code>, <code>DS_DEBUG_RIGHT</code>
+              </th>
+              <td>Kingbright SA56-11EWA</td>
+              <td>2</td>
+              <td>0.56 inch red common-anode display</td>
+            </tr>
+            <tr>
+              <th scope="row">
+                <code>R_DEBUG_LA..LG</code>, <code>R_DEBUG_RA..RG</code>
+              </th>
+              <td>680 ohm, 1%</td>
+              <td>14</td>
+              <td>Segment current limiting</td>
+            </tr>
+            <tr>
+              <th scope="row">Local bypass capacitors</th>
+              <td>100 nF</td>
+              <td>2</td>
+              <td>One per GAL</td>
+            </tr>
+            <tr>
+              <th scope="row">Local bulk capacitors</th>
+              <td>1 uF</td>
+              <td>2</td>
+              <td>One per GAL</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="assembled-board-acceptance-check">
+        <h2>14. Assembled-System Acceptance</h2>
+        <ol>
+          <li>
+            Program <code>U_HEX_LEFT</code> and <code>U_HEX_RIGHT</code> with
+            the same verified JEDEC image.
+          </li>
+          <li>
+            Write <code>$5A</code> to <code>$E80003</code>. Confirm that the
+            display reads <code>5A</code>.
+          </li>
+          <li>
+            Write <code>$00</code> through <code>$0F</code>. Confirm the right
+            digit walks through <code>0 1 2 3 4 5 6 7 8 9 A b C d E F</code>.
+          </li>
+          <li>
+            Write <code>$00</code>, <code>$10</code>, through <code>$F0</code>.
+            Confirm the left digit walks through the same glyph set.
+          </li>
+          <li>
+            Hold <code>$88</code>. Confirm all fourteen segments light, neither
+            GAL becomes noticeably warm, and the local +5 V rail remains within
+            specification.
+          </li>
+          <li>
+            Confirm both digits remain steady after a write and show no visible
+            flicker.
+          </li>
+        </ol>
+      </section>
+
+      <section id="sources">
+        <h2>15. Sources</h2>
+        <p>
+          GAL pinout, 5 V +/-10% operating range, input leakage, pin
+          capacitance, 15 ns propagation delay, 15 mA maximum BQL standby
+          current, and the <code>VOL</code> test point come from the Microchip
+          <a href="datasheets/ATF16V8BQL.pdf"
+            ><cite>ATF16V8B, ATF16V8BQ, and ATF16V8BQL</cite> data sheet</a
+          >, document Atmel-0364K.
+        </p>
+        <p>
+          Display polarity, pinout, 1.9 V typical forward voltage, 2.3 V maximum
+          forward voltage at 10 mA, and 30 mA DC forward-current rating come
+          from the Kingbright
+          <a href="datasheets/SA56-11EWA.pdf"
+            ><cite>SA56-11EWA</cite> data sheet</a
+          >, specification DSAP8372 / 1301000536.
+        </p>
+        <p>
+          The <code>SN74HCT574</code> +/-6 mA output-drive figure comes from the
+          Texas Instruments
+          <a href="datasheets/sn74hct574.pdf"
+            ><cite>SN54HCT574, SN74HCT574</cite> data sheet</a
+          >, SCLS177H.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

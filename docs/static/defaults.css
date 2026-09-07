@@ -1,0 +1,192 @@
+:root {
+  color: #000;
+  background-color: #fff;
+  font-family: serif;
+  font-size: 16px;
+  line-height: normal;
+}
+
+body {
+  display: block;
+  margin: 8px;
+}
+
+header,
+main,
+section {
+  display: block;
+}
+
+p,
+dl {
+  display: block;
+  margin-block: 1em;
+}
+
+dd {
+  display: block;
+  margin-inline-start: 40px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  display: block;
+  font-weight: bold;
+}
+
+h1 {
+  margin-block: 0.67em;
+  font-size: 2em;
+}
+
+h2 {
+  margin-block: 0.83em;
+  font-size: 1.5em;
+}
+
+h3 {
+  margin-block: 1em;
+  font-size: 1.17em;
+}
+
+h4 {
+  margin-block: 1.33em;
+  font-size: 1em;
+}
+
+h5 {
+  margin-block: 1.67em;
+  font-size: 0.83em;
+}
+
+h6 {
+  margin-block: 2.33em;
+  font-size: 0.67em;
+}
+
+a:link {
+  color: #0000ee;
+}
+
+a:visited {
+  color: #551a8b;
+}
+
+a:link:active,
+a:visited:active {
+  color: #ee0000;
+}
+
+a:any-link {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+pre {
+  display: block;
+  margin-block: 1em;
+  white-space: pre;
+}
+
+code,
+pre {
+  font-family: monospace;
+  font-size: 13px;
+}
+
+ul,
+ol {
+  display: block;
+  margin-block: 1em;
+  padding-inline-start: 40px;
+}
+
+ul {
+  list-style-type: disc;
+}
+
+ol {
+  list-style-type: decimal;
+}
+
+li {
+  display: list-item;
+  text-align: match-parent;
+}
+
+:is(ul, ol, dl) :is(ul, ol, dl) {
+  margin-block: 0;
+}
+
+:is(ul, ol) ul {
+  list-style-type: circle;
+}
+
+:is(ul, ol) :is(ul, ol) ul {
+  list-style-type: square;
+}
+
+table {
+  display: table;
+  box-sizing: border-box;
+  border-spacing: 2px;
+  border-collapse: separate;
+  text-indent: 0;
+}
+
+table[border="1"] {
+  border: 1px outset gray;
+}
+
+table[cellspacing="0"] {
+  border-spacing: 0;
+}
+
+caption {
+  display: table-caption;
+  text-align: center;
+}
+
+thead {
+  display: table-header-group;
+  vertical-align: middle;
+}
+
+tbody {
+  display: table-row-group;
+  vertical-align: middle;
+}
+
+tfoot {
+  display: table-footer-group;
+  vertical-align: middle;
+}
+
+tr {
+  display: table-row;
+  vertical-align: inherit;
+}
+
+td,
+th {
+  display: table-cell;
+  vertical-align: inherit;
+  padding: 1px;
+}
+
+th {
+  font-weight: bold;
+  text-align: center;
+}
+
+table[border="1"] > :is(thead, tbody, tfoot) > tr > :is(td, th) {
+  border: 1px inset gray;
+}
+
+table[cellpadding="4"] > :is(thead, tbody, tfoot) > tr > :is(td, th) {
+  padding: 4px;
+}

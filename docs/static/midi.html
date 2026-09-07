@@ -1,0 +1,1760 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - MC6850 MIDI, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>MC6850 MIDI</h1>
+      <p>
+        This document defines the MC6850 ACIA, its MC68EC000 bus adapter, MIDI
+        clock, interrupt connection, and 5-pin DIN MIDI IN, OUT, and THRU
+        circuits. <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; the read-data capture margin in
+          section 13 is an open item
+        </dd>
+        <dt>ACIA</dt>
+        <dd>Motorola MC6850P, 24-pin plastic DIP, 1 MHz grade</dd>
+        <dt>Bus connection</dt>
+        <dd>
+          I/O slot 5, <code>$EA0000-$EBFFFF</code>, on
+          <code>D7..D0</code>
+        </dd>
+        <dt>Canonical registers</dt>
+        <dd><code>$EA0001</code> and <code>$EA0003</code></dd>
+        <dt>Serial format</dt>
+        <dd>31.25 kbit/s, 8 data bits, no parity, 1 stop bit</dd>
+        <dt>Serial clock</dt>
+        <dd>500 kHz, divided by 10 from <code>MFP_CLK_5</code></dd>
+        <dt>Interrupt connection</dt>
+        <dd>MC68901 GPIP4, falling edge, vector <code>$46</code></dd>
+        <dt>External ports</dt>
+        <dd>One MIDI IN, one MIDI OUT, and one hardware MIDI THRU</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#bus-interface">Bus Interface</a></li>
+        <li><a href="#adapter-sequence">Adapter Sequence</a></li>
+        <li><a href="#register-map">Register Map</a></li>
+        <li><a href="#clock-reset">Clock and Reset</a></li>
+        <li><a href="#programming">Programming Rules</a></li>
+        <li><a href="#interrupts">Interrupts</a></li>
+        <li><a href="#midi-in">MIDI IN</a></li>
+        <li><a href="#midi-out-thru">MIDI OUT and THRU</a></li>
+        <li><a href="#connectors">Connector Pinout</a></li>
+        <li><a href="#pins">Package and Pin Maps</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#signals">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The MC6850 supplies one full-duplex asynchronous serial channel for
+          MIDI. The board has a galvanically isolated MIDI input, a software
+          controlled MIDI output, and a hardware THRU output that copies the
+          isolated input while the computer is powered. The THRU path does not
+          pass through the ACIA or depend on firmware.
+        </p>
+        <p>
+          The <a href="memory-map.html">Memory Map</a> owns the slot and
+          register addresses.
+          <a href="bus-and-decode.html">Bus and Address Decode</a> owns
+          <code>IO5_n</code>, the completion tree, and timeout behavior. The
+          <a href="mfp.html#interrupts">MFP</a> owns GPIP4 and vector
+          <code>$46</code>. The
+          <a href="mfp.html#clock-reset">MFP clock section</a> owns
+          <code>MFP_CLK_5</code>.
+        </p>
+        <p>
+          Signal names ending in <code>_n</code>, and signal names written with
+          a leading slash, are active low. The board uses +5 V logic and
+          through-hole packages. Every IC family and ordering code selected here
+          was documented before 1994.
+        </p>
+      </section>
+
+      <section id="architecture">
+        <h2>2. Architecture</h2>
+        <pre><code>MC68EC000 lower byte                 MC6850P and MIDI ports
+
+D7..D0 &lt;--------------------------&gt; D7..D0
+       +----&gt; U_MIDI_RDATA D inputs
+       &lt;---- U_MIDI_RDATA Q outputs after an ACIA read
+A1 --------------------------------&gt; RS
+R/W -------------------------------&gt; R/W
+IO5_n + LDS_n --&gt; MIDI_CYCLE ------&gt; request synchronizer
+MFP_CLK_5 --&gt; local buffer --------&gt; synchronizer and adapter clocks
+             +-- divide by 10 -----&gt; MIDI_CLK_500K
+                                     +--&gt; MC6850 E, Tx CLK, Rx CLK
+request --&gt; SELECT --&gt; DONE --&gt; ACK_READY --&gt; MIDI_DTACK_n
+                                      |
+MC6850 /IRQ -- 4.7 kohm pull-up ------+--&gt; MC68901 GPIP4
+
+MIDI IN --&gt; 6N138 --&gt; two LS14 stages --+--&gt; MC6850 Rx Data
+                                         +--&gt; LS07 --&gt; MIDI THRU
+MC6850 Tx Data ------------------------------&gt; LS07 --&gt; MIDI OUT</code></pre>
+        <p>
+          The MC68EC000 lacks the M6800-family <code>E</code>, <code>VMA</code>,
+          and <code>VPA</code> peripheral interface. The adapter synchronizes
+          each processor request to a continuous local enable clock. It captures
+          read data at the end of the MC6850 cycle and holds that byte on the
+          processor bus before returning <code>MIDI_DTACK_n</code>.
+        </p>
+      </section>
+
+      <section id="bus-interface">
+        <h2>3. Bus Interface</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC6850 processor-bus connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Motherboard signal</th>
+              <th scope="col">Adapter or MC6850 connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>MC6850 data pins and U_MIDI_RDATA</td>
+              <td>Transfers register data on the lower byte lane.</td>
+            </tr>
+            <tr>
+              <td><code>A1</code></td>
+              <td>MC6850 <code>RS</code></td>
+              <td>Selects the control/status or transmit/receive pair.</td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>MC6850 <code>R/W</code></td>
+              <td>High reads; low writes.</td>
+            </tr>
+            <tr>
+              <td><code>IO5_n</code></td>
+              <td>U_MIDI_REQ</td>
+              <td>Selects I/O slot 5 during a normal bus cycle.</td>
+            </tr>
+            <tr>
+              <td><code>LDS_n</code></td>
+              <td>U_MIDI_REQ</td>
+              <td>Restricts the interface to the lower data byte.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_DTACK_n</code></td>
+              <td>U_MIDI_ACK_GATE output</td>
+              <td>Returns the completed byte transfer to the motherboard.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Cycle Qualification</h3>
+        <p>
+          One SN74F02N gate, U_MIDI_REQ, asserts <code>MIDI_CYCLE</code> only
+          while slot 5 and the lower byte lane are selected.
+        </p>
+        <pre><code>MIDI_CYCLE = NOT (IO5_n OR LDS_n)</code></pre>
+        <p>
+          An upper-byte access leaves <code>MIDI_CYCLE</code> low and reaches
+          the motherboard timeout. A word access includes the lower lane and
+          completes, but only <code>D7..D0</code> contain valid data. Software
+          shall use byte accesses at odd addresses.
+        </p>
+
+        <h3>MC6850 Selection</h3>
+        <p>
+          MC6850 <code>CS0</code> and <code>CS1</code> connect to +5 V.
+          <code>/CS2</code> receives <code>MIDI_ACIA_CS_n</code>. U_MIDI_CS is
+          one SN74F32N OR gate driven by the complementary SELECT output and
+          DONE.
+        </p>
+        <pre><code>MIDI_ACIA_CS_n = (NOT MIDI_SELECT) OR MIDI_DONE</code></pre>
+        <p>
+          Selection begins after one falling edge of <code>MIDI_CLK_500K</code>
+          and ends after the next falling edge. The MC6850 sees a complete low
+          and high enable phase with address, direction, and write data held by
+          the waiting processor cycle.
+        </p>
+
+        <h3>Read-Data Hold Register</h3>
+        <p>
+          U_MIDI_RDATA is an SN74HCT574N. Its D inputs and Q outputs connect
+          bit-for-bit to processor <code>D7..D0</code>. The rising clock input
+          receives <code>MIDI_E_n</code>, so it captures the MC6850 byte just
+          after each falling edge of <code>E</code>. U_MIDI_READ_OE, one
+          SN74F10N gate, enables the outputs only after a selected read reaches
+          DONE.
+        </p>
+        <pre><code>MIDI_READ_OE_n = NOT (MIDI_DONE AND R/W AND MIDI_CYCLE)</code></pre>
+        <p>
+          The MC6850 and U_MIDI_RDATA can drive the bus together briefly after
+          the completion edge. Both drive the byte that the register captured.
+          The ACIA then enters its high-impedance state while the register holds
+          the byte through processor termination. During writes, U_MIDI_RDATA
+          does not drive the bus.
+        </p>
+      </section>
+
+      <section id="adapter-sequence">
+        <h2>4. Adapter Sequence</h2>
+        <p>
+          U_MIDI_SYNC is an SN74HCT74N. Its first flip-flop samples
+          <code>MIDI_CYCLE</code> on <code>MIDI_CLK_5</code>; its second stage
+          produces <code>MIDI_REQ_SYNC</code>. Both asynchronous clears connect
+          to <code>MIDI_CYCLE</code>, so releasing the processor cycle clears
+          the request without waiting for a clock edge.
+        </p>
+        <p>
+          U_MIDI_SEQ is a second SN74HCT74N. Both flip-flops clock on
+          <code>MIDI_E_n</code>, the inverted 500 kHz enable clock. The first D
+          input is high and produces SELECT. The second D input receives SELECT
+          and produces DONE one enable period later. Their clears connect to
+          <code>MIDI_REQ_SYNC</code>.
+        </p>
+        <p>
+          U_MIDI_ACK is one half of a third SN74HCT74N. It samples DONE on
+          <code>MIDI_CLK_5</code> and produces <code>MIDI_ACK_READY</code>. Its
+          asynchronous clear connects directly to <code>MIDI_CYCLE</code>. The
+          extra 5 MHz stage gives U_MIDI_RDATA time to enable before the
+          motherboard sees an acknowledgement.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Adapter states during one processor access
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">State</th>
+              <th scope="col">MC6850 selected</th>
+              <th scope="col">Read register</th>
+              <th scope="col"><code>MIDI_DTACK_n</code></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Request synchronizing</td>
+              <td>No</td>
+              <td>Disabled</td>
+              <td>High</td>
+            </tr>
+            <tr>
+              <td>SELECT after first falling E edge</td>
+              <td>Yes</td>
+              <td>Disabled</td>
+              <td>High</td>
+            </tr>
+            <tr>
+              <td>DONE after second falling E edge</td>
+              <td>No; transfer has finished</td>
+              <td>Enabled for a read</td>
+              <td>High</td>
+            </tr>
+            <tr>
+              <td>ACK_READY after the following 5 MHz edge</td>
+              <td>No</td>
+              <td>Enabled for a read</td>
+              <td>Low</td>
+            </tr>
+            <tr>
+              <td>Processor releases the cycle</td>
+              <td>No</td>
+              <td>Disabled</td>
+              <td>High</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          U_MIDI_ACK_GATE is one SN74F00N NAND gate. Raw cycle qualification
+          keeps the completion response inactive outside slot 5 and releases it
+          promptly when <code>LDS_n</code> rises.
+        </p>
+        <pre><code>MIDI_DTACK_n = NOT (MIDI_ACK_READY AND MIDI_CYCLE)</code></pre>
+      </section>
+
+      <section id="register-map">
+        <h2>5. Register Map</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Canonical MC6850 register addresses
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+              <th scope="col">RS</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$EA0001</code></td>
+              <td>Status register</td>
+              <td>Control register</td>
+              <td>0</td>
+            </tr>
+            <tr>
+              <td><code>$EA0003</code></td>
+              <td>Receive data register</td>
+              <td>Transmit data register</td>
+              <td>1</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Address lines <code>A16..A2</code> do not enter the local decode. The
+          two-register pattern repeats every four bytes throughout slot 5. The
+          addresses above are the canonical copy used by firmware.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC6850 status bits
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Bit</th>
+              <th scope="col">Name</th>
+              <th scope="col">Meaning when set</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>0</td>
+              <td>RDRF</td>
+              <td>A received byte is ready.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>TDRE</td>
+              <td>The transmit data register accepts another byte.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>DCD</td>
+              <td>Data carrier detect is inactive.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>CTS</td>
+              <td>Clear to send is inactive.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>FE</td>
+              <td>The received byte has a framing error.</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>OVRN</td>
+              <td>At least one received byte was lost.</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>PE</td>
+              <td>The received byte has a parity error.</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>IRQ</td>
+              <td>An enabled interrupt condition is active.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>/CTS</code> and <code>/DCD</code> connect to ground. The
+          transmitter remains clear to send and the receiver remains enabled.
+          <code>/RTS</code> is unused and has no board connection.
+        </p>
+      </section>
+
+      <section id="clock-reset">
+        <h2>6. Clock and Reset</h2>
+        <p>
+          U_MIDI_INV channel 1 is one SN74F04N inverter. It takes
+          <code>MFP_CLK_5</code> from the first stage of the MFP clock divider
+          and drives the MIDI-local <code>MIDI_CLK_5</code> net. U_MIDI_CLK is
+          an SN74LS390N wired as divide by 5 followed by divide by 2. Its final
+          divide-by-2 output supplies a symmetrical 500 kHz waveform.
+        </p>
+        <pre><code>MFP_CLK_5 -- local buffer --&gt; MIDI_CLK_5
+MIDI_CLK_5 -- divide by 5 --&gt; MIDI_CLK_DIV5
+MIDI_CLK_DIV5 -- divide by 2 --&gt; MIDI_CLK_500K
+
+MIDI_CLK_500K --&gt; MC6850 E, Tx CLK, and Rx CLK
+MC6850 divide ratio = 16
+MIDI bit rate = 31.25 kbit/s</code></pre>
+        <p>
+          U_MIDI_CLK pin 4, <code>1CLKB</code>, receives
+          <code>MIDI_CLK_5</code>. Pin 7, <code>1QD</code>, feeds pin 1,
+          <code>1CLKA</code>. Pin 3, <code>1QA</code>, produces
+          <code>MIDI_CLK_500K</code>. Pin 2, <code>1CLR</code>, is grounded. The
+          unused second counter has both clock inputs and its clear input
+          grounded; its outputs remain unconnected.
+        </p>
+        <h3>ACIA Reset</h3>
+        <p>
+          The MC6850 has no reset pin. Its control-register divide field must be
+          written as <code>11</code> after power-up and after every processor
+          RESET sequence. Firmware writes <code>$03</code> to
+          <code>$EA0001</code> before it writes the operating configuration.
+        </p>
+        <p>
+          The clock divider runs whenever +5 V and <code>MFP_CLK_5</code> are
+          present. Adapter state clears whenever no MIDI bus cycle is active.
+          The MC6850 remains in an unspecified power-up state until firmware
+          issues the master-reset write.
+        </p>
+      </section>
+
+      <section id="programming">
+        <h2>7. Programming Rules</h2>
+        <p>
+          The normal operating control byte is <code>$95</code>. It selects the
+          divide-by-16 clock, 8-N-1 framing, inactive transmitter interrupts,
+          low <code>/RTS</code>, and enabled receiver interrupts.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Firmware initialization sequence
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Step</th>
+              <th scope="col">Operation</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>Write <code>$03</code> to <code>$EA0001</code>.</td>
+              <td>Master-resets the ACIA.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Read <code>$EA0001</code>.</td>
+              <td>Observes initial status with CTS and DCD active low.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Write <code>$95</code> to <code>$EA0001</code>.</td>
+              <td>
+                Starts 31.25 kbit/s 8-N-1 operation with receive interrupts.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Firmware reads the status register before the data register. RDRF
+          identifies a current received byte; FE, OVRN, and PE describe that
+          receive state. Firmware writes the transmit data register only while
+          TDRE is set. Changing word format or clock division while a byte is in
+          flight can corrupt that byte.
+        </p>
+        <p>
+          A polling-only configuration uses <code>$15</code>. Transmitter
+          interrupts stay disabled in both configurations because TDRE is
+          normally high whenever the transmitter is idle and would otherwise
+          hold <code>/IRQ</code> low.
+        </p>
+      </section>
+
+      <section id="interrupts">
+        <h2>8. Interrupts</h2>
+        <p>
+          MC6850 pin 7 is an active-low open-drain output. R_MIDI_IRQ is a 4.7
+          kohm pull-up from <code>MIDI_IRQ_n</code> to +5 V. The same net
+          connects to MC68901 GPIP4. The MFP detects the falling edge and
+          supplies vector <code>$46</code> during the level-6 acknowledge cycle.
+        </p>
+        <p>
+          With control byte <code>$95</code>, a full receive register or an
+          overrun can request service. DCD is held low. The handler reads
+          status, reads the receive data register when RDRF or an error is
+          present, and returns after the enabled condition has cleared.
+        </p>
+        <p>
+          MIDI THRU remains active while the MC6850 interrupt is pending. A slow
+          handler can overrun the ACIA receive register, but it does not stop
+          the electrical copy from MIDI IN to MIDI THRU.
+        </p>
+      </section>
+
+      <section id="midi-in">
+        <h2>9. MIDI IN</h2>
+        <p>
+          J_MIDI_IN is a 5-pin, 180-degree DIN female connector. Pin 4 reaches
+          U_MIDI_OPTO pin 2, the 6N138 LED anode, through R_MIDI_IN, 220 ohms.
+          DIN pin 5 connects to U_MIDI_OPTO pin 3, the cathode. D_MIDI_IN is a
+          1N4148 across the LED with its cathode at pin 2 and anode at pin 3.
+        </p>
+        <pre><code>J_MIDI_IN pin 4 -- 220 ohms --+--&gt; 6N138 pin 2, anode
+                              |
+                         1N4148 reverse clamp
+                              |
+J_MIDI_IN pin 5 --------------+--&gt; 6N138 pin 3, cathode
+
+6N138 pin 8 ----------------------&gt; +5 V
+6N138 pin 5 ----------------------&gt; ground
+6N138 pin 6 -- 2.2 kohm pull-up --&gt; MIDI_RX_OPTO_n
+6N138 pin 7 -- 47 kohm -----------&gt; ground
+
+MIDI_RX_OPTO_n --&gt; LS14 --&gt; LS14 --&gt; MIDI_RX_DATA</code></pre>
+        <p>
+          U_MIDI_OPTO pins 1 and 4 remain open. C_MIDI_OPTO, 100 nF, connects
+          between pins 8 and 5 at the package. R_MIDI_BASE uses the 6N138
+          datasheet's 47 kohm gain-warning boundary while reducing stored
+          charge.
+        </p>
+        <p>
+          Two channels of U_MIDI_SCHMITT, an SN74LS14N, square the optocoupler
+          output and restore its polarity. Current through the optocoupler makes
+          <code>MIDI_RX_DATA</code> low. The net drives MC6850 Rx Data and one
+          U_MIDI_DRIVER input. Pins 1, 2, and 3 of J_MIDI_IN have no DC
+          connection to motherboard ground.
+        </p>
+      </section>
+
+      <section id="midi-out-thru">
+        <h2>10. MIDI OUT and THRU</h2>
+        <p>
+          U_MIDI_DRIVER is an SN74LS07N. One non-inverting open-collector
+          channel takes MC6850 Tx Data and sinks the MIDI OUT loop. A second
+          channel takes <code>MIDI_RX_DATA</code> and sinks the MIDI THRU loop.
+          Logical zero turns the selected output transistor on, matching MIDI's
+          current-on zero state.
+        </p>
+        <pre><code>+5 V -- 220 ohms --&gt; J_MIDI_OUT pin 4
+J_MIDI_OUT pin 5 -- 220 ohms --&gt; LS07 output
+MC6850 Tx Data ----------------&gt; LS07 input
+
++5 V -- 220 ohms --&gt; J_MIDI_THRU pin 4
+J_MIDI_THRU pin 5 -- 220 ohms --&gt; LS07 output
+MIDI_RX_DATA ------------------&gt; LS07 input</code></pre>
+        <p>
+          The four output resistors are 220 ohms, 5%, 0.25 W. Each output drives
+          one MIDI input. Four unused SN74LS07 inputs connect to ground and
+          their outputs remain open. MIDI OUT idles with Tx Data high. MIDI THRU
+          follows the isolated input even while the ACIA is reset or software is
+          not reading it.
+        </p>
+      </section>
+
+      <section id="connectors">
+        <h2>11. Connector Pinout</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MIDI 5-pin DIN connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">DIN pin</th>
+              <th scope="col">MIDI IN</th>
+              <th scope="col">MIDI OUT</th>
+              <th scope="col">MIDI THRU</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>Not connected</td>
+              <td>Not connected</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>No DC connection</td>
+              <td><code>MIDI_OUT_SHIELD</code> layout pad</td>
+              <td><code>MIDI_THRU_SHIELD</code> layout pad</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Not connected</td>
+              <td>Not connected</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>220 ohms to optocoupler anode</td>
+              <td>220 ohms to +5 V</td>
+              <td>220 ohms to +5 V</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>Optocoupler cathode</td>
+              <td>220 ohms to open-collector driver</td>
+              <td>220 ohms to open-collector driver</td>
+            </tr>
+            <tr>
+              <td>Shell</td>
+              <td><code>MIDI_IN_SHELL</code> isolated layout pad</td>
+              <td><code>MIDI_OUT_SHELL</code> layout pad</td>
+              <td><code>MIDI_THRU_SHELL</code> layout pad</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          J_MIDI_IN, J_MIDI_OUT, and J_MIDI_THRU are labeled 5-pin, 180-degree
+          DIN female receptacles. Connector drawings can show pin numbers from
+          the mating face or solder side. The schematic symbol and footprint
+          shall use the manufacturer's numbering.
+        </p>
+      </section>
+
+      <section id="pins">
+        <h2>12. Package and Pin Maps</h2>
+        <h3>MC6850P</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_MIDI_ACIA 24-pin DIP connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>VSS</td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Rx Data</td>
+              <td><code>MIDI_RX_DATA</code></td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Rx CLK</td>
+              <td><code>MIDI_CLK_500K</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>Tx CLK</td>
+              <td><code>MIDI_CLK_500K</code></td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td><code>/RTS</code></td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>Tx Data</td>
+              <td>U_MIDI_DRIVER input</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td><code>/IRQ</code></td>
+              <td><code>MIDI_IRQ_n</code></td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>CS0</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td><code>/CS2</code></td>
+              <td><code>MIDI_ACIA_CS_n</code></td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td>CS1</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td>RS</td>
+              <td>CPU <code>A1</code></td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td>VCC</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td><code>R/W</code></td>
+              <td>CPU <code>R/W</code></td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td>E</td>
+              <td><code>MIDI_CLK_500K</code></td>
+            </tr>
+            <tr>
+              <td>15</td>
+              <td>D7</td>
+              <td>CPU <code>D7</code></td>
+            </tr>
+            <tr>
+              <td>16</td>
+              <td>D6</td>
+              <td>CPU <code>D6</code></td>
+            </tr>
+            <tr>
+              <td>17</td>
+              <td>D5</td>
+              <td>CPU <code>D5</code></td>
+            </tr>
+            <tr>
+              <td>18</td>
+              <td>D4</td>
+              <td>CPU <code>D4</code></td>
+            </tr>
+            <tr>
+              <td>19</td>
+              <td>D3</td>
+              <td>CPU <code>D3</code></td>
+            </tr>
+            <tr>
+              <td>20</td>
+              <td>D2</td>
+              <td>CPU <code>D2</code></td>
+            </tr>
+            <tr>
+              <td>21</td>
+              <td>D1</td>
+              <td>CPU <code>D1</code></td>
+            </tr>
+            <tr>
+              <td>22</td>
+              <td>D0</td>
+              <td>CPU <code>D0</code></td>
+            </tr>
+            <tr>
+              <td>23</td>
+              <td><code>/DCD</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>24</td>
+              <td><code>/CTS</code></td>
+              <td>Ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>6N138</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_MIDI_OPTO 8-pin DIP connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>NC</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Anode</td>
+              <td>R_MIDI_IN from DIN pin 4</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Cathode</td>
+              <td>DIN pin 5</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>NC</td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>GND</td>
+              <td>Motherboard ground</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>VO</td>
+              <td><code>MIDI_RX_OPTO_n</code></td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>VB</td>
+              <td>47 kohms to ground</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>VCC</td>
+              <td>+5 V</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>Adapter Packages</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Adapter package assignments
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Assignment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>SN74HCT74N</td>
+              <td>Two-stage 5 MHz request synchronizer.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>SN74HCT74N</td>
+              <td>SELECT and DONE, clocked by <code>MIDI_E_n</code>.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>SN74HCT74N</td>
+              <td>
+                First half generates ACK_READY; unused half is tied inactive.
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_RDATA</code></td>
+              <td>SN74HCT574N</td>
+              <td>Eight-bit ACIA read-data hold register.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_REQ</code></td>
+              <td>SN74F02N</td>
+              <td>Cycle qualification.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_INV</code></td>
+              <td>SN74F04N</td>
+              <td>MFP clock buffer and E inversion.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_CS</code></td>
+              <td>SN74F32N</td>
+              <td>MC6850 select release.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_READ_OE</code></td>
+              <td>SN74F10N</td>
+              <td>Read-register output enable.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK_GATE</code></td>
+              <td>SN74F00N</td>
+              <td>Cycle-gated completion.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Unused FAST gate inputs connect to ground. The unused U_MIDI_ACK half
+          has D and CLK grounded and both asynchronous inputs tied high.
+        </p>
+
+        <h3>Sequential Logic Pins</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            SN74HCT74N package connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Pins</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>1 <code>/1CLR</code>, 13 <code>/2CLR</code></td>
+              <td><code>MIDI_CYCLE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>2 <code>1D</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>3 <code>1CLK</code>, 11 <code>2CLK</code></td>
+              <td><code>MIDI_CLK_5</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>4 <code>/1PRE</code>, 10 <code>/2PRE</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>5 <code>1Q</code></td>
+              <td>Pin 12, <code>2D</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>9 <code>2Q</code></td>
+              <td><code>MIDI_REQ_SYNC</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SYNC</code></td>
+              <td>6 <code>/1Q</code>, 8 <code>/2Q</code></td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>1 <code>/1CLR</code>, 13 <code>/2CLR</code></td>
+              <td><code>MIDI_REQ_SYNC</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>2 <code>1D</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>3 <code>1CLK</code>, 11 <code>2CLK</code></td>
+              <td><code>MIDI_E_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>4 <code>/1PRE</code>, 10 <code>/2PRE</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>5 <code>1Q</code></td>
+              <td><code>MIDI_SELECT</code> and pin 12, <code>2D</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>6 <code>/1Q</code></td>
+              <td><code>MIDI_SELECT_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>9 <code>2Q</code></td>
+              <td><code>MIDI_DONE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SEQ</code></td>
+              <td>8 <code>/2Q</code></td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>1 <code>/1CLR</code></td>
+              <td><code>MIDI_CYCLE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>2 <code>1D</code></td>
+              <td><code>MIDI_DONE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>3 <code>1CLK</code></td>
+              <td><code>MIDI_CLK_5</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>4 <code>/1PRE</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>5 <code>1Q</code></td>
+              <td><code>MIDI_ACK_READY</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>6 <code>/1Q</code>, 8 <code>/2Q</code>, 9 <code>2Q</code></td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>10 <code>/2PRE</code>, 13 <code>/2CLR</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK</code></td>
+              <td>11 <code>2CLK</code>, 12 <code>2D</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>All three packages</td>
+              <td>7, 14</td>
+              <td>Ground, +5 V</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_MIDI_RDATA SN74HCT574N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>/OE</code></td>
+              <td><code>MIDI_READ_OE_n</code></td>
+            </tr>
+            <tr>
+              <td>2, 3, 4, 5, 6, 7, 8, 9</td>
+              <td>Q0..Q7</td>
+              <td>CPU <code>D0..D7</code>, in order</td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td>GND</td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td>CLK</td>
+              <td><code>MIDI_E_n</code></td>
+            </tr>
+            <tr>
+              <td>12, 13, 14, 15, 16, 17, 18, 19</td>
+              <td>D7..D0</td>
+              <td>CPU <code>D7..D0</code>, in order</td>
+            </tr>
+            <tr>
+              <td>20</td>
+              <td>VCC</td>
+              <td>+5 V</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Clock and Gate Pins</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_MIDI_CLK SN74LS390N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>1CLKA</code></td>
+              <td>Pin 7, <code>1QD</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>1CLR</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>1QA</code></td>
+              <td><code>MIDI_CLK_500K</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>1CLKB</code></td>
+              <td><code>MIDI_CLK_5</code></td>
+            </tr>
+            <tr>
+              <td>5, 6</td>
+              <td><code>1QB</code>, <code>1QC</code></td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td><code>1QD</code></td>
+              <td><code>MIDI_CLK_DIV5</code> and pin 1</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>GND</td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>9, 10, 11, 13</td>
+              <td>
+                <code>2QD</code>, <code>2QC</code>, <code>2QB</code>,
+                <code>2QA</code>
+              </td>
+              <td>Not connected</td>
+            </tr>
+            <tr>
+              <td>12, 14, 15</td>
+              <td><code>2CLKB</code>, <code>2CLR</code>, <code>2CLKA</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>16</td>
+              <td>VCC</td>
+              <td>+5 V</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Used combinational-logic channels
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Input pins</th>
+              <th scope="col">Output pin and net</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_MIDI_REQ</code>, SN74F02N gate 1</td>
+              <td>2: <code>IO5_n</code>; 3: <code>LDS_n</code></td>
+              <td>1: <code>MIDI_CYCLE</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_INV</code>, SN74F04N gate 1</td>
+              <td>1: <code>MFP_CLK_5</code></td>
+              <td>2: <code>MIDI_CLK_5</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_INV</code>, SN74F04N gate 2</td>
+              <td>3: <code>MIDI_CLK_500K</code></td>
+              <td>4: <code>MIDI_E_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_CS</code>, SN74F32N gate 1</td>
+              <td>1: <code>MIDI_SELECT_n</code>; 2: <code>MIDI_DONE</code></td>
+              <td>3: <code>MIDI_ACIA_CS_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_READ_OE</code>, SN74F10N gate 2</td>
+              <td>
+                3: <code>MIDI_DONE</code>; 4: CPU <code>R/W</code>; 5:
+                <code>MIDI_CYCLE</code>
+              </td>
+              <td>6: <code>MIDI_READ_OE_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK_GATE</code>, SN74F00N gate 1</td>
+              <td>
+                1: <code>MIDI_ACK_READY</code>; 2: <code>MIDI_CYCLE</code>
+              </td>
+              <td>3: <code>MIDI_DTACK_n</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SCHMITT</code>, SN74LS14N gate 1</td>
+              <td>1: <code>MIDI_RX_OPTO_n</code></td>
+              <td>2: <code>MIDI_RX_SCHMITT</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SCHMITT</code>, SN74LS14N gate 2</td>
+              <td>3: <code>MIDI_RX_SCHMITT</code></td>
+              <td>4: <code>MIDI_RX_DATA</code></td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_DRIVER</code>, SN74LS07N gate 1</td>
+              <td>1: MC6850 Tx Data</td>
+              <td>2: R_MIDI_OUT_LOW to J_MIDI_OUT pin 5</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_DRIVER</code>, SN74LS07N gate 2</td>
+              <td>3: <code>MIDI_RX_DATA</code></td>
+              <td>4: R_MIDI_THRU_LOW to J_MIDI_THRU pin 5</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every 14-pin gate package uses pin 14 for +5 V and pin 7 for ground.
+          Unused input pins are grounded: U_MIDI_REQ pins 5, 6, 8, 9, 11, and
+          12; U_MIDI_INV pins 5, 9, 11, and 13; U_MIDI_CS pins 4, 5, 9, 10, 12,
+          and 13; U_MIDI_READ_OE pins 1, 2, 9, 10, 11, and 13; U_MIDI_ACK_GATE
+          pins 4, 5, 9, 10, 12, and 13; U_MIDI_SCHMITT pins 5, 9, 11, and 13;
+          and U_MIDI_DRIVER pins 5, 9, 11, and 13. Their unused outputs remain
+          unconnected.
+        </p>
+      </section>
+
+      <section id="timing">
+        <h2>13. Timing and Electrical Checks</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Clock checks for the 1 MHz-grade MC6850
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Requirement</th>
+              <th scope="col">Design value</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>E cycle time</td>
+              <td>1 to 10 us</td>
+              <td>2 us nominal</td>
+              <td>Within range</td>
+            </tr>
+            <tr>
+              <td>E low pulse</td>
+              <td>430 ns to 9.5 us</td>
+              <td>1 us nominal</td>
+              <td>570 ns nominal margin</td>
+            </tr>
+            <tr>
+              <td>E high pulse</td>
+              <td>450 ns to 9.5 us</td>
+              <td>1 us nominal</td>
+              <td>550 ns nominal margin</td>
+            </tr>
+            <tr>
+              <td>Serial clock in divide-by-16 mode</td>
+              <td>800 kHz maximum</td>
+              <td>500 kHz nominal</td>
+              <td>300 kHz below maximum</td>
+            </tr>
+            <tr>
+              <td>Serial-clock high and low pulses</td>
+              <td>600 ns minimum each</td>
+              <td>1 us nominal each</td>
+              <td>400 ns nominal margin</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The installed master oscillator has a tolerance of +/-100 ppm before
+          aging. Division preserves that relative tolerance, so the nominal
+          31.25 kbit/s stream remains inside MIDI's +/-1% rate limit.
+        </p>
+        <h3>Bus Response</h3>
+        <p>
+          Request synchronization takes at most two 5 MHz periods plus phase
+          alignment. Waiting for the first 500 kHz falling edge takes less than
+          one enable period, the selected ACIA cycle takes one more period, and
+          ACK_READY takes no more than one 5 MHz period after DONE. The
+          conservative logic-only bound is 4.6 us before gate and routing delay,
+          below the motherboard's 51.1 us normal-cycle timeout.
+        </p>
+        <pre><code>two 5 MHz synchronizer periods        0.4 us
+wait to first 500 kHz falling edge   2.0 us
+one selected MC6850 enable period    2.0 us
+ACK_READY registration               0.2 us
+------------------------------------------------
+conservative phase bound             4.6 us</code></pre>
+        <p>
+          On release, U_MIDI_ACK_GATE adds at most 6 ns before
+          <code>MIDI_DTACK_n</code> rises. The completion tree adds 5.3 ns in
+          its group SN74F21, 5.3 ns in the final SN74F21, and 6.6 ns in the
+          timeout-mask SN74F32. The 23.2 ns component total leaves 86.8 ns for
+          routed delay and loading under the MC68EC000's 110 ns limit.
+        </p>
+        <pre><code>U_MIDI_ACK_GATE release       6.0 ns maximum
+group SN74F21                5.3 ns maximum
+final SN74F21                5.3 ns maximum
+timeout-mask SN74F32         6.6 ns maximum
+------------------------------------------------
+component total             23.2 ns
+MC68EC000 limit            110.0 ns
+board allowance             86.8 ns</code></pre>
+        <p>
+          MC6850 read data is valid no later than 320 ns after E rises on the
+          1.0 MHz grade. The 1 us high phase leaves about 680 ns before E falls,
+          so the data is settled well before the capture edge.
+        </p>
+        <p>
+          The capture edge is the problem. U_MIDI_INV inverts
+          <code>MIDI_CLK_500K</code> into <code>MIDI_E_n</code> in up to 6.0 ns
+          (SN74F04 <code>tPLH</code>), so U_MIDI_RDATA clocks that long after E
+          falls. The MC6850 guarantees read data for only 10 ns after E falls,
+          and the SN74HCT574 requires 5 ns of hold after its rising clock edge.
+          The component-only hold margin is therefore negative:
+        </p>
+        <pre><code>MC6850 data hold after E falls      10.0 ns
+U_MIDI_INV SN74F04, tPLH            -6.0 ns
+SN74HCT574 data hold requirement    -5.0 ns
+------------------------------------------------
+component hold margin               -1.0 ns</code></pre>
+        <p>
+          <strong>Open item.</strong> This capture is not proven, and board
+          delay only makes it worse. Confirm the MC6850P <code>tDDR</code> and
+          <code>tDHR</code> figures against the 1.0 MHz column of the device
+          data sheet, then close the margin before fabrication. The
+          straightforward fixes are to clock U_MIDI_RDATA directly from
+          <code>MIDI_CLK_500K</code>'s falling edge instead of from the inverted
+          copy, or to capture one <code>MIDI_CLK_5</code> period earlier while
+          <code>E</code> is still high. Section 13 numbers otherwise use the 1.0
+          MHz column throughout, which is what the E-cycle and serial-clock rows
+          above already assume.
+        </p>
+        <h3>MIDI Current Loops</h3>
+        <p>
+          A complete 5 V MIDI loop contains three 220 ohm resistors. At nominal
+          values and the 6N138 typical 1.4 V LED drop, the current is about 5.45
+          mA. At 4.75 V, 5% high resistors, and the 1.7 V maximum LED drop, it
+          remains about 4.40 mA. The 6N138 guarantees TTL-load operation at 1.6
+          mA.
+        </p>
+        <pre><code>I nominal = (5.00 V - 1.40 V) / (3 * 220 ohms) = 5.45 mA
+I low     = (4.75 V - 1.70 V) / (3 * 231 ohms) = 4.40 mA</code></pre>
+        <p>
+          Shorting an output signal pin to ground puts at most 5.25 V across one
+          209 ohm minimum resistor. The resulting 25.1 mA and 132 mW remain
+          below the resistor's 0.25 W rating. The SN74LS07 output can sink the
+          normal loop current and is rated for 40 mA low-state current.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MIDI interface loading
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Added load</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>MFP_CLK_5</code></td>
+              <td>One SN74F04 input</td>
+              <td>The MFP divider also drives its existing second stage.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_CLK_5</code></td>
+              <td>Four clock inputs</td>
+              <td>U_MIDI_CLK, both U_MIDI_SYNC halves, and U_MIDI_ACK.</td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>
+                One MC6850 pin and one SN74HCT574 input and output per line
+              </td>
+              <td>Included in the post-layout bus-load check.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_IRQ_n</code></td>
+              <td>4.7 kohm pull-up and one MFP input</td>
+              <td>About 1.12 mA at 5.25 V when asserted.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_RX_OPTO_n</code></td>
+              <td>2.2 kohm pull-up and one LS14 input</td>
+              <td>The 6N138's guaranteed low-state drive covers both loads.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="parts">
+        <h2>14. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MIDI subsystem parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_MIDI_ACIA</code></td>
+              <td>MC6850P</td>
+              <td>Asynchronous serial adapter.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_OPTO</code></td>
+              <td>6N138</td>
+              <td>MIDI IN optocoupler.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_DRIVER</code></td>
+              <td>SN74LS07N</td>
+              <td>MIDI OUT and THRU drivers.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_SCHMITT</code></td>
+              <td>SN74LS14N</td>
+              <td>MIDI IN edge cleanup.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_CLK</code></td>
+              <td>SN74LS390N</td>
+              <td>5 MHz to 500 kHz divider.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>U_MIDI_SYNC</code>, <code>U_MIDI_SEQ</code>,
+                <code>U_MIDI_ACK</code>
+              </td>
+              <td>3 x SN74HCT74N</td>
+              <td>Synchronization, sequence state, and acknowledgement.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_RDATA</code></td>
+              <td>SN74HCT574N</td>
+              <td>Read-data hold register.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_REQ</code></td>
+              <td>SN74F02N</td>
+              <td>Cycle qualification.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_INV</code></td>
+              <td>SN74F04N</td>
+              <td>Clock buffering and inversion.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_CS</code></td>
+              <td>SN74F32N</td>
+              <td>ACIA selection.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_READ_OE</code></td>
+              <td>SN74F10N</td>
+              <td>Read-register enable.</td>
+            </tr>
+            <tr>
+              <td><code>U_MIDI_ACK_GATE</code></td>
+              <td>SN74F00N</td>
+              <td>Completion qualification.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>J_MIDI_IN</code>, <code>J_MIDI_OUT</code>,
+                <code>J_MIDI_THRU</code>
+              </td>
+              <td>3 x 5-pin DIN female, 180 degree</td>
+              <td>MIDI cable connectors.</td>
+            </tr>
+            <tr>
+              <td><code>D_MIDI_IN</code></td>
+              <td>1N4148</td>
+              <td>Optocoupler reverse clamp.</td>
+            </tr>
+            <tr>
+              <td><code>R_MIDI_IN</code></td>
+              <td>220 ohms, 5%, 0.25 W</td>
+              <td>MIDI IN current limiting.</td>
+            </tr>
+            <tr>
+              <td><code>R_MIDI_OPTO</code></td>
+              <td>2.2 kohm, 5%</td>
+              <td>6N138 output pull-up.</td>
+            </tr>
+            <tr>
+              <td><code>R_MIDI_BASE</code></td>
+              <td>47 kohm, 5%</td>
+              <td>6N138 base discharge.</td>
+            </tr>
+            <tr>
+              <td><code>R_MIDI_IRQ</code></td>
+              <td>4.7 kohm, 5%</td>
+              <td>MC6850 interrupt pull-up.</td>
+            </tr>
+            <tr>
+              <td><code>R_MIDI_OUT_HIGH</code>, <code>R_MIDI_OUT_LOW</code></td>
+              <td>2 x 220 ohms, 5%, 0.25 W</td>
+              <td>MIDI OUT current limiting.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>R_MIDI_THRU_HIGH</code>, <code>R_MIDI_THRU_LOW</code>
+              </td>
+              <td>2 x 220 ohms, 5%, 0.25 W</td>
+              <td>MIDI THRU current limiting.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Motorola documented the MC6850 revision used here in 1985. Texas
+          Instruments documented the SN74LS390 in 1976, the SN74HCT74 in 1982,
+          the SN74HCT574 in 1984, the FAST gates in 1987, and the SN74LS07 in
+          1990. Hewlett-Packard's 1978 optoelectronics catalog includes the
+          6N138. Each IC has a 100 nF ceramic bypass capacitor at its supply
+          pins. U_MIDI_ACIA, U_MIDI_CLK, and U_MIDI_OPTO also have a 1 uF local
+          capacitor beside the package.
+        </p>
+      </section>
+
+      <section id="layout">
+        <h2>15. Board Layout</h2>
+        <ul>
+          <li>
+            Put the three DIN connectors at the board edge and verify every
+            footprint pin number against the mating-face drawing. Mark IN, OUT,
+            and THRU on the silkscreen.
+          </li>
+          <li>
+            Decide the chassis and shield scheme during board layout.
+            <code>MIDI_OUT_SHIELD</code>, <code>MIDI_THRU_SHIELD</code>, and the
+            three connector-shell pads may remain open or receive the board's
+            chosen chassis or RF connection. Do not give J_MIDI_IN pin 2 or its
+            shell a direct DC path to logic ground.
+          </li>
+          <li>
+            Place U_MIDI_OPTO, D_MIDI_IN, and R_MIDI_IN beside J_MIDI_IN. Keep
+            every isolated input-side trace away from motherboard-ground copper
+            across the optocoupler isolation boundary.
+          </li>
+          <li>
+            Place each OUT and THRU 220 ohm resistor beside its connector or
+            driver. Keep the two current-loop traces paired and away from
+            <code>MIDI_RX_OPTO_n</code>.
+          </li>
+          <li>
+            Route <code>MFP_CLK_5</code> only to U_MIDI_INV. Keep
+            <code>MIDI_CLK_5</code>, <code>MIDI_CLK_500K</code>, and
+            <code>MIDI_E_n</code> short and free of long test-point stubs.
+          </li>
+          <li>
+            Measure the added <code>MFP_CLK_5</code> load and the four-load
+            <code>MIDI_CLK_5</code> branch. Verify clean threshold crossings at
+            U_MIDI_CLK, U_MIDI_SYNC, and U_MIDI_ACK.
+          </li>
+          <li>
+            Measure <code>MIDI_CLK_500K</code> at MC6850 pins 3, 4, and 14. Each
+            high and low pulse must exceed 600 ns, and the frequency must remain
+            within the MIDI +/-1% limit.
+          </li>
+          <li>
+            Measure the 6N138 and two LS14 stages with a 31.25 kbit/s test
+            stream. Each final <code>MIDI_RX_DATA</code> edge must complete in
+            less than 2 us, and THRU must preserve valid bit widths.
+          </li>
+          <li>
+            Include U_MIDI_ACIA and U_MIDI_RDATA in the processor data-bus
+            capacitance total. Check read-bus overlap at the second E falling
+            edge and confirm that both devices drive the same captured value.
+          </li>
+          <li>
+            Measure the E-falling-to-U_MIDI_RDATA clock path against the MC6850
+            data hold time. The component-only margin is negative, so resolve
+            the open item in section 13 before committing the layout.
+          </li>
+          <li>
+            Measure the routed <code>MIDI_DTACK_n</code> release path and keep
+            its board contribution below 86.8 ns.
+          </li>
+          <li>
+            Place every 100 nF capacitor at its IC supply pins. Put the 1 uF
+            capacitors beside U_MIDI_ACIA, U_MIDI_CLK, and U_MIDI_OPTO.
+          </li>
+        </ul>
+      </section>
+
+      <section id="signals">
+        <h2>16. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MIDI subsystem signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>MIDI_CYCLE</code></td>
+              <td>U_MIDI_REQ</td>
+              <td>
+                Synchronizer, ACK register, read-enable gate, and completion
+                gate.
+              </td>
+            </tr>
+            <tr>
+              <td><code>MIDI_CLK_5</code></td>
+              <td>U_MIDI_INV from <code>MFP_CLK_5</code></td>
+              <td>Clock divider, synchronizer, and ACK register.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_CLK_DIV5</code></td>
+              <td>U_MIDI_CLK</td>
+              <td>U_MIDI_CLK final divide-by-2 stage.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_CLK_500K</code></td>
+              <td>U_MIDI_CLK</td>
+              <td>MC6850 E, Tx CLK, and Rx CLK.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_E_n</code></td>
+              <td>U_MIDI_INV</td>
+              <td>U_MIDI_SEQ and U_MIDI_RDATA clocks.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_REQ_SYNC</code></td>
+              <td>U_MIDI_SYNC</td>
+              <td>U_MIDI_SEQ asynchronous clears.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_SELECT</code></td>
+              <td>U_MIDI_SEQ first half</td>
+              <td>U_MIDI_SEQ second half and U_MIDI_CS.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_SELECT_n</code></td>
+              <td>U_MIDI_SEQ first-half complementary output</td>
+              <td>U_MIDI_CS.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_DONE</code></td>
+              <td>U_MIDI_SEQ second half</td>
+              <td>U_MIDI_CS, U_MIDI_ACK, and U_MIDI_READ_OE.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_ACK_READY</code></td>
+              <td>U_MIDI_ACK</td>
+              <td>U_MIDI_ACK_GATE.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_ACIA_CS_n</code></td>
+              <td>U_MIDI_CS</td>
+              <td>MC6850 <code>/CS2</code>.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_READ_OE_n</code></td>
+              <td>U_MIDI_READ_OE</td>
+              <td>U_MIDI_RDATA <code>/OE</code>.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_DTACK_n</code></td>
+              <td>U_MIDI_ACK_GATE</td>
+              <td>Motherboard completion tree.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_IRQ_n</code></td>
+              <td>MC6850 pin 7</td>
+              <td>MC68901 GPIP4 and R_MIDI_IRQ.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_RX_OPTO_n</code></td>
+              <td>6N138 pin 6</td>
+              <td>First U_MIDI_SCHMITT channel.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_RX_SCHMITT</code></td>
+              <td>U_MIDI_SCHMITT first channel</td>
+              <td>U_MIDI_SCHMITT second channel.</td>
+            </tr>
+            <tr>
+              <td><code>MIDI_RX_DATA</code></td>
+              <td>Second U_MIDI_SCHMITT channel</td>
+              <td>MC6850 Rx Data and MIDI THRU driver.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources">
+        <h2>17. Sources</h2>
+        <ul>
+          <li>
+            Motorola,
+            <a href="datasheets/MC6850.pdf"
+              ><cite
+                >MC6850 Asynchronous Communications Interface Adapter</cite
+              ></a
+            >, 1985. Device operation, pinout, registers, electrical limits, and
+            bus and serial timing.
+          </li>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >, sections 3.7, 5.1, 10.13, and 10.14.
+          </li>
+          <li>
+            MIDI Manufacturers Association and AMEI MIDI Committee,
+            <a
+              href="https://www.midi.org/wp-content/uploads/wpforo/default_attachments/1709416667-ca33-MIDI-10-Electrical-Specification-Update.pdf"
+              ><cite>MIDI 1.0 Electrical Specification Update</cite></a
+            >, 2014. The 5 V circuit retains the original 220 ohm transmitter
+            values, 5 mA loop, 8-N-1 format, DIN pinout, receiver isolation, and
+            hardware THRU behavior.
+          </li>
+          <li>
+            Hewlett-Packard,
+            <a
+              href="https://bitsavers.org/components/hp/1978_Optoelectronics_Designers_Catalog.pdf"
+              ><cite>Optoelectronics Designer's Catalog</cite></a
+            >, 1978. Historical 6N138 data and switching guidance.
+          </li>
+          <li>
+            Broadcom,
+            <a href="https://docs.broadcom.com/doc/AV02-1359EN"
+              ><cite
+                >6N138/6N139 Low Input Current, High Gain Optocouplers</cite
+              ></a
+            >. Current electrical, package, bypass, and base-resistor data for
+            the period 6N138 family.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="https://www.ti.com/lit/ds/symlink/sn74ls390.pdf"
+              ><cite>SN74LS390 Dual 4-Bit Decade Counter</cite></a
+            >, October 1976, revised March 1988.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74ls07.pdf"><cite>SN74LS07</cite></a
+            >, <a href="datasheets/sn74ls14.pdf"><cite>SN74LS14</cite></a
+            >, <a href="datasheets/sn74hct74.pdf"><cite>SN74HCT74</cite></a
+            >, and
+            <a href="datasheets/sn74hct574.pdf"><cite>SN74HCT574</cite></a>
+            data sheets.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74f00.pdf"><cite>SN74F00</cite></a
+            >, <a href="datasheets/sn74f02.pdf"><cite>SN74F02</cite></a
+            >, <a href="datasheets/sn74f04.pdf"><cite>SN74F04</cite></a
+            >, <a href="datasheets/sn74f10.pdf"><cite>SN74F10</cite></a
+            >, and
+            <a href="datasheets/sn74f32.pdf"><cite>SN74F32</cite></a> data
+            sheets.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

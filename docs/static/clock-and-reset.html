@@ -1,0 +1,4675 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Clock and Reset, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>Clock and Reset</h1>
+
+      <p>
+        This document defines the 10 MHz CPU clock and the requirements for
+        external processor reset.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; loaded clock waveforms, reset edges,
+          and supply-ramp behavior remain to be measured on the assembled board
+        </dd>
+
+        <dt>Clock divider</dt>
+        <dd>
+          SN74F74N divide-by-four implementation frozen; timing checks below
+        </dd>
+
+        <dt>Post-layout clock checks</dt>
+        <dd>Loaded waveforms, routed capacitance, and CPU-pin timing</dd>
+
+        <dt>Master oscillator</dt>
+        <dd>Epson SG-615PH, 40 MHz, C grade (+/-100 ppm)</dd>
+
+        <dt>Intended environment</dt>
+        <dd>
+          Ordinary indoor use; +5 V regulated supply; 0 to 70 C design range
+        </dd>
+
+        <dt>Reset circuit</dt>
+        <dd>
+          DS1233-5, SN74LS14N, and SN74LS07N selected; supply-ramp and loaded
+          transition-time checks are deferred until board bring-up
+        </dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#signal-summary">Signal Summary</a></li>
+        <li>
+          <a href="#internal-signal-reference">Internal Signal Reference</a>
+        </li>
+        <li><a href="#master-oscillator">Master Oscillator</a></li>
+        <li><a href="#cpu-clock-divider">CPU Clock Divider</a></li>
+        <li><a href="#clock-distribution">Clock Distribution and Fanout</a></li>
+        <li><a href="#cpu-clock-timing">CPU Clock Timing Verification</a></li>
+        <li><a href="#power-on-reset">Power-On Reset</a></li>
+        <li><a href="#manual-reset">Manual Reset</a></li>
+        <li>
+          <a href="#processor-reset-halt"
+            >Processor /RESET and /HALT Handling</a
+          >
+        </li>
+        <li><a href="#reset-distribution">Reset Distribution</a></li>
+        <li><a href="#boot-overlay-reset">Boot-Overlay Reset Connection</a></li>
+        <li>
+          <a href="#reset-release-sequencing">Reset Release Sequencing</a>
+        </li>
+        <li>
+          <a href="#electrical-timing-verification"
+            >Electrical and Timing Verification</a
+          >
+        </li>
+        <li>
+          <a href="#post-layout-verification">Post-Layout Verification</a>
+        </li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="signal-summary">
+        <h2>1. Signal Summary</h2>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Clock and reset signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Direction</th>
+              <th scope="col">Meaning</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>MASTER_CLK_40</code></td>
+              <td>Clock source to divider</td>
+              <td>40 MHz master clock.</td>
+              <td>SG-615PH C-grade part installed</td>
+            </tr>
+            <tr>
+              <td><code>CPU_CLK_10</code></td>
+              <td>Divider output</td>
+              <td>
+                10 MHz clock for the MC68EC000, bus-timeout counter, and DRAM
+                clock buffer.
+              </td>
+              <td>Divider selected</td>
+            </tr>
+            <tr>
+              <td><code>CPU_CLK_DIV2</code></td>
+              <td>
+                First divider stage to second divider stage and DRAM clock
+                buffer
+              </td>
+              <td>20 MHz divider and DRAM-sequencer clock.</td>
+              <td>
+                DRAM branch buffered; assembled-board verification required
+              </td>
+            </tr>
+            <tr>
+              <td><code>RESET_RAW_n</code></td>
+              <td>Supervisor and switch to conditioner</td>
+              <td>DS1233 RST with SW_RESET and 1 nF C_RESET_SW.</td>
+              <td>Slow node; first LS14 input only</td>
+            </tr>
+            <tr>
+              <td><code>RESET_STAGE_H</code></td>
+              <td>LS14 stage 1 to stage 2</td>
+              <td>Active-high intermediate reset.</td>
+              <td>U_RESET_COND pin 2 to pin 3</td>
+            </tr>
+            <tr>
+              <td><code>RESET_n</code></td>
+              <td>Reset source to motherboard logic</td>
+              <td>
+                External board-reset request. This is separate from the
+                processor's bidirectional <code>/RESET</code> pin.
+              </td>
+              <td>
+                DS1233-5 and two-stage SN74LS14 conditioner selected; loaded
+                timing open
+              </td>
+            </tr>
+            <tr>
+              <td><code>CPU_RESET_n</code></td>
+              <td>Bidirectional CPU pin</td>
+              <td>
+                External processor reset input and RESET-instruction output.
+              </td>
+              <td>
+                SN74LS07 channel 1 and 3.9 kohm pull-up selected; timing open
+              </td>
+            </tr>
+            <tr>
+              <td><code>CPU_HALT_n</code></td>
+              <td>Bidirectional CPU pin</td>
+              <td>
+                Must be asserted with <code>/RESET</code> for external reset.
+              </td>
+              <td>
+                SN74LS07 channel 2 and 3.9 kohm pull-up selected; timing open
+              </td>
+            </tr>
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Reset buffer to peripheral reset adapters</td>
+              <td>
+                Buffered reset for every reset-capable peripheral that must
+                respond to the processor RESET instruction.
+              </td>
+              <td>LS07 channel 3 and 1 kohm pull-up selected</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="internal-signal-reference">
+        <h2>2. Internal Signal Reference</h2>
+
+        <p>
+          This table defines the clock and reset nets used by the motherboard.
+          Signal names ending in <code>_n</code> are active low. Clock signals
+          have no active-low suffix because both logic states are part of their
+          normal waveform.
+        </p>
+
+        <p>
+          The reset nets represent different reset domains. They are not
+          interchangeable, even when a complete motherboard reset asserts
+          several of them at once.
+        </p>
+
+        <p>
+          This section lists nets owned by the clock and reset design. Overlay
+          and address-decode signals such as <code>OVERLAY_EN</code>,
+          <code>OVERLAY_n</code>, <code>OVERLAY_WRITE_n</code>, and
+          <code>ROM_ALIAS_n</code> remain in the
+          <a href="bus-and-decode.html#internal-signal-reference"
+            >Bus and Decode internal signal reference</a
+          >. Component references, resistor references, package-pin names, and
+          the direct SN74F74 complementary-output feedback wires are not
+          separate motherboard signal names.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Clock and reset internal signals
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Type / polarity</th>
+              <th scope="col">Source</th>
+              <th scope="col">Consumers</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>MASTER_CLK_40</code></td>
+              <td>40 MHz clock</td>
+              <td><code>Y_MASTER_CLK</code>, Epson SG-615PH</td>
+              <td><code>U_CPU_CLK</code> pin 3, first-stage clock input</td>
+              <td>
+                Free-running 40 MHz motherboard master clock. It is not stopped
+                or gated by reset.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_CLK_DIV2</code></td>
+              <td>20 MHz clock</td>
+              <td><code>U_CPU_CLK</code> pin 5, first-stage Q output</td>
+              <td>
+                <code>U_CPU_CLK</code> pin 11 and
+                <code>U_DRAM_CLK_BUF</code> pin 2
+              </td>
+              <td>
+                Divider and DRAM-sequencer clock. It is not a general-purpose
+                motherboard clock.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_CLK_10</code></td>
+              <td>10 MHz clock</td>
+              <td>
+                <code>U_CPU_CLK</code> pin 9, second-stage Q output, through
+                <code>R_CPU_CLK</code>
+              </td>
+              <td>
+                MC68EC000 <code>CLK</code>; <code>U_TIMEOUT</code> CD74HCT4040E
+                <code>CP</code> input; <code>U_DRAM_CLK_BUF</code> pin 13
+              </td>
+              <td>
+                Free-running processor and bus-timing clock derived from
+                <code>MASTER_CLK_40</code> by division by four.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>RESET_RAW_n</code></td>
+              <td>Active-low reset source; slow transitions permitted</td>
+              <td>
+                <code>U_RESET_SUP</code> DS1233-5 <code>RST</code>, pin 2;
+                <code>SW_RESET</code> can pull the net low
+              </td>
+              <td>
+                <code>C_RESET_SW</code>; <code>U_RESET_COND</code> pin 1, first
+                SN74LS14 Schmitt-trigger input
+              </td>
+              <td>
+                Raw power-on, brownout, and manual-reset node. This signal is
+                intentionally conditioned before being used by ordinary
+                motherboard logic.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>RESET_STAGE_H</code></td>
+              <td>Active-high internal reset stage</td>
+              <td><code>U_RESET_COND</code> pin 2, first-inverter output</td>
+              <td><code>U_RESET_COND</code> pin 3, second-inverter input</td>
+              <td>
+                Implementation-only signal between the two SN74LS14
+                Schmitt-trigger stages. It is not a motherboard reset domain and
+                must not be used elsewhere.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>RESET_n</code></td>
+              <td>Active-low motherboard reset</td>
+              <td><code>U_RESET_COND</code> pin 4, second-inverter output</td>
+              <td>
+                <code>U_OVERLAY</code> pin 4, asynchronous preset;
+                <code>U_RESET_DRV</code> pins 1 and 3, CPU reset and halt driver
+                inputs; four inputs of <code>U_DRAM_RESET_BUF</code>, which fan
+                reset out to the DRAM controller
+              </td>
+              <td>
+                Complete motherboard reset. Asserted by power-on, brownout, or
+                manual reset. Re-enables the boot-ROM overlay and externally
+                resets the processor.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_RESET_n</code></td>
+              <td>Active-low bidirectional processor node</td>
+              <td><code>U_RESET_DRV</code> channel 1 or the MC68EC000</td>
+              <td>
+                MC68EC000 <code>/RESET</code> pin;
+                <code>U_RESET_DRV</code> channel-3 input
+              </td>
+              <td>
+                Actual processor <code>/RESET</code> signal. It is asserted by a
+                complete motherboard reset and may also be asserted by the
+                processor while executing the RESET instruction. It does not
+                feed back into <code>RESET_n</code>.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_HALT_n</code></td>
+              <td>Active-low bidirectional processor node</td>
+              <td><code>U_RESET_DRV</code> channel 2 or the MC68EC000</td>
+              <td>MC68EC000 <code>/HALT</code> pin</td>
+              <td>
+                Actual processor <code>/HALT</code> signal. Motherboard reset
+                asserts it together with <code>CPU_RESET_n</code>, but processor
+                halt conditions may also assert it independently.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Active-low buffered peripheral reset</td>
+              <td>
+                <code>U_RESET_DRV</code> channel 3, driven from
+                <code>CPU_RESET_n</code>
+              </td>
+              <td>Peripheral-specific reset adaptation circuits</td>
+              <td>
+                Buffered reset-distribution source for peripherals that must
+                respond both to complete motherboard reset and to a processor
+                RESET instruction.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Reset-Domain Relationships</h3>
+
+        <pre><code>DS1233 / manual switch
+        |
+        v
+RESET_RAW_n
+        |
+        v
+SN74LS14 conditioner
+        |
+        v
+RESET_n -------------------------> boot-overlay initialization
+   |
+   +----> LS07 ----> CPU_RESET_n ----> MC68EC000 /RESET
+   |                     |
+   |                     +----> LS07 ----> PERIPH_RESET_n
+   |                                         |
+   |                                         +--> peripheral reset adapters
+   |
+   +----> LS07 ----> CPU_HALT_n -----> MC68EC000 /HALT
+
+
+MC68EC000 RESET instruction
+        |
+        +---------------------> CPU_RESET_n
+                                      |
+                                      +--> PERIPH_RESET_n
+
+        does not assert RESET_n</code></pre>
+
+        <h3>Clock-Domain Relationships</h3>
+
+        <pre><code>SG-615PH
+    |
+    +-- MASTER_CLK_40
+            |
+            +-- divide by 2
+                    |
+                    +-- CPU_CLK_DIV2
+                            |
+                            +-- divide by 2
+                                    |
+                                    +-- CPU_CLK_10
+                                            |
+                                            +-- MC68EC000 CLK
+                                            |
+                                            +-- timeout counter CLK
+                                            |
+                                            +-- DRAM clock buffer
+                                                    |
+                                                    +-- startup/refresh counters</code></pre>
+
+        <h3>Signal-Use Rules</h3>
+
+        <p>
+          <code>RESET_RAW_n</code> must not be used directly as a general
+          motherboard logic reset. Its slow transition behavior is intentional,
+          and ordinary logic uses the conditioned <code>RESET_n</code> signal.
+        </p>
+
+        <p>
+          <code>RESET_STAGE_H</code> is local to <code>U_RESET_COND</code> and
+          must not acquire additional loads or architectural meaning.
+        </p>
+
+        <p>
+          <code>CPU_RESET_n</code> and <code>CPU_HALT_n</code> connect to
+          bidirectional, open-drain processor pins. Their pull-ups and one-way
+          open-collector drivers are part of each net definition; neither net is
+          an ordinary push-pull output.
+        </p>
+
+        <p>
+          Additional peripherals should use
+          <code>PERIPH_RESET_n</code> rather than attaching directly to
+          <code>CPU_RESET_n</code>, unless a specific peripheral interface
+          requires direct observation of the processor pin and the resulting
+          electrical loading has been re-verified.
+        </p>
+
+        <p>
+          <code>CPU_CLK_DIV2</code> is allocated only to the second divider
+          stage and the DRAM sequencer. Any further consumer must be documented
+          and included in the clock-loading analysis.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          The names, polarity, and reset-domain boundaries in this table are
+          frozen. Adding a consumer does not create a new signal name, but it
+          does require the applicable clock-load or reset-load analysis to be
+          repeated. Layout capacitance, waveform measurements, and peripheral
+          reset fanout are post-layout verification items. The CPU clock uses
+          the conservative timing targets defined below.
+        </p>
+      </section>
+
+      <section id="master-oscillator">
+        <h2>3. Master Oscillator</h2>
+
+        <p>
+          <code>Y_MASTER_CLK</code> is the installed Epson
+          <code>SG-615PH</code> 40 MHz oscillator, reported as tested. It
+          supplies <code>MASTER_CLK_40</code> to the first SN74F74N stage. The
+          PH is a 5 V CMOS-output part in a four-pin SOJ package; 40 MHz is
+          within its 26.001 to 66.667 MHz range.
+        </p>
+
+        <p>
+          The added
+          <a href="datasheets/SG-615_531_51_Series_DS.pdf">series datasheet</a>
+          omits the PH variant. The values below use Epson's
+          <a href="datasheets/SG-615PH_en.pdf">SG-615PH datasheet</a>, page 1,
+          with the package pin map on page 2. The installed marking is recorded
+          below. Board measurements are deferred until bring-up.
+        </p>
+
+        <h3>Physical Connections</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Y_MASTER_CLK SG-615PH connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>OE</code></td>
+              <td>+5 V</td>
+              <td>
+                Output permanently enabled; independent of motherboard reset.
+              </td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>GND</code></td>
+              <td>Ground</td>
+              <td>Power return.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>OUT</code></td>
+              <td><code>MASTER_CLK_40</code></td>
+              <td>40 MHz master-clock output.</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+              <td>Oscillator power.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Connect 100 nF + 1uF between pins 4 and 2, close to the package. This
+          is within Epson's recommended 0.01 to 0.1 uF bypass range. Pin 1 tied
+          to VCC meets the PH output-enable high threshold of 80 percent of VCC.
+          Neither OE nor the divider clock is gated by reset.
+        </p>
+
+        <h3>Electrical Characteristics</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            SG-615PH limits and checks against the SN74F74N input
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Datasheet value</th>
+              <th scope="col">Design check</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Frequency</td>
+              <td>26.001 to 66.667 MHz</td>
+              <td>Installed nominal frequency: 40.000 MHz.</td>
+              <td>Within range</td>
+            </tr>
+            <tr>
+              <td>Supply</td>
+              <td>4.5 to 5.5 V</td>
+              <td>Matches the divider supply range.</td>
+              <td>Compatible</td>
+            </tr>
+            <tr>
+              <td>Operating temperature</td>
+              <td>-20 to 70 C</td>
+              <td>Clock chain limited to 0 to 70 C by the SN74F74N.</td>
+              <td>Compatible over 0 to 70 C</td>
+            </tr>
+            <tr>
+              <td>High output</td>
+              <td>VCC - 0.4 V minimum at IOH = -4 mA</td>
+              <td>
+                4.1 V at minimum supply; 2.1 V above the F74's 2 V input
+                threshold.
+              </td>
+              <td>DC margin verified</td>
+            </tr>
+            <tr>
+              <td>Low output</td>
+              <td>0.4 V maximum at IOL = 4 mA</td>
+              <td>0.4 V below the F74's 0.8 V input limit.</td>
+              <td>DC margin verified</td>
+            </tr>
+            <tr>
+              <td>Input-current load</td>
+              <td>PH output source/sink rating: 4 mA</td>
+              <td>
+                One F74 CLK input requires at most 20 uA high or 0.6 mA low.
+              </td>
+              <td>DC drive verified</td>
+            </tr>
+            <tr>
+              <td>Capacitive load</td>
+              <td>50 pF maximum</td>
+              <td>
+                Include divider input, traces, socket or adapter, and probe
+                capacitance. F74 input capacitance is not specified in its
+                datasheet.
+              </td>
+              <td>Board verification required</td>
+            </tr>
+            <tr>
+              <td>Symmetry</td>
+              <td>40 to 60 percent at 50 percent of VCC</td>
+              <td>
+                10 ns minimum nominal interval at Epson's measurement level.
+              </td>
+              <td>TTL-level pulse width not established</td>
+            </tr>
+            <tr>
+              <td>Rise / fall time</td>
+              <td>7 ns maximum each, between 20 and 80 percent of VCC</td>
+              <td>These levels differ from the F74 input thresholds.</td>
+              <td>Post-layout waveform measurement required</td>
+            </tr>
+            <tr>
+              <td>Supply current</td>
+              <td>35 mA maximum, no load</td>
+              <td>
+                Loaded operating current must also be included in the power
+                budget.
+              </td>
+              <td>No-load value verified</td>
+            </tr>
+            <tr>
+              <td>Startup</td>
+              <td>10 ms maximum from minimum supply voltage</td>
+              <td>Allow startup before the processor's reset hold interval.</td>
+              <td>Sequencing requirement defined below</td>
+            </tr>
+            <tr>
+              <td>Frequency tolerance</td>
+              <td>B: +/-50 ppm; C: +/-100 ppm over -20 to 70 C</td>
+              <td>
+                Installed C grade: +/-100 ppm. The B option is limited to 55
+                MHz.
+              </td>
+              <td>C grade confirmed from reported marking</td>
+            </tr>
+            <tr>
+              <td>Aging</td>
+              <td>+/-5 ppm maximum in the first year, at 25 C and 5 V</td>
+              <td>This is not a lifetime bound for the existing oscillator.</td>
+              <td>Included in the accepted clock tolerance policy</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Frequency and Pulse Width</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Tolerance-only frequency bounds, excluding aging and jitter
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Grade</th>
+              <th scope="col">Master frequency range</th>
+              <th scope="col">CPU frequency range</th>
+              <th scope="col">Shortest steady CPU period</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>C, +/-100 ppm</td>
+              <td>39.996 to 40.004 MHz</td>
+              <td>9.999 to 10.001 MHz</td>
+              <td>100 ns / 1.0001, approximately 99.990 ns</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The design accepts the installed C-grade oscillator. Its
+          tolerance-only upper bound is 10.001 MHz at the CPU. This normal
+          oscillator tolerance is acceptable for the MC68EC000FN10 used on the
+          board; no oscillator or divider change is required.
+        </p>
+
+        <p>
+          At the C-grade upper frequency, the period is approximately 24.9975 ns
+          and 40 percent is approximately 9.999 ns. That interval is measured at
+          50 percent of VCC. It cannot be compared directly with the F74's 4 ns
+          high and 5 ns low requirements without accounting for the measurement
+          thresholds and edge shape. The PH datasheet supplies no TTL-level
+          symmetry or jitter limit. Check the loaded waveform at the divider pin
+          before closing this item.
+        </p>
+
+        <h3>Startup and Reset</h3>
+
+        <p>
+          The oscillator runs while its supply is valid and OE is high. For
+          power-on reset, allow its 10 ms maximum startup time from VCC reaching
+          4.5 V, then hold the processor's reset inputs for at least 100 ms
+          after power and the divided clock are valid. A fixed-delay
+          implementation therefore needs at least 110 ms from valid supply, plus
+          allowance for divider settling and timer tolerance. A nominal 100 ms
+          timer starting at power application does not meet this conservative
+          sequence.
+        </p>
+
+        <h3>Installed-Part Record</h3>
+
+        <pre><code>Reported marking: sg-615PH C 40.0000 M 6270A
+Model: SG-615PH
+Tolerance grade: C (+/-100 ppm)
+Nominal frequency: 40.0000 MHz
+Additional marking: 6270A (date/lot decoding unverified)</code></pre>
+
+        <p>
+          The meaning of <code>6270A</code> is not needed for the electrical
+          design. Record measured frequency and waveform results during board
+          bring-up.
+        </p>
+      </section>
+
+      <section id="cpu-clock-divider">
+        <h2>4. CPU Clock Divider</h2>
+
+        <p>
+          <code>U_CPU_CLK</code>, a Texas Instruments <code>SN74F74N</code> dual
+          positive-edge-triggered D-type flip-flop, divides
+          <code>MASTER_CLK_40</code> by four. Each half is a toggle stage with
+          its complementary output connected to its D input.
+        </p>
+
+        <pre><code>MASTER_CLK_40 -> divide by 2 -> divide by 2 -> CPU_CLK_10
+
+CPU_CLK_DIV2 = NOT CPU_CLK_DIV2 on each MASTER_CLK_40 rising edge
+CPU_CLK_10   = NOT CPU_CLK_10 on each CPU_CLK_DIV2 rising edge</code></pre>
+
+        <p>
+          <code>CPU_CLK_DIV2</code> is the 20 MHz divider node and the selected
+          DRAM-sequencer clock. Its state allocations and memory timing belong
+          in <a href="dram.html#sequencer-clock-selection">dram.html</a>.
+        </p>
+
+        <h3>Physical Connections</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_CPU_CLK SN74F74N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>14</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+              <td>Power</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td><code>GND</code></td>
+              <td>Ground</td>
+              <td>Power return</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>1CLK</code></td>
+              <td><code>MASTER_CLK_40</code></td>
+              <td>First-stage clock</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>1D</code></td>
+              <td>Pin 6, <code>1/Q</code></td>
+              <td>First-stage toggle feedback</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td><code>1Q</code></td>
+              <td><code>CPU_CLK_DIV2</code></td>
+              <td>20 MHz divider output</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td><code>1/Q</code></td>
+              <td>Pin 2, <code>1D</code></td>
+              <td>First-stage complementary feedback</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>1PRE_n</code></td>
+              <td>+5 V</td>
+              <td>Asynchronous preset inactive</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>1CLR_n</code></td>
+              <td>+5 V</td>
+              <td>Asynchronous clear inactive</td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td><code>2CLK</code></td>
+              <td>Pin 5, <code>CPU_CLK_DIV2</code></td>
+              <td>Second-stage clock</td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td><code>2D</code></td>
+              <td>Pin 8, <code>2/Q</code></td>
+              <td>Second-stage toggle feedback</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td><code>2Q</code></td>
+              <td>
+                <code>CPU_CLK_10</code> through <code>R_CPU_CLK</code> (0 ohms
+                initially)
+              </td>
+              <td>10 MHz CPU clock; series-link provision defined below</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td><code>2/Q</code></td>
+              <td>
+                Pin 12, <code>2D</code>, and <code>U_EXP_CLK_PHASE</code> input
+              </td>
+              <td>
+                Second-stage complementary feedback and expansion-clock source;
+                see <a href="expansion.html">Expansion Slots</a>
+              </td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td><code>2PRE_n</code></td>
+              <td>+5 V</td>
+              <td>Asynchronous preset inactive</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td><code>2CLR_n</code></td>
+              <td>+5 V</td>
+              <td>Asynchronous clear inactive</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          A 100 nF ceramic capacitor and a 1 uF capacitor are connected in
+          parallel between pins 14 and 7 and placed near the package.
+        </p>
+
+        <h3>Divider Feedback Timing and Loading</h3>
+
+        <p>
+          The values below are the SN74F74 limits over its recommended
+          temperature range of 0 to 70 C at <code>VCC = 5 V +/-0.5 V</code>.
+          Switching values use <code>CL = 50 pF</code> and
+          <code>RL = 500 ohms</code>. Feedback calculations assume a steady 40
+          MHz input and short feedback traces. C-grade tolerance reduces the
+          shortest steady input period to approximately 24.9975 ns; jitter and
+          final board loading still need checking.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Divider timing checks against SN74F74 limits
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Requirement or limit</th>
+              <th scope="col">Design value</th>
+              <th scope="col">Result</th>
+              <th scope="col">Source</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Clock pulse duration</td>
+              <td>4 ns minimum high; 5 ns minimum low</td>
+              <td>
+                SG-615PH: approximately 9.999 ns minimum at 50 percent VCC,
+                using C-grade tolerance only
+              </td>
+              <td>
+                Open: verify at the divider's measurement levels with actual
+                loading
+              </td>
+              <td>SN74F74, page 2-3, timing requirements</td>
+            </tr>
+            <tr>
+              <td>Toggle-feedback setup time</td>
+              <td>2 ns for high data; 3 ns for low data</td>
+              <td>
+                Approximately 15.7975 ns: 24.9975 ns period minus 9.2 ns maximum
+                output delay
+              </td>
+              <td>
+                Pass under the stated assumptions; approximately 12.7975 ns
+                conservative setup margin
+              </td>
+              <td>SN74F74, pages 2-3 and 2-4</td>
+            </tr>
+            <tr>
+              <td>Toggle-feedback hold time</td>
+              <td>1 ns minimum for high or low data</td>
+              <td>3 ns minimum clock-to-output delay</td>
+              <td>Pass under the stated assumptions; 2 ns hold margin</td>
+              <td>SN74F74, pages 2-3 and 2-4</td>
+            </tr>
+            <tr>
+              <td>Master oscillator drive</td>
+              <td>
+                VIH &gt;= 2 V; VIL &lt;= 0.8 V; IIH &lt;= 20 uA; IIL magnitude
+                &lt;= 0.6 mA
+              </td>
+              <td>
+                SG-615PH: VOH &gt;= 4.1 V at minimum supply, VOL &lt;= 0.4 V, 4
+                mA source/sink rating
+              </td>
+              <td>DC levels and input-current load verified</td>
+              <td>
+                SN74F74, page 2-3, recommended conditions and electrical
+                characteristics
+              </td>
+            </tr>
+            <tr>
+              <td>CPU clock load</td>
+              <td>
+                F74 switching limits specified at CL = 50 pF and RL = 500 ohms
+              </td>
+              <td>
+                20 pF maximum CPU input plus 10 pF CD74HCT4040 and 10 pF
+                CD74ACT244 inputs: 40 pF before board parasitics
+              </td>
+              <td>
+                10 pF remains for traces, sockets, and probe; verify the loaded
+                clock on the assembled board
+              </td>
+              <td>
+                SN74F74 page 2-4; M68000UM section 10.13; CD74HCT4040 and
+                CD74ACT244 section 5.6 tables
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Logic-Level Compatibility</h3>
+
+        <p>
+          The following limits use <code>VCC = 4.5 V</code> and the SN74F74
+          electrical characteristics on page 2-3. The divider's D and CLK inputs
+          also use 2.0 V and 0.8 V thresholds. Each feedback output drives one D
+          input, and <code>1Q</code> drives one CLK input; their 20 uA
+          high-state and 0.6 mA low-state loads are within the F74's 1 mA source
+          and 20 mA sink ratings. The second-stage complementary output also
+          drives one SN74F04 input for the expansion clock. Its added 20 uA high
+          or 0.6 mA low load keeps the total within the same ratings. The
+          SG-615PH also supports the first-stage CLK input's DC load.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            SN74F74 output to MC68EC000 clock-input margins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Driver limit</th>
+              <th scope="col">CPU threshold</th>
+              <th scope="col">Margin</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>High level</td>
+              <td><code>VOH(min) = 2.5 V</code> at <code>IOH = -1 mA</code></td>
+              <td><code>VIH(min) = 2.0 V</code></td>
+              <td>0.5 V</td>
+              <td>Pass</td>
+            </tr>
+            <tr>
+              <td>Low level</td>
+              <td><code>VOL(max) = 0.5 V</code> at <code>IOL = 20 mA</code></td>
+              <td><code>VIL(max) = 0.8 V</code></td>
+              <td>0.3 V</td>
+              <td>Pass</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Startup Behavior</h3>
+
+        <p>
+          The divider free-runs and its asynchronous preset and clear inputs
+          remain inactive. Its power-up phase is unspecified. The reset circuit
+          must hold the processor in reset until <code>MASTER_CLK_40</code> and
+          <code>CPU_CLK_10</code> are stable. An ordinary board reset must not
+          stop the CPU clock.
+        </p>
+      </section>
+
+      <section id="clock-distribution">
+        <h2>5. Clock Distribution and Fanout</h2>
+
+        <p>
+          Each clock net has a defined set of consumers. Check the loading and
+          timing effect before adding another consumer or test-point branch.
+        </p>
+
+        <pre><code>Y_MASTER_CLK
+    |
+    +-- MASTER_CLK_40
+            |
+            +-- U_CPU_CLK first-stage CLK
+
+U_CPU_CLK first stage
+    |
+    +-- CPU_CLK_DIV2
+            |
+            +-- U_CPU_CLK second-stage CLK
+            |
+            +-- U_DRAM_CLK_BUF 20 MHz input
+
+U_CPU_CLK second stage (2Q, pin 9)
+    |
+    R_CPU_CLK (0 ohms initially)
+    |
+    CPU_CLK_10
+    |
+    +-- MC68EC000 CLK
+    |
+    +-- U_TIMEOUT CD74HCT4040E CP (pin 10)
+    |
+    +-- U_DRAM_CLK_BUF 10 MHz input
+            |
+            +-- DRAM_CLK_10
+                    |
+                    +-- U_STARTUP_DIV CD74HCT4040E CP (pin 10)
+                    +-- U_REFRESH_DIV CD74HCT4040E CP (pin 10)
+                    +-- U_DRAM_CLK_BUF pin 15 -&gt; ROM_CLK  (firmware ROM)
+                    +-- U_DRAM_CLK_BUF pin 17 -&gt; INT_CLK  (interrupt logic,
+                                                           MFP divider, RTC)</code></pre>
+
+        <p>
+          The DRAM controller uses a <code>CD74ACT244E</code> clock buffer. Its
+          20 MHz output feeds four matched controller branches. Its 10 MHz
+          output feeds the two DRAM divider counters and two further channels of
+          the same buffer, which produce <code>ROM_CLK</code> and
+          <code>INT_CLK</code>. Every subsystem clock derived from the 10 MHz
+          net therefore leaves the buffer rather than the divider, so the CPU
+          and timeout paths keep the motherboard clock to themselves. The
+          channel assignment is in
+          <a href="dram.html#clock-distribution">dram.html</a>.
+        </p>
+
+        <h3>MASTER_CLK_40 Loading</h3>
+
+        <p>
+          <code>MASTER_CLK_40</code> is driven directly by
+          <code>Y_MASTER_CLK</code>, the SG-615PH oscillator. It presently
+          drives only the first clock input of <code>U_CPU_CLK</code>.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MASTER_CLK_40 loading
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Load</th>
+              <th scope="col">Maximum input capacitance</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>U_CPU_CLK</code> first-stage clock input</td>
+              <td>Not specified</td>
+              <td>
+                The SN74F74 datasheet gives input currents, not a guaranteed CLK
+                input capacitance.
+              </td>
+            </tr>
+
+            <tr>
+              <td>PCB trace, adapter, socket, pads, and probe</td>
+              <td>Measured on assembled board</td>
+              <td>
+                Budget is 50 pF minus the established divider-input load. Accept
+                only a clean 40 MHz edge at the divider input within the
+                oscillator's 50 pF load condition.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The SG-615PH specifies operation with up to a 50 pF CMOS output load.
+          The divider's unknown input capacitance prevents a numerical remaining
+          budget. Include all connected loads, including the probe during
+          testing, within that 50 pF limit.
+        </p>
+
+        <p>
+          <code>MASTER_CLK_40</code> shall not be distributed around the
+          motherboard as a convenient unrelated 40 MHz timing source. Any future
+          consumer must be added explicitly to this load calculation.
+        </p>
+
+        <h3>CPU_CLK_DIV2 Loading</h3>
+
+        <p>
+          <code>CPU_CLK_DIV2</code> drives the second divide-by-two stage and
+          one input of <code>U_DRAM_CLK_BUF</code>. Buffered branches A-D drive
+          the request synchronizer, transaction register, acknowledgement
+          register, phase counter, state/control registers, and refresh logic as
+          specified in
+          <a href="dram.html#controller-implementation">dram.html</a>.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            CPU_CLK_DIV2 loading
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Load</th>
+              <th scope="col">Maximum input capacitance</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>U_CPU_CLK</code> second-stage clock input</td>
+              <td>Not specified</td>
+              <td>
+                SN74F74 pin 11 (2CLK); no guaranteed input-capacitance value is
+                published.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>U_DRAM_CLK_BUF</code> pin 2</td>
+              <td>10 pF maximum</td>
+              <td>
+                One <code>CD74ACT244E</code> input. Its output drives the DRAM
+                controller branches, so those loads do not appear here.
+              </td>
+            </tr>
+
+            <tr>
+              <td>PCB trace, pads, socket, and probe</td>
+              <td>Measured on assembled board</td>
+              <td>
+                Determine the total with the 2CLK input. Use 50 pF as the
+                timing-analysis load target, subject to the F74 test-condition
+                caveat below.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The controller branch is one ACT input with at most 1 uA leakage and
+          10 pF capacitance. It fits the SN74F74's DC ratings. The divider input
+          capacitance is not specified, so accept the branch by measuring a
+          clean clock at both receivers. The two complementary-Q feedback paths
+          each drive a separate D input; they are not additional loads on
+          <code>CPU_CLK_DIV2</code> or <code>CPU_CLK_10</code>, but their own
+          loading affects toggle-feedback timing.
+        </p>
+
+        <h3>CPU_CLK_10 Loading</h3>
+
+        <p>
+          <code>CPU_CLK_10</code> is the principal distributed clock produced by
+          the divider. It has three consumers: the MC68EC000 CPU, the
+          CD74HCT4040 used by the bus-timeout circuit, and one input of the DRAM
+          <code>CD74ACT244E</code> clock buffer.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            CPU_CLK_10 capacitive load
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Load</th>
+              <th scope="col">Maximum capacitance</th>
+              <th scope="col">Source</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>MC68EC000 <code>CLK</code></td>
+              <td>20 pF</td>
+              <td>
+                M68000UM, section 10.13: Vin = 0 V, TA = 25 C, test frequency =
+                1 MHz; periodically sampled.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>U_TIMEOUT</code> CD74HCT4040 clock input</td>
+              <td>10 pF</td>
+              <td>CD74HCT4040 datasheet, section 5.6</td>
+            </tr>
+
+            <tr>
+              <td><code>U_DRAM_CLK_BUF</code> CD74ACT244 input</td>
+              <td>10 pF</td>
+              <td>CD74ACT244 datasheet, section 5.6</td>
+            </tr>
+
+            <tr>
+              <td>Known device load total</td>
+              <td>40 pF maximum</td>
+              <td>20 pF + 10 pF + 10 pF</td>
+            </tr>
+
+            <tr>
+              <td>PCB trace, socket, and pad capacitance</td>
+              <td>Within the 10 pF remaining budget, shared with any probe</td>
+              <td>Verify this allocation from the assembled clock waveform.</td>
+            </tr>
+
+            <tr>
+              <td>Debug probe capacitance</td>
+              <td>Probe-specific; included while attached</td>
+              <td>
+                Use the probe's specified input capacitance in the same 10 pF
+                remaining budget. No probe model is selected.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The divider switching characteristics used elsewhere in this document
+          are specified with a 50 pF output test load. The known
+          receiving-device capacitance is 40 pF maximum, leaving 10 pF between
+          the known device loads and that test condition.
+        </p>
+
+        <p>
+          The F74's 50 pF figure is a switching-test condition, not an absolute
+          maximum output-load rating. Those limits also specify a 500 ohm test
+          load and defined input waveforms. A total capacitance at or below 50
+          pF does not by itself guarantee the published minimum and maximum
+          delays, edge rates, or pulse widths on the board. Check the complete
+          test conditions and loaded waveform. Exceeding 50 pF requires new
+          timing analysis; it does not alone establish an electrical overstress
+          condition.
+        </p>
+
+        <pre><code>CPU_CLK_10 known input load = 20 pF + 10 pF + 10 pF = 40 pF
+Timing-analysis load target = 50 pF
+Remaining allocation = 50 pF - 40 pF = 10 pF
+
+C_trace + C_pads + C_socket + C_adapter + C_probe &lt;= 10 pF</code></pre>
+
+        <p>
+          Count each capacitance once. The device input figures already describe
+          the packaged inputs; do not add the same input-package capacitance
+          again. A routing estimate needs the board stackup, trace geometry, and
+          lengths. The assembled-board waveform is the acceptance result.
+        </p>
+
+        <h3>DC Fanout</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            DC load checks, separate from capacitive timing checks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Driver and load</th>
+              <th scope="col">Receiving-device current</th>
+              <th scope="col">Driver source / sink rating</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>SG-615PH to one F74 CLK input</td>
+              <td>20 uA high; 0.6 mA low</td>
+              <td>4 mA / 4 mA</td>
+              <td>DC load fits</td>
+            </tr>
+            <tr>
+              <td>F74 1Q to one F74 CLK input</td>
+              <td>20 uA high; 0.6 mA low</td>
+              <td>1 mA / 20 mA</td>
+              <td>DC load fits</td>
+            </tr>
+            <tr>
+              <td>Each F74 complementary-Q output to its own D input</td>
+              <td>20 uA high; 0.6 mA low, per output</td>
+              <td>1 mA / 20 mA, per output</td>
+              <td>DC load fits; keep each feedback trace local</td>
+            </tr>
+            <tr>
+              <td>F74 2Q to CPU CLK, timeout CP, and ACT244 input</td>
+              <td>
+                2.5 uA CPU leakage + 1 uA counter + 1 uA ACT input = 4.5 uA
+                screening total
+              </td>
+              <td>1 mA / 20 mA</td>
+              <td>Published leakage values are below the drive ratings</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Sources are SN74F74 page 2-3, SG-615PH page 1, M68000UM section 10.13,
+          CD74HCT4040 section 5.5, and CD74ACT244 section 5.5. The CPU specifies
+          input leakage at 5.25 V; the logic inputs specify leakage at their
+          rails. These are DC checks under the cited conditions, not estimates
+          of transient charging current. The counter uses the same 2.0 V high
+          and 0.8 V low thresholds as the CPU, giving 0.5 V high and 0.3 V low
+          margins from the F74's 2.5 V / 0.5 V output limits at VCC = 4.5 V.
+        </p>
+
+        <h3>Routing Rules</h3>
+
+        <p>
+          Clock traces shall be kept short and direct, with a continuous ground
+          reference on the adjacent plane. Long stubs and unnecessary test-point
+          branches shall be avoided.
+        </p>
+
+        <p>
+          Route <code>CPU_CLK_DIV2</code> only to the second divider stage and
+          <code>U_DRAM_CLK_BUF</code>. Keep the buffer root and its four
+          controller branches local to the DRAM logic.
+          <code>MASTER_CLK_40</code> should run only from the oscillator to the
+          divider unless another documented clock consumer is later added.
+        </p>
+
+        <p>
+          <code>CPU_CLK_10</code> shall be routed from the divider to the CPU,
+          timeout counter, and <code>U_DRAM_CLK_BUF</code>. The buffer's 10 MHz
+          output supplies the startup and refresh counters. The layout must be
+          reviewed for total capacitive load and for excessive trace length
+          before clock timing is considered complete.
+        </p>
+
+        <h3>Source Termination Provision</h3>
+
+        <p>
+          The PCB shall provide a series-resistor footprint immediately adjacent
+          to the <code>CPU_CLK_10</code> driver output. The initial assembly
+          value is 0 ohms so that it acts as a direct connection. Designate this
+          provision <code>R_CPU_CLK</code>; the CPU, timeout, and DRAM-buffer
+          branches are downstream of it.
+        </p>
+
+        <p>
+          No nonzero termination resistance is presently specified. If bring-up
+          measurements show overshoot, undershoot, ringing, or multiple
+          threshold crossings, the resistor value shall be selected from the
+          measured waveform and actual PCB interconnect rather than guessed in
+          advance. Any nonzero value requires another edge-rate, pulse-width,
+          and logic-level check at both receivers. A footprint and initial value
+          are specified here; no PCB layout or assembled termination has been
+          verified.
+        </p>
+
+        <h3>Clock-Net Ownership</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Allowed clock-net consumers
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Current consumers</th>
+              <th scope="col">Distribution status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>MASTER_CLK_40</code></td>
+              <td><code>U_CPU_CLK</code> first stage</td>
+              <td>Dedicated oscillator-to-divider connection</td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_CLK_DIV2</code></td>
+              <td>
+                <code>U_CPU_CLK</code> second stage and
+                <code>U_DRAM_CLK_BUF</code>
+              </td>
+              <td>Restricted 20 MHz source; DRAM branches buffered</td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_CLK_10</code></td>
+              <td>
+                MC68EC000, CD74HCT4040 timeout counter, and
+                <code>U_DRAM_CLK_BUF</code>, which rebuffers it as
+                <code>DRAM_CLK_10</code>, <code>ROM_CLK</code>, and
+                <code>INT_CLK</code>
+              </td>
+              <td>Motherboard-distributed CPU/bus clock</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Status</h3>
+
+        <p>
+          The consumer list and 0 ohm series-link provision are defined. DC
+          fanout checks pass under the cited datasheet conditions. The remaining
+          checks are the F74 input-capacitance estimate, board and probe
+          loading, and waveforms at both receivers. No separate buffer is
+          selected; the need for one remains subject to those checks.
+        </p>
+      </section>
+
+      <section id="cpu-clock-timing">
+        <h2>6. CPU Clock Timing Verification</h2>
+
+        <p>
+          <code>CPU_CLK_10</code> is generated by dividing
+          <code>MASTER_CLK_40</code> by four with the SN74F74N divider. A
+          nominal 40 MHz input gives a nominal 10 MHz CPU clock with a 100 ns
+          period. The MC68EC000-specific bus-timing tables in M68000UM section
+          10.14 include 10 MHz operation, and the addendum's ordering table
+          lists the FN package in the 10 MHz speed grade.
+        </p>
+
+        <p>
+          The MC68EC000FN10 supports 10 MHz operation. This design permits the
+          installed oscillator's C-grade tolerance of +/-100 ppm, which gives a
+          tolerance-only upper bound of 10.001 MHz after division. See the
+          oscillator section for the frequency bounds.
+        </p>
+
+        <h3>Divider Input Timing</h3>
+
+        <p>
+          At <code>VCC = 5 V +/-0.5 V</code>, <code>CL = 50 pF</code>, and
+          <code>RL = 500 ohms</code>, the SN74F74 switching table gives a
+          minimum guaranteed maximum operating frequency of 100 MHz over 0 to 70
+          C. This exceeds the required 40 MHz input frequency by 60 MHz. The
+          oscillator must also meet the divider's 4 ns minimum high and 5 ns
+          minimum low pulse durations and its TTL input-drive requirements. The
+          SG-615PH meets the DC drive requirements. Measure clock pulse widths
+          at the divider input after layout because the two datasheets use
+          different measurement conditions.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            CPU clock requirements and verification status
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Requirement or target</th>
+              <th scope="col">Datasheet value or calculation</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Divider input frequency</td>
+              <td>40 MHz nominal; 40.004 MHz tolerance-only maximum</td>
+              <td>SN74F74 fmax &gt;= 100 MHz at CL = 50 pF, RL = 500 ohms</td>
+              <td>Frequency capability verified under the stated conditions</td>
+            </tr>
+            <tr>
+              <td>CPU clock frequency</td>
+              <td>10 MHz speed grade</td>
+              <td>
+                9.999 to 10.001 MHz with C-grade tolerance, excluding aging
+              </td>
+              <td>Accepted design margin</td>
+            </tr>
+            <tr>
+              <td>CPU clock period</td>
+              <td>100 ns nominal</td>
+              <td>
+                100 ns nominal; approximately 99.990 ns at the C-grade upper
+                frequency
+              </td>
+              <td>
+                Tolerance-only value calculated; measure the loaded clock during
+                board bring-up
+              </td>
+            </tr>
+            <tr>
+              <td>CPU CLK minimum high pulse width</td>
+              <td>45 ns conservative verification target</td>
+              <td>
+                50 ns nominal; approximately 45.795 ns conditional estimate with
+                C-grade tolerance
+              </td>
+              <td>Post-layout measurement required</td>
+            </tr>
+            <tr>
+              <td>CPU CLK minimum low pulse width</td>
+              <td>45 ns conservative verification target</td>
+              <td>
+                50 ns nominal; approximately 43.795 ns conditional estimate with
+                C-grade tolerance
+              </td>
+              <td>Post-layout measurement required</td>
+            </tr>
+            <tr>
+              <td>CPU CLK maximum rise time</td>
+              <td>10 ns conservative verification target</td>
+              <td>
+                No guaranteed output rise-time limit in the cited SN74F74 tables
+              </td>
+              <td>Post-layout measurement required</td>
+            </tr>
+            <tr>
+              <td>CPU CLK maximum fall time</td>
+              <td>10 ns conservative verification target</td>
+              <td>
+                No guaranteed output fall-time limit in the cited SN74F74 tables
+              </td>
+              <td>Post-layout measurement required</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>MC68EC000 Documentation Note</h3>
+
+        <p>
+          The project copy of M68000UM is the Ninth Edition. Section 10.8, page
+          10-8, still labels the general clock-timing table as applying to all
+          processors except the MC68EC000. Its 20 MHz footnote nevertheless
+          names the MC68EC000. This conflict does not establish the table's 10
+          MHz column as an exact MC68EC000FN10 specification. Section 10.9
+          covers the MC68008, not the MC68EC000.
+        </p>
+
+        <p>
+          The general 10 MHz column specifies 45 ns minimum high and low pulse
+          widths and 10 ns maximum rise and fall times. Section 6.0 of the
+          Motorola addendum gives the same values for the MC68SEC000, which is a
+          different device. Because the available MC68EC000 documentation is
+          ambiguous, this design uses 45 ns minimum high and low pulse widths
+          and 10 ns maximum rise and fall times as conservative board-bring-up
+          targets. They are verification targets, not attributed MC68EC000FN10
+          limits.
+        </p>
+
+        <h3>Duty Cycle and Edge Rates</h3>
+
+        <p>
+          Ideally, the 100 ns CPU clock period has 50 ns high and low intervals.
+          Unequal low-to-high and high-to-low clock-to-Q delays in the second
+          flip-flop change those intervals. SN74F74 page 2-4 specifies CLK-to-Q
+          or CLK-to-complementary-Q delays of 3 to 7.8 ns for a rising output
+          and 3.6 to 9.2 ns for a falling output over 0 to 70 C, at 4.5 to 5.5
+          V, CL = 50 pF, and RL = 500 ohms.
+        </p>
+
+        <pre><code>Maximum master frequency, tolerance only = 40 MHz * 1.0001 = 40.004 MHz
+Shortest steady master period = 25 ns / 1.0001
+Second-stage rising-edge interval = 50 ns / 1.0001, approximately 49.995 ns
+Conditional minimum high width = 49.995 ns + 3.6 ns - 7.8 ns = 45.795 ns
+Conditional minimum low width  = 49.995 ns + 3 ns - 9.2 ns = 43.795 ns</code></pre>
+
+        <p>
+          These estimates assume successive rising edges at the second-stage
+          clock input remain approximately 49.995 ns apart. They account for
+          second-stage delay asymmetry only, with constant first-stage delay and
+          no oscillator aging or jitter. Neither is a guaranteed minimum pulse
+          width at the CPU pin. Final verification must include first-stage
+          edge-spacing variation, oscillator timing, actual loading, and the
+          CPU's specified pulse-width measurement levels. The conditional
+          low-width estimate is below the comparison value of 45 ns. The
+          available limits therefore do not establish compliance with that
+          value; this does not prove the circuit will fail.
+        </p>
+
+        <p>
+          The F74 switching table gives propagation delays, not guaranteed
+          output rise and fall times. Its note 3 refers to load circuits and
+          waveforms in Section 1 of the source databook, which is not included
+          in this standalone PDF. Those measurement definitions are still
+          needed. Output edge rates remain unverified at the CPU pin with the
+          CPU, timeout counter, refresh counter, and board capacitance attached.
+        </p>
+
+        <h3>Status and Sources</h3>
+
+        <p>
+          The SN74F74N implementation and divide-by-four ratio are frozen. Exact
+          CPU pulse-width, edge-rate, and load checks are deferred until the
+          routed board can be measured. The C-grade oscillator tolerance is
+          accepted.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Post-layout clock checks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Required resolution</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>CPU input timing</td>
+              <td>
+                Check the loaded clock against the conservative 45 ns pulse
+                width and 10 ns edge targets used by this design.
+              </td>
+            </tr>
+            <tr>
+              <td>Divider measurement definitions</td>
+              <td>
+                Obtain and check the F Logic databook Section 1 referenced by
+                the F74 switching table.
+              </td>
+            </tr>
+            <tr>
+              <td>Loaded clock waveforms</td>
+              <td>
+                Record high/low pulse widths, rise/fall times, and jitter at
+                both divider and CPU pins over the intended supply and
+                temperature range.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock loading</td>
+              <td>
+                Check input, board, socket, adapter, and probe capacitance on
+                each divider output and the oscillator output.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Sources are the
+          <a href="datasheets/sn74f74.pdf">SN74F74 datasheet, SDFS046A</a>,
+          pages 2-1 through 2-4, downloaded from
+          <a href="https://www.ti.com/lit/ds/symlink/sn74f74.pdf"
+            >Texas Instruments</a
+          >; <a href="datasheets/M68000UM.pdf">M68000UM, Ninth Edition</a>,
+          sections 10.8 and 10.14; and the
+          <a href="datasheets/addendum-M68000.pdf">M68000 manual addendum</a>,
+          section 6.0 and the ordering information on page 25.
+        </p>
+      </section>
+
+      <section id="power-on-reset">
+        <h2>7. Power-On Reset</h2>
+
+        <p>
+          <code>U_RESET_SUP</code> is a Dallas Semiconductor
+          <code>DS1233-5</code> EconoReset supervisor. It monitors the
+          motherboard +5 V rail and generates the active-low raw reset signal
+          <code>RESET_RAW_n</code>.
+        </p>
+
+        <p>
+          The datasheet lists the lead-free TO-92 ordering form as
+          <code>DS1233-5+</code>. The <code>+</code> suffix denotes the package
+          lead finish and does not change the reset function.
+        </p>
+
+        <pre><code>+5 V ---- U_RESET_SUP pin 3 (VCC)
+GND ----- U_RESET_SUP pin 1 (GND)
+
+U_RESET_SUP pin 2 (RST) ---- RESET_RAW_n
+                              +-- manual switch and 1 nF capacitor to GND
+                              +-- LS14 stage 1 -- LS14 stage 2 -- RESET_n
+                                                                +-- overlay preset
+                                                                +-- LS07 CPU drivers</code></pre>
+
+        <h3>Selection Rationale</h3>
+
+        <p>
+          The DS1233-5 combines supply-voltage monitoring, reset-delay timing,
+          and manual-reset switch monitoring in a three-pin through-hole device.
+          It does not depend on an external RC network to establish the required
+          power-on reset interval.
+        </p>
+
+        <h3>Supply Monitoring</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            DS1233-5 supply-monitor characteristics
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Minimum</th>
+              <th scope="col">Typical</th>
+              <th scope="col">Maximum</th>
+              <th scope="col">Design significance</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>VCC</code> trip point</td>
+              <td>4.50 V</td>
+              <td>4.625 V</td>
+              <td>4.75 V</td>
+              <td>
+                Reset trips at the individual device's threshold within this
+                range. The range does not guarantee assertion at 4.75 V.
+              </td>
+            </tr>
+
+            <tr>
+              <td>Reset active time</td>
+              <td>250 ms</td>
+              <td>350 ms</td>
+              <td>450 ms</td>
+              <td>
+                Reset remains asserted after the supply returns to an
+                in-tolerance condition.
+              </td>
+            </tr>
+
+            <tr>
+              <td>Supply detect to reset assertion</td>
+              <td>-</td>
+              <td>-</td>
+              <td>100 ns</td>
+              <td>
+                Supervisor-pin delay under the stated supply conditions;
+                excludes external isolation-driver delay. Check the supply-fall
+                requirement below.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          These limits are from page 5 of the DS1233 datasheet. The AC table
+          requires at least 300 us for VCC to fall from 4.75 V to 4.00 V. A
+          faster collapse is outside that specified condition, so the 100 ns
+          assertion delay must not be treated as an unconditional brownout
+          guarantee.
+        </p>
+
+        <p>
+          The MC68EC000 supply specification is 5 V +/-5 percent, or 4.75 to
+          5.25 V (M68000UM section 10.13). The DS1233-5 may not trip until 4.50
+          V, leaving up to 0.25 V of CPU undervoltage before reset. On a slow
+          power ramp it can also finish its timer before the CPU supply reaches
+          4.75 V. The threshold values are verified; complete CPU brownout
+          protection and safe release are not.
+        </p>
+
+        <h3>Power-On Timing</h3>
+
+        <p>
+          On power-up, the DS1233 keeps <code>RESET_RAW_n</code> asserted until
+          the +5 V rail has crossed the monitored supply threshold and the
+          internal reset timer has completed.
+        </p>
+
+        <p>
+          The minimum reset-active interval is 250 ms after the supervisor's
+          threshold is crossed. It exceeds the CPU's 100 ms reset requirement
+          only if power and clock become valid early enough within that
+          interval.
+        </p>
+
+        <p>
+          The oscillator starts within 10 ms after reaching its minimum supply
+          of 4.5 V. On a rising supply that stays valid, the supervisor's
+          threshold is at or above this voltage, so the oscillator can use at
+          most the first 10 ms of the supervisor's minimum delay.
+        </p>
+
+        <pre><code>t0: supply crosses the supervisor's actual 4.50 to 4.75 V threshold
+    and remains above it
+
+Oscillator startup allowance: at most 10 ms from reaching 4.5 V
+Earliest supervisor release:  t0 + 250 ms
+Conditional post-startup hold: 250 ms - 10 ms = 240 ms
+CPU reset requirement:        100 ms after valid power and clock</code></pre>
+        <p>
+          The 240 ms difference is a conditional timing budget, not proof of
+          safe CPU release. The rail must reach and remain within 4.75 to 5.25
+          V, and the divided clock and isolation drivers must be valid, at least
+          100 ms before release at the CPU pins. In the 250 ms minimum case,
+          this requires valid CPU conditions by t0 + 150 ms. Verify that
+          condition against the actual supply ramp and driver circuit.
+        </p>
+
+        <h3>Physical Connections</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_RESET_SUP DS1233-5 TO-92 connections
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>GND</code></td>
+              <td>Ground</td>
+              <td>Supply return</td>
+            </tr>
+
+            <tr>
+              <td>2</td>
+              <td><code>RST</code></td>
+              <td><code>RESET_RAW_n</code></td>
+              <td>
+                Raw active-low supervisor output and manual-reset sensing input
+              </td>
+            </tr>
+
+            <tr>
+              <td>3</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+              <td>Power and monitored supply</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The TO-92 pin numbering in the datasheet is shown from the bottom
+          view: pin 1 is ground, pin 2 is <code>RST</code>, and pin 3 is
+          <code>VCC</code>.
+        </p>
+
+        <p>
+          A 100 nF + 1 uF ceramic decoupling capacitor shall be placed between
+          <code>VCC</code> and ground close to <code>U_RESET_SUP</code>.
+        </p>
+
+        <h3>RESET_RAW_n Electrical Behavior</h3>
+
+        <p>
+          The DS1233 contains an internal pull-up resistor on its
+          <code>RST</code> pin. The datasheet specifies this resistor as 3.75
+          kohm minimum, 5 kohm typical, and 6.25 kohm maximum.
+        </p>
+
+        <p>
+          When reset is asserted, the device can sink at least 8 mA while
+          maintaining a reset-output voltage of no more than 0.4 V.
+        </p>
+
+        <p>
+          RESET_RAW_n drives only the first SN74LS14 input, SW_RESET, and
+          C_RESET_SW. The two-stage conditioner drives RESET_n and isolates the
+          raw RC node from the overlay and LS07 inputs. The
+          <a href="#electrical-timing-verification">electrical verification</a>
+          section gives the separate load budgets. No external pull-up is
+          selected.
+        </p>
+
+        <p>
+          The supervisor's operating-current limit is 50 uA. Its output
+          capacitance is at most 10 pF. Include both the internal pull-up
+          current and external loads in the reset sink-current budget. For
+          example, the internal resistor alone draws approximately (5.5 V - 0.4
+          V) / 3.75 kohm = 1.36 mA at a 0.4 V reset level. The 8 mA output
+          rating does not define how much current the released node can source;
+          that depends on its pull-up.
+        </p>
+
+        <h3>Manual Reset Capability</h3>
+
+        <p>
+          The DS1233 also monitors its RST node for an external switch closure.
+          <a href="#manual-reset">Manual Reset</a> defines SW_RESET and the
+          selected 1 nF C_RESET_SW, including the separate debounce and
+          reset-active intervals.
+        </p>
+
+        <h3>Reset Release and HCT Inputs</h3>
+
+        <p>
+          The SN74HCT74 preset requires input rise/fall times no greater than
+          500 ns. RESET_RAW_n feeds two SN74LS14 Schmitt stages, and the
+          conditioned RESET_n output drives the preset, so the reset-node
+          capacitor does not set the preset's RC release time.
+        </p>
+
+        <p>
+          The SN74LS14 accepts slow input ramps. Its datasheet does not give a
+          guaranteed output rise/fall time, so the conditioned preset waveform
+          still requires verification. Component and layout evidence gaps are
+          listed in
+          <a href="#electrical-timing-verification">electrical verification</a>.
+        </p>
+
+        <h3>Isolation from Processor /RESET</h3>
+
+        <p>
+          <code>RESET_n</code> is a motherboard reset-request signal and remains
+          separate from the MC68EC000's bidirectional <code>/RESET</code> pin.
+        </p>
+
+        <p>
+          The processor <code>/RESET</code> pin must not be connected directly
+          to the DS1233 <code>RST</code> node. The MC68EC000 can assert its own
+          <code>/RESET</code> pin while executing the RESET instruction. If this
+          assertion were allowed to pull <code>RESET_RAW_n</code> low, the
+          DS1233 could interpret the processor-generated assertion as an
+          external reset request and extend it into a full motherboard reset.
+        </p>
+
+        <p>
+          Instead, <code>RESET_n</code> will drive the processor
+          <code>/RESET</code> and <code>/HALT</code> inputs through separate
+          LS07 channels defined in the processor-reset section. They must
+          preserve one-way reset propagation:
+        </p>
+
+        <pre><code>RESET_n -----------> CPU /RESET driver -----------> CPU /RESET
+    |
+    +---------------> CPU /HALT driver ------------> CPU /HALT
+
+CPU /RESET ---------X---------> RESET_n
+
+X = no feedback path</code></pre>
+
+        <p>
+          Consequently, power-on reset and manual motherboard reset reinitialize
+          board state such as the boot overlay, while a processor-generated
+          RESET instruction does not re-enable the boot overlay.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          The <code>DS1233-5</code> is frozen as the motherboard power-on and
+          supply-monitoring reset supervisor. Its <code>RST</code> node is
+          <code>RESET_RAW_n</code>. Power-on reset duration and supply threshold
+          are recorded from the datasheet; full board-level verification remains
+          open.
+        </p>
+
+        <p>
+          Supply-ramp and brownout coverage, reset-node loading, conditioned
+          edges, and CPU /RESET and /HALT timing are post-layout checks. The
+          supervisor selection is final.
+        </p>
+
+        <h3>Source</h3>
+
+        <p>
+          Dallas Semiconductor / Analog Devices,
+          <a href="datasheets/ds1233.pdf"
+            ><cite>DS1233 5V EconoReset</cite>, revision 2 (August 2025)</a
+          >, pages 1, 2, 5, and 6;
+          <a href="datasheets/M68000UM.pdf">M68000UM</a>, sections 5.5 and
+          10.13; and <a href="datasheets/sn74hct74.pdf">SN74HCT74</a>,
+          recommended operating conditions.
+        </p>
+      </section>
+
+      <section id="manual-reset">
+        <h2>8. Manual Reset</h2>
+
+        <p>
+          Manual motherboard reset is requested by
+          <code>SW_RESET</code>, a normally-open momentary pushbutton connected
+          between <code>RESET_RAW_n</code> and ground.
+        </p>
+
+        <p>
+          The DS1233 directly monitors its <code>RST</code> output node for an
+          externally applied low level. Therefore no separate switch-debounce
+          logic or reset one-shot is required.
+        </p>
+
+        <pre><code>                  DS1233-5
+                     |
+                     +---- RESET_RAW_n ----+---- two LS14 stages -> RESET_n
+                                      |
+                                      +---- SW_RESET ---- GND
+                                      |
+                                      +---- C_RESET_SW -- GND</code></pre>
+
+        <h3>Switch Function</h3>
+
+        <p>
+          <code>SW_RESET</code> is a single-pole, single-throw, normally-open
+          momentary switch.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Manual reset behavior
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Switch state</th>
+              <th scope="col">RESET_RAW_n</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Released, with valid supply and all reset timers complete</td>
+              <td>Normally high</td>
+              <td>Motherboard operates normally.</td>
+            </tr>
+
+            <tr>
+              <td>Pressed</td>
+              <td>Forced low</td>
+              <td>
+                DS1233 detects the external reset request and asserts
+                motherboard reset.
+              </td>
+            </tr>
+
+            <tr>
+              <td>Released after reset</td>
+              <td>Held low by DS1233 timer</td>
+              <td>
+                Reset remains asserted for the DS1233 reset-active interval
+                before
+                <code>RESET_RAW_n</code> returns high.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Debounce and Reset Extension</h3>
+
+        <p>
+          Mechanical switch bounce is handled by the DS1233. When a low-going
+          edge is detected on <code>RESET_RAW_n</code>, the supervisor takes
+          control of the reset node and keeps it asserted.
+        </p>
+
+        <p>
+          After the debounce timer expires, the DS1233 checks for switch
+          release. If the button is still held, reset stays asserted. Once
+          release is detected, a separate reset-active interval follows. A short
+          press can therefore leave part of the debounce interval as well as the
+          reset interval after physical switch release.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Manual-reset timing
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Minimum</th>
+              <th scope="col">Typical</th>
+              <th scope="col">Maximum</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Pushbutton debounce interval (PBDB)</td>
+              <td>250 ms</td>
+              <td>350 ms</td>
+              <td>450 ms</td>
+            </tr>
+            <tr>
+              <td>Reset-active interval after detected release (tRST)</td>
+              <td>250 ms</td>
+              <td>350 ms</td>
+              <td>450 ms</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Both timing ranges are specified over -40 to 85 C at VCC = 4.5 to 5.5
+          V. The 250 ms minimum reset-active interval exceeds the CPU reset
+          durations listed below, provided power and clock remain valid and the
+          isolation stages deliver the required low levels to both CPU reset
+          pins. This does not close the supply and release-edge checks in the
+          power-on section.
+        </p>
+
+        <h3>Reset-Node Capacitor</h3>
+
+        <p>
+          <code>C_RESET_SW</code> is connected directly between
+          <code>RESET_RAW_n</code> and ground as required by the DS1233
+          pushbutton interface.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Manual-reset capacitor
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Value</th>
+              <th scope="col">Type</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>C_RESET_SW</code></td>
+              <td>1 nF</td>
+              <td>Ceramic</td>
+              <td>
+                DS1233 external-pushbutton interface capacitor; nominal value
+                selected
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The DS1233 permits a capacitance from 100 pF through 0.01 uF for
+          pushbutton operation. The selected 1 nF value is inside this range and
+          also exceeds the 500 pF minimum for applications using an external
+          pull-up to obtain additional reset-node current. That configuration
+          also requires an external pull-up of at least 1 kohm; the capacitor
+          alone does not increase drive current. No external pull-up is
+          selected.
+        </p>
+
+        <p>
+          <code>C_RESET_SW</code> does not establish the motherboard reset
+          duration. The DS1233 internal timer sets that duration. This is the
+          same reset-node capacitor described in the power-on section, not an
+          additional capacitor. Implementation may choose any suitable 1 nF
+          ceramic part whose tolerance keeps it within the DS1233 range of 100
+          pF to 10 nF.
+        </p>
+
+        <p>
+          The selected 1 nF capacitor remains on RESET_RAW_n. Two SN74LS14
+          Schmitt stages isolate its slow RC release from the overlay preset.
+          The <a href="#electrical-timing-verification">electrical checks</a>
+          record raw-node loading and the remaining conditioned-output edge
+          check.
+        </p>
+
+        <h3>Reset Switch Wiring</h3>
+
+        <p>The reset switch requires only two electrical connections:</p>
+
+        <pre><code>SW_RESET terminal 1 -> RESET_RAW_n
+SW_RESET terminal 2 -> GND</code></pre>
+
+        <p>
+          No separate debounce timer is selected. Place C_RESET_SW near the
+          supervisor, between its RST node and ground. The required capacitor
+          still forms an RC release edge with the pull-up; reset-edge
+          conditioning is separate from switch debouncing.
+        </p>
+
+        <p>
+          If the switch is mounted remotely from the motherboard, its wiring
+          should be kept reasonably short and routed with a nearby ground return
+          so that the reset input does not become an unnecessary noise pickup
+          path. Check exposed front-panel wiring for noise and ESD
+          susceptibility during the enclosure design.
+        </p>
+
+        <h3>Interaction with Other Reset Sources</h3>
+
+        <p>
+          Manual reset and power-on reset share the same board-level
+          <code>RESET_RAW_n</code> domain. Both therefore perform the same
+          motherboard initialization, including re-enabling the boot ROM
+          overlay.
+        </p>
+
+        <p>
+          This remains distinct from a processor-generated RESET instruction.
+          The CPU's bidirectional <code>/RESET</code> pin does not feed back
+          into <code>RESET_RAW_n</code>, so software execution of RESET does not
+          simulate pressing <code>SW_RESET</code> and does not re-enable the
+          boot overlay.
+        </p>
+
+        <h3>Physical Switch Selection</h3>
+
+        <p>
+          The electrical switch requirement is frozen as a normally-open
+          momentary SPST contact. The exact mechanical switch part is not frozen
+          because its package and actuator style depend on the eventual
+          enclosure and front-panel design.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          Manual-reset electrical behavior is frozen:
+          <code>SW_RESET</code> pulls <code>RESET_RAW_n</code> to ground, the
+          DS1233 performs switch debouncing and reset extension, and
+          <code>C_RESET_SW</code> is 1 nF.
+        </p>
+
+        <p>
+          The exact mechanical pushbutton remains an enclosure-level decision.
+          The isolated drivers from conditioned <code>RESET_n</code> to the
+          MC68EC000 <code>/RESET</code> and <code>/HALT</code> pins use the
+          SN74LS07N defined below. Loaded transition times are post-layout
+          checks.
+        </p>
+
+        <h3>Source</h3>
+
+        <p>
+          Dallas Semiconductor / Analog Devices,
+          <a href="datasheets/ds1233.pdf"
+            ><cite>DS1233 5V EconoReset</cite>, revision 2</a
+          >, page 2 (pushbutton operation) and page 5 (AC limits);
+          <a href="datasheets/sn74hct74.pdf">SN74HCT74</a>, recommended
+          operating conditions.
+        </p>
+      </section>
+
+      <section id="processor-reset-halt">
+        <h2>9. Processor /RESET and /HALT Handling</h2>
+
+        <p>
+          The MC68EC000 <code>/RESET</code> and <code>/HALT</code> pins are
+          bidirectional active-low signals. Both pins are open-drain when driven
+          by the processor.
+        </p>
+
+        <p>
+          An external processor reset requires both signals to be asserted at
+          the same time. However, the two CPU pins must remain electrically
+          separate because the processor can also assert either signal
+          independently: execution of the RESET instruction asserts
+          <code>/RESET</code>, while processor halt conditions can cause the
+          processor to assert <code>/HALT</code>.
+        </p>
+
+        <p>
+          Board-level <code>RESET_n</code> therefore drives the two processor
+          pins through separate open-collector buffer stages.
+        </p>
+
+        <p>
+          The processor <code>MODE</code> pin must be high or unconnected during
+          reset so the MC68EC000 starts in 16-bit bus mode.
+        </p>
+
+        <pre><code>                         +5 V
+                          |
+                       3.9 kohm
+                          |
+RESET_n ---> LS07 ------+------ CPU_RESET_n ---> MC68EC000 /RESET
+             open       |
+           collector    +------ CPU may also pull this node low
+
+
+                         +5 V
+                          |
+                       3.9 kohm
+                          |
+RESET_n ---> LS07 ------+------ CPU_HALT_n ----> MC68EC000 /HALT
+             open       |
+           collector    +------ CPU may also pull this node low</code></pre>
+
+        <h3>Driver Selection</h3>
+
+        <p>
+          <code>U_RESET_DRV</code> is a Texas Instruments
+          <code>SN74LS07N</code>, a six-channel non-inverting buffer with
+          open-collector outputs in a 14-pin PDIP package.
+        </p>
+
+        <p>
+          A non-inverting open-collector buffer is required because
+          <code>RESET_n</code> already has the desired active-low polarity. A
+          low input causes the corresponding LS07 output transistor to pull the
+          processor signal low. A high input releases the processor signal
+          instead of actively driving it high.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Processor reset-driver truth table
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col"><code>RESET_n</code></th>
+              <th scope="col">LS07 output state</th>
+              <th scope="col"><code>CPU_RESET_n</code></th>
+              <th scope="col"><code>CPU_HALT_n</code></th>
+              <th scope="col">Processor state</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>0</td>
+              <td>Pulling low</td>
+              <td>Low</td>
+              <td>Low</td>
+              <td>External processor reset asserted</td>
+            </tr>
+
+            <tr>
+              <td>1</td>
+              <td>High impedance</td>
+              <td>Released</td>
+              <td>Released</td>
+              <td>Normal CPU control of both pins</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Physical Connections</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_RESET_DRV SN74LS07N connections
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>14</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+              <td>Power</td>
+            </tr>
+
+            <tr>
+              <td>7</td>
+              <td><code>GND</code></td>
+              <td>Ground</td>
+              <td>Power return</td>
+            </tr>
+
+            <tr>
+              <td>1</td>
+              <td><code>1A</code></td>
+              <td><code>RESET_n</code></td>
+              <td>Motherboard-reset request for processor /RESET</td>
+            </tr>
+
+            <tr>
+              <td>2</td>
+              <td><code>1Y</code></td>
+              <td><code>CPU_RESET_n</code></td>
+              <td>Open-collector drive of MC68EC000 /RESET</td>
+            </tr>
+
+            <tr>
+              <td>3</td>
+              <td><code>2A</code></td>
+              <td><code>RESET_n</code></td>
+              <td>Motherboard-reset request for processor /HALT</td>
+            </tr>
+
+            <tr>
+              <td>4</td>
+              <td><code>2Y</code></td>
+              <td><code>CPU_HALT_n</code></td>
+              <td>Open-collector drive of MC68EC000 /HALT</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          A 100 nF + 1uF ceramic decoupling capacitor shall be placed directly
+          between pins 14 and 7.
+        </p>
+
+        <p>
+          Channel 3 (pins 5 and 6) is assigned to peripheral reset in
+          <a href="#reset-distribution">Reset Distribution</a>. Tie unused
+          inputs 4A, 5A, and 6A (pins 9, 11, and 13) to ground and leave outputs
+          4Y, 5Y, and 6Y (pins 8, 10, and 12) unconnected. Recheck loading if
+          these channels are assigned later.
+        </p>
+
+        <h3>Processor-Side Pull-Ups</h3>
+
+        <p>
+          Because both the LS07 outputs and the MC68EC000 outputs are
+          open-collector/open-drain, each processor control line requires its
+          own pull-up resistor.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Processor reset and halt pull-ups
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">From</th>
+              <th scope="col">To</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>R_CPU_RESET</code></td>
+              <td>+5 V</td>
+              <td><code>CPU_RESET_n</code></td>
+              <td>3.9 kohm, +/-5 percent</td>
+            </tr>
+
+            <tr>
+              <td><code>R_CPU_HALT</code></td>
+              <td>+5 V</td>
+              <td><code>CPU_HALT_n</code></td>
+              <td>3.9 kohm, +/-5 percent</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Pull-Up Current Verification</h3>
+
+        <p>
+          The MC68EC000-specific DC characteristics guarantee
+          <code>VOL &lt;= 0.5 V</code> for the processor
+          <code>/HALT</code> output while sinking 1.6 mA. The
+          <code>/RESET</code> output has the stronger guarantee of 5.0 mA at the
+          same maximum low voltage.
+        </p>
+
+        <p>
+          <code>/HALT</code> therefore sets the worst-case pull-up-current
+          requirement.
+        </p>
+
+        <pre><code>R nominal = 3.9 kohm
+R minimum at -5% = 3.705 kohm
+
+VCC maximum = 5.25 V
+CPU VOL maximum = 0.5 V
+
+Pull-up load at the CPU's specified maximum low voltage
+    = (5.25 V - 0.5 V) / 3.705 kohm
+    = 1.28 mA
+
+Resistor-current upper bound, taking the low node as 0 V
+    = 5.25 V / 3.705 kohm
+    = 1.42 mA
+
+Both values are below the 1.6 mA HALT sink rating</code></pre>
+
+        <p>
+          Each pull-up is within the processor's sink rating while its LS07
+          output is released. This checks the defined resistor load; additional
+          peripheral inputs or pull-ups require another current calculation.
+        </p>
+
+        <p>
+          The SN74LS07 guarantees at most 0.4 V while sinking 16 mA, within its
+          4.75 to 5.25 V supply and 0 to 70 C operating ranges. This meets the
+          CPU's 0.8 V low-input limit for the defined pull-ups. Operation below
+          4.75 V is not guaranteed, so this stage does not close the DS1233
+          brownout-coverage gap.
+        </p>
+
+        <h3>Supervisor Loading and Released Levels</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Reset-driver DC checks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Calculation or datasheet limit</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Two LS07 inputs on RESET_n, low</td>
+              <td>
+                2 * 0.2 mA = 0.4 mA. The DS1233 pull-up is isolated on
+                RESET_RAW_n and is not part of this load.
+              </td>
+              <td>Below the SN74LS14's 8 mA low-state drive rating</td>
+            </tr>
+            <tr>
+              <td>Two LS07 inputs on RESET_n, high</td>
+              <td>
+                2 * 20 uA = 40 uA. RESET_n is actively driven by the second
+                SN74LS14 stage.
+              </td>
+              <td>Below the SN74LS14's 0.4 mA high-state drive rating</td>
+            </tr>
+            <tr>
+              <td>CPU-side released levels</td>
+              <td>
+                HALT: 270 uA screening leakage gives 3.64 V. RESET adds the 20
+                uA channel-3 input: 290 uA gives 3.56 V with the 4.095 kohm
+                maximum pull-up.
+              </td>
+              <td>Above the CPU's 2 V high threshold under this model</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The LS07 off-state limit is specified at a 30 V output; using its 250
+          uA value at the board's 5 V level is a conservative screening
+          assumption, not a separate 5 V specification. The CPU leakage value
+          comes from M68000UM section 10.13. Final loading must include all
+          receivers and protection components. The released LS07 output cannot
+          source a high level; each pull-up must overcome the node's leakage.
+        </p>
+
+        <h3>One-Way Motherboard Reset Propagation</h3>
+
+        <p>
+          The open-collector buffers provide intentional one-way isolation
+          between the motherboard reset domain and the bidirectional processor
+          pins.
+        </p>
+
+        <pre><code>RESET_n
+   |
+   +--------> LS07 --------> CPU_RESET_n
+   |                           ^
+   |                           |
+   |                     CPU RESET instruction
+   |
+   +--------> LS07 --------> CPU_HALT_n
+                               ^
+                               |
+                         CPU halt condition
+
+
+CPU_RESET_n ----X----> RESET_n
+CPU_HALT_n  ----X----> RESET_n</code></pre>
+
+        <p>
+          Consequently, power-on or manual motherboard reset asserts both CPU
+          control pins and also resets motherboard state such as the boot
+          overlay. A processor-generated RESET instruction asserts only
+          <code>CPU_RESET_n</code> and does not reassert <code>RESET_n</code>.
+        </p>
+
+        <p>
+          Peripherals that are intended to respond to the processor RESET
+          instruction use the buffered <code>PERIPH_RESET_n</code> domain
+          defined below. Do not add direct CPU_RESET_n loads without review.
+          Peripherals that must respond only to complete motherboard reset shall
+          instead use the <code>RESET_n</code> domain. Exact peripheral reset
+          connections belong in the corresponding subsystem documents.
+        </p>
+
+        <h3>HALT Behavior</h3>
+
+        <p>
+          During an external motherboard reset, the second LS07 channel pulls
+          <code>CPU_HALT_n</code> low from the same request that asserts
+          <code>CPU_RESET_n</code>. The channels have separate delays; verify
+          that both CPU pins stay low together for the required reset interval.
+          Exact simultaneous edges are not guaranteed.
+        </p>
+
+        <p>
+          Outside motherboard reset, the LS07 output is released. The processor
+          can therefore assert <code>CPU_HALT_n</code> itself to report an
+          internally detected halt condition without driving against the reset
+          circuit.
+        </p>
+
+        <p>
+          <code>CPU_HALT_n</code> is not fed back into <code>RESET_n</code>. A
+          processor halt condition therefore does not automatically become a
+          motherboard reset request.
+        </p>
+
+        <h3>Transition-Time Verification</h3>
+
+        <p>
+          M68000UM section 10.14, page 10-25, parameter 32 specifies 150 ns
+          maximum HALT and RESET input transition time for the MC68EC000,
+          including the 10 MHz grade. Check both assertion and release at the
+          CPU pins. Release depends on each pull-up, total capacitance, and
+          off-state leakage.
+        </p>
+
+        <p>
+          The CPU's published input capacitance is 20 pF maximum under its
+          section 10.13 test conditions. With the maximum 4.095 kohm pull-up,
+          that input alone gives an 81.9 ns RC time constant. A time constant is
+          not the complete input transition time; include LS07 output
+          capacitance, routing, sockets, probes, and any peripherals, and use
+          the manual's measurement levels. The LS07 datasheet supplies no
+          guaranteed output-capacitance value, so accept the final node from its
+          measured release time and thresholds rather than an assumed
+          capacitance.
+        </p>
+
+        <p>
+          LS07 section 6.6 specifies propagation delays at 5 V and 25 C with a
+          110 ohm load and 15 pF capacitance. Those conditions do not match the
+          selected 3.9 kohm pull-ups, and propagation delay is not an output
+          rise-time specification. Verify the loaded waveforms against 150 ns
+          before marking this interface complete. The LS07 is not a Schmitt
+          trigger, so the edge conditioning is done upstream by the two-stage
+          SN74LS14. Its loaded output edge remains a separate verification item.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          Processor reset and halt isolation is frozen:
+          <code>U_RESET_DRV</code> is an <code>SN74LS07N</code>, two separate
+          non-inverting open-collector channels are driven by
+          <code>RESET_n</code>, and the processor-side
+          <code>CPU_RESET_n</code> and <code>CPU_HALT_n</code> nets each use a
+          3.9 kohm pull-up to +5 V.
+        </p>
+
+        <p>
+          The selected parts and connections are fixed. Measure the 150 ns
+          transitions, total loading, conditioned output edges, and supply-ramp
+          behavior after layout.
+        </p>
+
+        <h3>Sources</h3>
+
+        <p>
+          Motorola,
+          <a href="datasheets/M68000UM.pdf"><cite>M68000 User's Manual</cite></a
+          >, sections 3.6, 3.11, 5.5, 10.13, and 10.14; Texas Instruments,
+          <a href="datasheets/sn74ls07.pdf"><cite>SN74LS07</cite>, revision D</a
+          >, sections 5, 6.3, 6.5, and 6.6; and
+          <a href="datasheets/ds1233.pdf">DS1233</a>, page 5.
+        </p>
+      </section>
+
+      <section id="reset-distribution">
+        <h2>10. Reset Distribution</h2>
+
+        <p>
+          The motherboard distinguishes between a complete board reset and the
+          processor's bidirectional <code>/RESET</code> signal.
+        </p>
+
+        <p>
+          <code>RESET_n</code> represents a power-on or manual motherboard
+          reset. It initializes board-specific state such as the boot-ROM
+          overlay and externally asserts both processor <code>/RESET</code> and
+          <code>/HALT</code>.
+        </p>
+
+        <p>
+          <code>CPU_RESET_n</code> is the actual MC68EC000
+          <code>/RESET</code> pin. It is asserted during a motherboard reset,
+          but the processor can also assert it while executing the RESET
+          instruction. In that case external devices are reset without
+          reinitializing the processor itself.
+        </p>
+
+        <p>
+          Peripheral reset distribution must therefore originate from
+          <code>CPU_RESET_n</code> rather than directly from
+          <code>RESET_n</code> when the peripheral is intended to honor the
+          processor RESET instruction.
+        </p>
+
+        <pre><code>DS1233 supply supervision / manual switch
+                  |
+                  v
+             RESET_RAW_n
+                  |
+            two LS14 stages
+                  |
+               RESET_n
+                  +--> boot overlay (conditioned reset)
+                  +--> LS07 channel 1 --> CPU_RESET_n
+                  +--> LS07 channel 2 --> CPU_HALT_n
+
+CPU RESET instruction -----------------> CPU_RESET_n
+                                              |
+                                              v
+                                         LS07 channel 3
+                                              |
+                                              v
+                                        PERIPH_RESET_n
+                                              |
+                                              v
+                                   peripheral reset interfaces
+
+CPU_RESET_n and PERIPH_RESET_n must not feed back into RESET_n.</code></pre>
+
+        <h3>Peripheral Reset Buffer</h3>
+
+        <p>
+          Channel 3 of <code>U_RESET_DRV</code>, the existing
+          <code>SN74LS07N</code>, buffers <code>CPU_RESET_n</code> into the
+          active-low peripheral-reset distribution signal
+          <code>PERIPH_RESET_n</code>.
+        </p>
+
+        <p>
+          The SN74LS07 is non-inverting, so the signal polarity is preserved:
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Peripheral reset-distribution behavior
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col"><code>CPU_RESET_n</code></th>
+              <th scope="col">LS07 channel 3 output</th>
+              <th scope="col"><code>PERIPH_RESET_n</code></th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>0</td>
+              <td>Pulling low</td>
+              <td>0</td>
+              <td>Peripheral reset asserted</td>
+            </tr>
+
+            <tr>
+              <td>1</td>
+              <td>High impedance</td>
+              <td>High through pull-up</td>
+              <td>Peripheral reset released</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Physical Connection</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_RESET_DRV channel 3 assignment
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>5</td>
+              <td><code>3A</code></td>
+              <td><code>CPU_RESET_n</code></td>
+              <td>Sense the processor /RESET state</td>
+            </tr>
+
+            <tr>
+              <td>6</td>
+              <td><code>3Y</code></td>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Open-collector peripheral-reset distribution output</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          <code>PERIPH_RESET_n</code> requires a pull-up to +5 V because the
+          SN74LS07 output is open collector.
+        </p>
+
+        <p>
+          <code>R_PERIPH_RESET</code> is 1 kohm, +/-5 percent, rated at least
+          0.125 W, from +5 V to <code>PERIPH_RESET_n</code>. The value is final.
+          Verify the total receiver leakage, capacitance, and delivered pulse
+          width after the peripheral interfaces and board layout are complete.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Peripheral pull-up budget
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Calculation</th>
+              <th scope="col">Scope</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Resistor tolerance</td>
+              <td>950 to 1050 ohms</td>
+              <td>1 kohm +/-5 percent</td>
+            </tr>
+            <tr>
+              <td>Resistor-current upper bound</td>
+              <td>5.25 V / 950 ohms = 5.53 mA</td>
+              <td>Taking the asserted node as 0 V</td>
+            </tr>
+            <tr>
+              <td>Remaining sink-current allocation</td>
+              <td>16 mA - 5.53 mA = 10.47 mA</td>
+              <td>
+                For added low-state source currents and other pull-ups, using
+                the LS07 0.4 V output guarantee
+              </td>
+            </tr>
+            <tr>
+              <td>Resistor dissipation bound</td>
+              <td>5.25 V squared / 950 ohms = 29.1 mW</td>
+              <td>Below 0.125 W before environmental derating</td>
+            </tr>
+            <tr>
+              <td>Released level without external receivers</td>
+              <td>4.75 V - 1050 ohms * 250 uA = 4.49 V</td>
+              <td>
+                Screening estimate using the LS07 off-state leakage limit
+                specified at 30 V
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Receiver leakage lowers the released level further. For a receiver
+          requiring VIH, check VCC(min) - R(max) * I_leak(total) &gt;= VIH. For
+          a simple unloaded RC model, the 10-to-90-percent rise time is
+          approximately 2.2 * R * C; leakage and distributed wiring require a
+          more complete model. No capacitance or edge-time allowance is assigned
+          until the receivers' thresholds and transition limits are known.
+        </p>
+
+        <p>
+          The defined <a href="mfp.html#clock-reset">MC68901 reset input</a>
+          adds at most 10 uA leakage and 10 pF capacitance to
+          <code>PERIPH_RESET_n</code>. Its leakage drops the released level by
+          at most 10.5 mV through the 1.05 kohm maximum pull-up, and its 2.0 V
+          TTL high threshold matches the reset driver.
+        </p>
+
+        <p>
+          The two expansion-slot control buffers add two SN74HCT244 inputs,
+          totaling at most 2 uA leakage and 20 pF capacitance. Their leakage
+          lowers the released level by at most 2.1 mV through the 1.05 kohm
+          maximum pull-up. Each buffer then drives one connector reset branch;
+          card loads do not appear directly on <code>PERIPH_RESET_n</code>. See
+          <a href="expansion.html#clock-reset">Expansion Slots</a>.
+        </p>
+
+        <p>
+          The <a href="opl3.html#clock-reset">OPL3 reset adapter</a> adds one
+          CD74HCT123 input and one SN74HCT08 input, totaling at most 2 uA
+          leakage and about 20 pF nominal input capacitance. Their leakage
+          lowers the released level by at most 2.1 mV through the 1.05 kohm
+          maximum pull-up. The adapter stretches every peripheral reset locally,
+          so the YMF262 does not load <code>PERIPH_RESET_n</code> directly.
+        </p>
+
+        <h3>CPU_RESET_n Buffer Loading</h3>
+
+        <p>
+          The additional LS07 input is a small load on the bidirectional
+          processor-reset node. The LS07 uses TTL-compatible input thresholds: a
+          LOW input is guaranteed at or below 0.8 V and a HIGH input is
+          guaranteed at or above 2.0 V.
+        </p>
+
+        <p>
+          Its maximum LOW-state input current is 0.2 mA. With the 3.9 kohm
+          <code>CPU_RESET_n</code> pull-up, the worst-case current that the
+          MC68EC000 must sink while asserting its own <code>/RESET</code> output
+          is:
+        </p>
+
+        <pre><code>R_CPU_RESET minimum = 3.9 kohm * 0.95 = 3.705 kohm
+Pull-up load at VOL = 0.5 V = (5.25 V - 0.5 V) / 3.705 kohm = 1.28 mA
+Pull-up current upper bound at 0 V = 5.25 V / 3.705 kohm = 1.42 mA
+Additional LS07 low-state input current = 0.20 mA
+
+Conservative CPU /RESET sink-load budget = 1.42 mA + 0.20 mA = 1.62 mA
+MC68EC000 /RESET sink rating = 5.0 mA at VOL &lt;= 0.5 V</code></pre>
+
+        <p>
+          Therefore sensing <code>CPU_RESET_n</code> with one LS07 input does
+          not overload the processor's <code>/RESET</code> output under this
+          current budget. The added input is on CPU_RESET_n only; the weaker
+          CPU_HALT_n output does not carry it.
+        </p>
+
+        <p>
+          The high-state input load is another 20 uA. Including the existing 250
+          uA LS07 output-leakage screening allowance and 20 uA CPU input leakage
+          gives 290 uA on CPU_RESET_n. Its released-level estimate is 4.75 V -
+          4.095 kohm * 290 uA = 3.56 V, above the 2.0 V threshold. The 250 uA
+          output limit is specified at 30 V, so using it here remains a
+          screening assumption. Added input capacitance must also be included in
+          the CPU's 150 ns reset-transition check; LS07 input capacitance is not
+          specified.
+        </p>
+
+        <h3>Reset Domains</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Motherboard reset domains
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Asserted by</th>
+              <th scope="col">Primary purpose</th>
+              <th scope="col">Must not affect</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>RESET_n</code></td>
+              <td>DS1233/manual RESET_RAW_n through two SN74LS14 stages</td>
+              <td>
+                Complete motherboard reset, processor external reset, and
+                initialization of board-only state
+              </td>
+              <td>
+                Must not be asserted merely because the CPU executes RESET
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_RESET_n</code></td>
+              <td>External motherboard reset or the MC68EC000 itself</td>
+              <td>Actual bidirectional MC68EC000 /RESET node</td>
+              <td>Must not feed backward into <code>RESET_n</code></td>
+            </tr>
+
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Buffered <code>CPU_RESET_n</code></td>
+              <td>
+                Reset source for external devices that must honor both
+                motherboard reset and the processor RESET instruction
+              </td>
+              <td>
+                Must not reinitialize board-only state such as the boot overlay
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_HALT_n</code></td>
+              <td>External motherboard reset or the MC68EC000 itself</td>
+              <td>Actual bidirectional processor /HALT node</td>
+              <td>Does not form part of peripheral reset distribution</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Peripheral Interface Boundary</h3>
+
+        <p>
+          <code>PERIPH_RESET_n</code> is a motherboard reset-distribution
+          source, not necessarily the final reset pin connection for every
+          peripheral.
+        </p>
+
+        <p>
+          Every reset-capable peripheral shall derive its reset from
+          <code>PERIPH_RESET_n</code>. Each peripheral document must verify its
+          reset polarity, input thresholds, minimum reset duration, release
+          timing, and any required synchronization. An active-high reset needs
+          inversion. A device without a reset pin needs its own initialization
+          method. The RESET instruction drives the CPU node for 124 clocks,
+          nominally 12.4 us at 10 MHz; it does not invoke the DS1233's 250 ms
+          minimum timer. Check the delivered pulse after buffer and adapter
+          delays. LS07 switching values measured with 110 ohms and 15 pF do not
+          apply directly to this 1 kohm distribution net.
+        </p>
+
+        <p>
+          Peripheral pages must not connect additional loads directly to
+          <code>CPU_RESET_n</code> without updating the CPU reset-node loading
+          analysis. The buffered <code>PERIPH_RESET_n</code> domain exists to
+          avoid uncontrolled fanout on the bidirectional processor pin.
+        </p>
+
+        <h3>Board-Only Reset State</h3>
+
+        <p>
+          State that must be restored only by power-on or manual motherboard
+          reset uses <code>RESET_n</code>, not <code>PERIPH_RESET_n</code>.
+        </p>
+
+        <p>
+          In particular, the boot-overlay state belongs to the
+          <code>RESET_n</code> domain. A processor RESET instruction must reset
+          external devices without re-enabling the low-address firmware alias.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          The reset-domain architecture and peripheral-reset buffer topology are
+          frozen. Channel 3 of <code>U_RESET_DRV</code> generates
+          <code>PERIPH_RESET_n</code> from <code>CPU_RESET_n</code>.
+        </p>
+
+        <p>
+          <code>R_PERIPH_RESET</code> is frozen at 1 kohm with the
+          resistor-current budget shown above. The <a href="mfp.html">MFP</a>,
+          <a href="midi.html">MIDI</a>, <a href="opl3.html">OPL3</a>,
+          <a href="rtc.html">RTC</a>, <a href="floppy.html">floppy</a>, and
+          <a href="vga.html">VGA</a>
+          shall use this domain wherever the selected device provides or needs a
+          reset input. Their pages must define the final pin connection and any
+          polarity adapter. Fanout, leakage, capacitance, release edges, and
+          delivered pulse widths are post-layout checks.
+        </p>
+
+        <p>
+          The MC6850 has no reset pin. The
+          <a href="midi.html#clock-reset">MIDI design</a> instead requires a
+          control-register master reset after power-up and after every processor
+          RESET sequence.
+        </p>
+
+        <h3>Source</h3>
+
+        <p>
+          Motorola,
+          <a href="datasheets/M68000UM.pdf"><cite>M68000 User's Manual</cite></a
+          >, sections 3.6, 5.5, 10.13, and 10.14; and Texas Instruments,
+          <a href="datasheets/sn74ls07.pdf"><cite>SN74LS07</cite></a
+          >, sections 5, 6.3, 6.5, and 6.6.
+        </p>
+      </section>
+
+      <section id="boot-overlay-reset">
+        <h2>11. Boot-Overlay Reset Connection</h2>
+
+        <p>
+          The boot-ROM overlay is motherboard state and is initialized by
+          <code>RESET_n</code>, not by the processor's bidirectional
+          <code>CPU_RESET_n</code> signal.
+        </p>
+
+        <p>
+          The conditioned <code>RESET_n</code> output connects to
+          <code>U_OVERLAY</code> pin 4, the active-low asynchronous preset. The
+          raw DS1233 output is isolated by two SN74LS14 Schmitt stages.
+        </p>
+
+        <pre><code>RESET_n
+   |
+   +----------------------> U_OVERLAY 1/PRE
+                                  |
+                                  +-- Q  = OVERLAY_EN
+                                  |
+                                  +-- /Q = OVERLAY_n</code></pre>
+
+        <h3>Reset-State Behavior</h3>
+
+        <p>
+          The SN74HCT74 asynchronous preset input is active low. When
+          <code>1/PRE</code> is low while <code>1/CLR</code> is inactive, the
+          flip-flop forces <code>Q</code> high and <code>/Q</code> low
+          independently of the D and clock inputs.
+        </p>
+
+        <p>Therefore assertion of motherboard reset produces:</p>
+
+        <pre><code>RESET_n = 0
+
+U_OVERLAY 1/PRE = 0
+
+OVERLAY_EN = 1
+OVERLAY_n  = 0</code></pre>
+
+        <p>
+          <code>OVERLAY_EN = 1</code> is the required boot state. The firmware
+          EEPROM alias is enabled for the low 128 KiB address range. This is the
+          reset mapping, not an active CPU bus cycle during reset.
+        </p>
+
+        <h3>Relationship to ROM Alias Logic</h3>
+
+        <p>The bus decoder defines the raw boot-alias condition as:</p>
+
+        <pre><code>ROM_ALIAS_ADDR_n = LOW128_n OR OVERLAY_n</code></pre>
+
+        <p>While reset is asserted:</p>
+
+        <pre><code>OVERLAY_n = 0
+
+At an address inside $000000-$01FFFF:
+
+LOW128_n = 0
+
+ROM_ALIAS_ADDR_n
+    = 0 OR 0
+    = 0
+
+The raw alias address condition is true.
+Actual bus-cycle qualification is separate:
+ROM_ALIAS_n = ROM_ALIAS_ADDR_n OR NORMAL_MISC_n</code></pre>
+
+        <p>
+          With valid reset release and normal-cycle qualification, the initial
+          stack-pointer and program-counter fetches from addresses beginning at
+          <code>$000000</code> are directed to firmware rather than DRAM.
+        </p>
+
+        <h3>Reset Release</h3>
+
+        <p>
+          When <code>RESET_n</code> returns high, the asynchronous preset
+          becomes inactive. This releases control of the flip-flop but does not
+          by itself request that the overlay be disabled.
+        </p>
+
+        <p>
+          <code>OVERLAY_EN</code> therefore remains high after motherboard reset
+          is released. Firmware later disables the low-address alias using the
+          <code>SYSREG0</code> overlay-write mechanism defined in
+          <a href="bus-and-decode.html">bus-and-decode.html</a>.
+        </p>
+
+        <p>
+          The exact D-input and clocking implementation of
+          <code>U_OVERLAY</code> is owned by
+          <code>bus-and-decode.html</code> and is not redefined here.
+        </p>
+
+        <h3>Processor RESET Instruction</h3>
+
+        <p>
+          <code>CPU_RESET_n</code> is deliberately not connected to the
+          asynchronous preset input of <code>U_OVERLAY</code>.
+        </p>
+
+        <p>
+          When the MC68EC000 executes a RESET instruction, it can assert
+          <code>CPU_RESET_n</code> and consequently <code>PERIPH_RESET_n</code>,
+          but the board-level <code>RESET_n</code> signal remains inactive.
+        </p>
+
+        <pre><code>CPU executes RESET instruction:
+
+CPU_RESET_n    = 0
+PERIPH_RESET_n = 0
+
+RESET_n        = 1
+
+U_OVERLAY 1/PRE remains inactive
+OVERLAY_EN remains unchanged</code></pre>
+
+        <p>
+          Thus a processor RESET instruction resets external devices without
+          restoring the boot-ROM alias, unless an independent board reset
+          occurs. Any RESET_n assertion, including a supervisor brownout reset,
+          reinitializes the overlay when the flip-flop supply is valid.
+        </p>
+
+        <h3>Reset-Domain Summary</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Boot-overlay response to reset sources
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Reset event</th>
+              <th scope="col"><code>RESET_n</code></th>
+              <th scope="col"><code>CPU_RESET_n</code></th>
+              <th scope="col">Overlay preset?</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Power-on reset</td>
+              <td>Asserted</td>
+              <td>Asserted through CPU reset driver</td>
+              <td>Yes</td>
+            </tr>
+
+            <tr>
+              <td>Manual reset</td>
+              <td>Asserted</td>
+              <td>Asserted through CPU reset driver</td>
+              <td>Yes</td>
+            </tr>
+
+            <tr>
+              <td>Supervisor brownout reset</td>
+              <td>Asserted</td>
+              <td>Through CPU reset driver, subject to valid supply</td>
+              <td>Yes, when flip-flop supply is valid</td>
+            </tr>
+            <tr>
+              <td>CPU RESET instruction</td>
+              <td>Not asserted</td>
+              <td>Asserted by CPU</td>
+              <td>No</td>
+            </tr>
+
+            <tr>
+              <td>Processor HALT condition</td>
+              <td>Not asserted</td>
+              <td>Unaffected unless separately asserted</td>
+              <td>No</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Electrical Verification</h3>
+
+        <p>
+          The HCT74 preset requires VIH at least 2 V, VIL no greater than 0.8 V,
+          a low pulse of at least 20 ns at 4.5 V, and input rise/fall times no
+          greater than 500 ns. Input leakage is at most 1 uA in magnitude and
+          input capacitance is at most 10 pF.
+        </p>
+
+        <p>
+          RESET_n is driven by the second SN74LS14 stage, with two LS07 inputs
+          and this preset as its loads. A direct DS1233-to-preset RC calculation
+          does not describe this net. See
+          <a href="#electrical-timing-verification">electrical verification</a>
+          for the raw-node and conditioned-node tables, current margins, and the
+          unspecified LS14 output-edge limit.
+        </p>
+
+        <h3>Preset and Clear Overlap</h3>
+
+        <p>
+          The bus document grounds D and CLK and uses OVERLAY_WRITE_n on
+          asynchronous clear to disable the overlay. Releasing preset retains
+          the boot state only if clear is inactive. Both asynchronous inputs low
+          force both <code>Q</code> and <code>/Q</code> high, so the outputs are
+          no longer complementary.
+        </p>
+
+        <p>
+          A motherboard reset arriving during a SYSREG0 write can overlap preset
+          and clear before the processor and decoder respond. Holding the CPU in
+          reset eventually stops writes, but does not prove that the inputs
+          never overlap. Verify that clear returns high while preset is still
+          held low, and that the boot state is restored before CPU reset
+          release. The overlay-disable circuit remains defined in the bus
+          document.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          The boot-overlay reset-domain assignment is frozen. Check the
+          conditioned output edge and preset/clear overlap after layout. With
+          clear inactive,
+          <code>RESET_n</code> asserts the active-low preset input of
+          <code>U_OVERLAY</code>, forcing <code>OVERLAY_EN</code> high and
+          <code>OVERLAY_n</code> low.
+        </p>
+
+        <p>
+          <code>CPU_RESET_n</code> and <code>PERIPH_RESET_n</code> do not
+          initialize the overlay. The existing overlay-disable implementation
+          remains defined exclusively in <code>bus-and-decode.html</code>.
+        </p>
+
+        <h3>Source</h3>
+
+        <p>
+          Texas Instruments,
+          <cite>
+            SN54HCT74 / SN74HCT74 Dual D-Type Positive-Edge-Triggered Flip-Flops
+            With Clear and Preset </cite
+          >, <a href="datasheets/sn74hct74.pdf">datasheet</a>, sections 5.2,
+          5.4, 5.5, and 7.3; <a href="datasheets/sn74ls07.pdf">SN74LS07</a>,
+          section 6.5; <a href="datasheets/ds1233.pdf">DS1233</a>, page 5; and
+          <a href="bus-and-decode.html">Bus and Decode</a>, overlay
+          implementation.
+        </p>
+      </section>
+
+      <section id="reset-release-sequencing">
+        <h2>12. Reset Release Sequencing</h2>
+
+        <p>
+          The +5 V supply, master oscillator, CPU clock divider, and
+          boot-overlay state must be valid before the MC68EC000 begins its
+          reset-vector bus cycles. The sequence below defines the required
+          operation. Supply-ramp, reset-edge, and overlay preset/clear checks
+          are deferred until board bring-up.
+        </p>
+
+        <p>
+          The clock source and divider are free-running and are not controlled
+          by reset. The DS1233 therefore delays processor release rather than
+          attempting to start the clock simultaneously with the processor.
+        </p>
+
+        <p>
+          This sequence assumes valid device supplies, inactive overlay clear,
+          and compliant reset waveforms. Reset outputs are not guaranteed from
+          zero volts, and the LS14 conditioner and LS07 drivers require at least
+          4.75 V.
+        </p>
+
+        <pre><code>+5 V power applied
+       |
+       +-- DS1233 detects supply
+       |       |
+       |       +-- RESET_RAW_n asserted -> two LS14 stages -> RESET_n
+       |               |
+       |               +-- boot overlay forced enabled
+       |               +-- CPU_RESET_n asserted through LS07
+       |               +-- CPU_HALT_n asserted through LS07
+       |
+       +-- SG-615PH starts
+       |       |
+       |       +-- MASTER_CLK_40 becomes valid
+       |               |
+       |               +-- divider begins free-running
+       |                       |
+       |                       +-- CPU_CLK_10 becomes valid
+       |
+       +-- supply crosses actual DS1233 threshold and stays above it
+               |
+               +-- DS1233 reset timer starts
+               |
+               +-- at least 250 ms
+               |
+               +-- RESET_RAW_n released -> two LS14 stages -> RESET_n
+                       |
+                       +-- overlay preset released;
+                       |   OVERLAY_EN remains set
+                       |
+                       +-- CPU_RESET_n released
+                       +-- CPU_HALT_n released
+                               |
+                               +-- MC68EC000 begins reset sequence
+                                       |
+                                       +-- fetch initial SSP from $000000
+                                       +-- fetch initial PC from $000004
+                                       |
+                                       +-- vector reads use ROM alias</code></pre>
+
+        <h3>Power-Up Sequence</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Power-on reset-release sequence
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Stage</th>
+              <th scope="col">Condition</th>
+              <th scope="col">Required state</th>
+              <th scope="col">Verification</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>Supply rises toward the supervisor threshold</td>
+              <td>
+                <code>RESET_n</code>, <code>CPU_RESET_n</code>, and
+                <code>CPU_HALT_n</code> asserted.
+              </td>
+              <td>
+                Required boot state once each device's supply is valid. Do not
+                assume specified LS07 behavior below 4.75 V.
+              </td>
+            </tr>
+
+            <tr>
+              <td>2</td>
+              <td>
+                Supply crosses the actual DS1233-5 threshold, 4.50 to 4.75 V
+              </td>
+              <td>
+                DS1233 continues asserting reset while its internal timer runs.
+              </td>
+              <td>
+                250 ms minimum, 350 ms typical, 450 ms maximum after threshold
+                crossing, under the datasheet conditions
+              </td>
+            </tr>
+
+            <tr>
+              <td>3</td>
+              <td>SG-615PH starts</td>
+              <td>
+                <code>MASTER_CLK_40</code> becomes valid while the processor is
+                still held in reset.
+              </td>
+              <td>10 ms maximum oscillator startup time</td>
+            </tr>
+
+            <tr>
+              <td>4</td>
+              <td><code>MASTER_CLK_40</code> is running</td>
+              <td>
+                <code>U_CPU_CLK</code> free-runs and produces
+                <code>CPU_CLK_10</code>.
+              </td>
+              <td>No divider reset or clock gating is used</td>
+            </tr>
+
+            <tr>
+              <td>5</td>
+              <td>DS1233 reset timer expires</td>
+              <td>
+                RESET_RAW_n is released; the two LS14 stages then deassert
+                RESET_n.
+              </td>
+              <td>
+                Earliest supervisor release is t0 + 250 ms. Crossing its
+                threshold does not establish the CPU's 4.75 V minimum supply.
+              </td>
+            </tr>
+
+            <tr>
+              <td>6</td>
+              <td><code>RESET_n</code> becomes inactive</td>
+              <td>
+                LS07 channels release <code>CPU_RESET_n</code> and
+                <code>CPU_HALT_n</code>.
+              </td>
+              <td>
+                Final release-edge timing depends on the 3.9 kohm pull-ups and
+                node capacitances.
+              </td>
+            </tr>
+
+            <tr>
+              <td>7</td>
+              <td>Processor reset ends</td>
+              <td>
+                MC68EC000 reads the initial supervisor stack pointer and program
+                counter through the active boot-ROM alias.
+              </td>
+              <td>
+                Requires valid overlay supply, inactive clear, compliant preset
+                release, and the normal-cycle alias qualification
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Power-Up Reset Margin</h3>
+
+        <p>
+          The MC68EC000-specific AC electrical specifications state that the
+          processor must remain in the reset state for 520 clocks during
+          power-up to allow its internal circuitry to stabilize.
+        </p>
+
+        <pre><code>CPU clock = 10 MHz
+CPU clock period = 100 ns
+
+520 clocks * 100 ns
+    = 52 us</code></pre>
+
+        <p>
+          The general reset-operation section of the M68000 User's Manual gives
+          the more conservative requirement that initial external reset be held
+          for at least 100 ms.
+        </p>
+
+        <p>
+          The board retains the conservative 100 ms hold after power and clock
+          become valid. The DS1233's 250 ms minimum delay can cover both
+          requirements, but its timer starts at its own threshold. A slow ramp
+          can start that timer before the CPU reaches its 4.75 V minimum supply.
+        </p>
+
+        <pre><code>MC68EC000 stabilization: 520 valid clocks = 52 us at nominal 10 MHz
+At 9.999 MHz: 520 / 9.999 MHz = approximately 52.0052 us
+Board initial-reset hold after valid power and clock: 100 ms
+DS1233 minimum delay from its threshold crossing:    250 ms
+
+The durations have different starting conditions.</code></pre>
+
+        <h3>Oscillator Startup Margin</h3>
+
+        <p>
+          The SG-615PH specifies 10 ms maximum startup after reaching its 4.5 V
+          minimum supply. On a rising rail that stays valid, the DS1233-5
+          threshold is at or above that voltage. The following budget assumes
+          that ramp behavior; divider timing and CPU supply validity must also
+          be checked.
+        </p>
+
+        <pre><code>t0 = actual DS1233 threshold crossing, with supply remaining above it
+
+Earliest supervisor release:       t0 + 250 ms
+Latest oscillator startup:         t0 +  10 ms
+Conditional post-startup interval:       240 ms
+
+For the board's 100 ms initial-reset hold:
+valid CPU power, clock, and reset levels are required by t0 + 150 ms.</code></pre>
+
+        <p>
+          Verify the actual supply ramp and the common low interval at both CPU
+          pins. The CPU and LS07 require 4.75 to 5.25 V. A rail that stalls
+          below 4.75 V can let the supervisor timer expire without meeting that
+          condition. The
+          <a href="#power-on-reset">power-on reset section</a> records this
+          threshold gap. The <a href="#cpu-clock-timing">CPU clock checks</a>
+          remain separate from the reset-duration budget.
+        </p>
+
+        <h3>Boot-Overlay State at Release</h3>
+
+        <p>
+          With valid supply and asynchronous clear inactive, a low
+          <code>RESET_n</code> presets <code>U_OVERLAY</code>:
+        </p>
+
+        <pre><code>OVERLAY_EN = 1
+OVERLAY_n  = 0</code></pre>
+
+        <p>
+          When <code>RESET_n</code> rises, the preset input becomes inactive,
+          but this does not clear the flip-flop. Therefore
+          <code>OVERLAY_EN</code> remains high after reset release.
+        </p>
+
+        <p>
+          No software action is needed to establish the alias. Hardware must
+          restore the preset state before CPU release, including when reset
+          interrupts a SYSREG0 overlay-disable write. Verify preset/clear
+          overlap and preset release as described in the
+          <a href="#boot-overlay-reset">boot-overlay reset section</a>.
+        </p>
+
+        <p>
+          With those conditions met, each 32-bit vector is read as two 16-bit
+          transfers in the selected 16-bit bus mode:
+        </p>
+
+        <pre><code>$000000 and $000002: initial SSP -> boot ROM alias
+$000004 and $000006: initial PC  -> boot ROM alias</code></pre>
+
+        <h3>Processor /RESET and /HALT Release</h3>
+
+        <p>
+          Both processor control pins are driven from the same
+          <code>RESET_n</code> source through separate channels of
+          <code>U_RESET_DRV</code>. There is therefore no intentional sequencing
+          delay between processor <code>/RESET</code> and <code>/HALT</code>.
+        </p>
+
+        <p>
+          When <code>RESET_n</code> rises, each SN74LS07 open-collector output
+          releases its corresponding processor node. The 3.9 kohm pull-up on
+          each node then raises that signal toward +5 V.
+        </p>
+
+        <p>
+          LS07 channel behavior, pull-up tolerance, and node capacitance can
+          produce different threshold-crossing times. Check the common asserted
+          interval and both release waveforms at the CPU pins; a shared source
+          does not prove simultaneous release or a specified skew bound.
+        </p>
+
+        <h3>Processor Input Transition Requirement</h3>
+
+        <p>
+          MC68EC000 AC specification 32 gives a maximum input transition time of
+          150 ns for both <code>/HALT</code> and <code>/RESET</code>. Use the
+          manual's measurement conventions when checking the waveforms.
+        </p>
+
+        <p>The final release-edge calculation therefore must prove:</p>
+
+        <pre><code>CPU_RESET_n transition time &lt;= 150 ns
+CPU_HALT_n  transition time &lt;= 150 ns</code></pre>
+
+        <p>
+          Each 3.9 kohm +/-5 percent pull-up can reach 4.095 kohm. The CPU's 20
+          pF maximum input capacitance alone gives an 81.9 ns RC time constant.
+          That is a partial-load calculation, not a 150 ns transition-time pass.
+          Include LS07 output capacitance, routing, sockets, probes, leakage,
+          and the channel-3 input on CPU_RESET_n. The LS07 datasheet does not
+          specify those pin capacitances, so final transition times require
+          additional load data and measurements on the assembled board. See
+          <a href="#processor-reset-halt">processor reset and halt handling</a>
+          for the driver limits. Check assertion edges as well as release.
+        </p>
+
+        <h3>RESET_n Release Edge</h3>
+
+        <p>
+          C_RESET_SW remains 1 nF on RESET_RAW_n. The raw node now feeds two
+          SN74LS14 Schmitt stages, which drive RESET_n. Verify the conditioned
+          output against the HCT74's 500 ns input-transition limit; LS14
+          propagation delay is not an output rise-time guarantee. The
+          <a href="#electrical-timing-verification">electrical checks</a>
+          separate missing component limits from deferred PCB parasitics.
+        </p>
+
+        <h3>Peripheral Reset Release</h3>
+
+        <p>
+          <code>PERIPH_RESET_n</code> is generated from
+          <code>CPU_RESET_n</code> through another open-collector LS07 channel.
+          Channel 3 starts releasing its output as CPU_RESET_n is recognized
+          high at its input. This does not specify the threshold-crossing order
+          at the CPU and peripheral pins or guarantee a recovery delay.
+        </p>
+
+        <p>
+          Exact peripheral readiness after reset is not assumed by this
+          document. Each peripheral page must verify its device-specific reset
+          recovery time before firmware accesses that device.
+        </p>
+
+        <p>
+          The initial vector reads select the firmware EEPROM alias. Peripheral
+          recovery need not delay them provided resetting devices neither drive
+          nor hold shared bus signals. Verify that condition and each device's
+          recovery time in the peripheral pages before firmware accesses it. See
+          <a href="#reset-distribution">reset distribution</a> for the
+          peripheral pull-up and post-layout load budget.
+        </p>
+
+        <h3>Status</h3>
+
+        <p>
+          The free-running clock, shared board-reset source, and overlay reset
+          domain are unchanged. Datasheet durations support the intended
+          sequence under the conditions above; board-level release timing is not
+          yet verified.
+        </p>
+
+        <p>
+          Remaining checks are the supply ramp, valid divided clock, common CPU
+          reset hold, loaded reset edges, overlay preset/clear overlap, and
+          peripheral recovery. No additional datasheet is needed to establish
+          the durations cited here. Completing the edge checks needs board
+          loading and waveform measurements; the LS07 datasheet omits pin
+          capacitances.
+        </p>
+
+        <h3>Sources</h3>
+
+        <p>
+          Motorola,
+          <cite>M68000 8-/16-/32-Bit Microprocessors User's Manual</cite>,
+          <a href="datasheets/M68000UM.pdf">manual</a>, section 5.5 and section
+          10.14, parameter 32 and note 4; Analog Devices,
+          <a
+            href="https://www.analog.com/media/en/technical-documentation/data-sheets/DS1233.pdf"
+            >DS1233</a
+          >, pages 2, 3, and 5 (also
+          <a href="datasheets/ds1233.pdf">stored locally</a>); Texas
+          Instruments, <a href="datasheets/sn74hct74.pdf">SN74HCT74</a>,
+          sections 5.2 and 7.3, and
+          <a href="datasheets/sn74ls07.pdf">SN74LS07</a>, sections 6.3, 6.5, and
+          6.6; Epson, <a href="datasheets/SG-615PH_en.pdf">SG-615PH</a>,
+          specifications.
+        </p>
+      </section>
+
+      <section id="electrical-timing-verification">
+        <h2>13. Electrical and Timing Verification</h2>
+
+        <p>
+          Reset timing is divided into two electrical domains.
+          <code>RESET_RAW_n</code> is the relatively slow supervisor and
+          pushbutton node generated by the DS1233. A Schmitt-trigger conditioner
+          converts this signal into the clean logic-level motherboard reset
+          signal <code>RESET_n</code>.
+        </p>
+
+        <p>
+          This distinction prevents the RC behavior required by the DS1233
+          pushbutton interface from being applied directly to ordinary HCT logic
+          inputs.
+        </p>
+
+        <pre><code>DS1233 RST
+    |
+    +-- RESET_RAW_n
+            |
+            +-- SW_RESET ---- GND
+            |
+            +-- C_RESET_SW -- GND
+            |
+            +-- SN74LS14 inverter
+                    |
+                    +-- RESET_STAGE_H
+                            |
+                            +-- SN74LS14 inverter
+                                    |
+                                    +-- RESET_n
+                                            |
+                                            +-- U_OVERLAY 1/PRE
+                                            +-- CPU /RESET LS07 input
+                                            +-- CPU /HALT LS07 input</code></pre>
+
+        <h3>Reset Signal Conditioner</h3>
+
+        <p>
+          <code>U_RESET_COND</code> is a Texas Instruments
+          <code>SN74LS14N</code> hex Schmitt-trigger inverter. Two inverter
+          stages are cascaded so that the final signal retains the active-low
+          polarity of the original DS1233 reset signal.
+        </p>
+
+        <pre><code>RESET_RAW_n = 0
+    -> first inverter output = 1
+    -> second inverter output = 0
+    -> RESET_n asserted
+
+RESET_RAW_n = 1
+    -> first inverter output = 0
+    -> second inverter output = 1
+    -> RESET_n inactive</code></pre>
+
+        <p>
+          The Schmitt-trigger input is specifically intended to accept slow or
+          noisy transitions. The first stage therefore accepts the RC-shaped
+          release of <code>RESET_RAW_n</code>, while the second stage receives
+          an ordinary logic transition from the first stage.
+        </p>
+
+        <h3>Physical Connections</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_RESET_COND SN74LS14N connections
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>14</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+              <td>Power</td>
+            </tr>
+
+            <tr>
+              <td>7</td>
+              <td><code>GND</code></td>
+              <td>Ground</td>
+              <td>Power return</td>
+            </tr>
+
+            <tr>
+              <td>1</td>
+              <td><code>1A</code></td>
+              <td><code>RESET_RAW_n</code></td>
+              <td>Schmitt-trigger reception of raw reset</td>
+            </tr>
+
+            <tr>
+              <td>2</td>
+              <td><code>1Y</code></td>
+              <td><code>RESET_STAGE_H</code></td>
+              <td>First-stage active-high reset signal</td>
+            </tr>
+
+            <tr>
+              <td>3</td>
+              <td><code>2A</code></td>
+              <td><code>RESET_STAGE_H</code></td>
+              <td>Second conditioner stage input</td>
+            </tr>
+
+            <tr>
+              <td>4</td>
+              <td><code>2Y</code></td>
+              <td><code>RESET_n</code></td>
+              <td>Clean active-low motherboard reset</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          A 100 nF + 1uF ceramic decoupling capacitor shall be placed directly
+          between pins 14 and 7.
+        </p>
+
+        <p>
+          The four unused SN74LS14 inputs shall be tied to a defined logic
+          level. Tie unused inputs 5, 9, 11, and 13 to ground. Leave outputs 6,
+          8, 10, and 12 unconnected.
+        </p>
+
+        <h3>RESET_RAW_n Loading</h3>
+
+        <p>
+          <code>RESET_RAW_n</code> is intentionally permitted to transition
+          slowly. Its known loads are the DS1233 itself, the first SN74LS14
+          Schmitt-trigger input, the manual-reset capacitor, and PCB parasitics.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            RESET_RAW_n electrical loads
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Value or limit</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>DS1233 internal pull-up</td>
+              <td>3.75 kohm minimum, 5 kohm typical, 6.25 kohm maximum</td>
+              <td>Verified</td>
+            </tr>
+
+            <tr>
+              <td>DS1233 output capacitance</td>
+              <td>10 pF maximum</td>
+              <td>Verified</td>
+            </tr>
+
+            <tr>
+              <td><code>C_RESET_SW</code></td>
+              <td>1 nF</td>
+              <td>Inside DS1233 permitted 100 pF through 0.01 uF range</td>
+            </tr>
+
+            <tr>
+              <td>SN74LS14 input</td>
+              <td>
+                Schmitt-trigger input; designed for slow input transitions
+              </td>
+              <td>Suitable</td>
+            </tr>
+
+            <tr>
+              <td>PCB parasitics</td>
+              <td>Deferred until PCB layout</td>
+              <td>Layout-dependent</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          At a 0.4 V low level, the raw-node load is (5.25 V - 0.4 V) / 3.75
+          kohm + 0.4 mA = 1.693 mA, below the DS1233's 8 mA rating. At a
+          hypothetical zero-volt output, the same current budget is 1.800 mA.
+          These calculations include the supervisor's internal pull-up; no
+          external pull-up is selected.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Conditioner limits and raw-node checks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">Value and conditions</th>
+              <th scope="col">Assessment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Operating range</td>
+              <td>4.75 to 5.25 V; 0 to 70 C</td>
+              <td>
+                Applies to the SN74LS14 and LS07. No guaranteed conditioned
+                reset below 4.75 V.
+              </td>
+            </tr>
+            <tr>
+              <td>Schmitt thresholds</td>
+              <td>
+                At VCC = 5 V: VT+ = 1.4 / 1.6 / 1.9 V; VT- = 0.5 / 0.8 / 1.0 V
+                (minimum / typical / maximum); hysteresis 0.4 V minimum
+              </td>
+              <td>
+                Threshold limits are specified at 5 V, not as full-supply-range
+                bounds.
+              </td>
+            </tr>
+            <tr>
+              <td>Raw-node low</td>
+              <td>
+                DS1233 VOL &lt;= 0.4 V at 8 mA; first-stage input IIL magnitude
+                &lt;= 0.4 mA at 0.4 V
+              </td>
+              <td>
+                0.1 V below the 0.5 V minimum negative-going threshold at 5 V.
+              </td>
+            </tr>
+            <tr>
+              <td>Raw-node high</td>
+              <td>
+                LS14 IIH &lt;= 20 uA at 2.7 V; screening estimate: 4.75 V - 6.25
+                kohm * 20 uA = 4.625 V
+              </td>
+              <td>
+                Above VT+ at 5 V. IIH is tested at 2.7 V; this is a DC screen,
+                not a full input-current curve.
+              </td>
+            </tr>
+            <tr>
+              <td>High-input current cross-check</td>
+              <td>
+                II &lt;= 0.1 mA at VI = 7 V; if budgeted at the raw node: 4.75 V
+                - 6.25 kohm * 0.1 mA = 4.125 V
+              </td>
+              <td>
+                Conservative screening assumption at the board voltage, not a
+                separately specified 5 V leakage limit.
+              </td>
+            </tr>
+            <tr>
+              <td>Raw-node capacitance</td>
+              <td>
+                1 nF nominal + DS1233 10 pF maximum = 1010 pF, plus LS14 input
+                capacitance
+              </td>
+              <td>
+                LS14 input capacitance is unspecified. PCB and wiring
+                capacitance are deferred; capacitor tolerance must also be
+                included.
+              </td>
+            </tr>
+            <tr>
+              <td>Raw release model</td>
+              <td>
+                6.25 kohm * 1010 pF = 6.3125 us nominal-capacitor time constant;
+                20-to-80-percent interval about 8.75 us
+              </td>
+              <td>
+                Partial RC model; slow ramps are allowed at the Schmitt input.
+                No HCT input is on this node.
+              </td>
+            </tr>
+            <tr>
+              <td>Interstage loading</td>
+              <td>
+                One LS14 input: 20 uA high, 0.4 mA low; output capacity 0.4 mA
+                source, 8 mA sink
+              </td>
+              <td>
+                Within the DC current ratings; do not treat typical threshold
+                input currents as guaranteed limits.
+              </td>
+            </tr>
+            <tr>
+              <td>Conditioner supply current</td>
+              <td>ICCH 16 mA maximum; ICCL 21 mA maximum for the package</td>
+              <td>
+                Use 21 mA as the static package budget, excluding external loads
+                and switching current.
+              </td>
+            </tr>
+            <tr>
+              <td>Propagation delay</td>
+              <td>
+                tPLH and tPHL each 22 ns maximum at 5 V, CL = 15 pF, RL = 400
+                ohm or 2 kohm; section 6.6 temperature conditions
+              </td>
+              <td>
+                Two-stage sum 44 ns only under these test conditions. This is
+                not an output transition-time limit.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>RESET_n Logic Levels</h3>
+
+        <p>
+          The second SN74LS14 stage actively drives
+          <code>RESET_n</code> both high and low. The principal known loads are
+          two SN74LS07 inputs, the SN74HCT74 boot-overlay preset input, and four
+          tied <code>CD74ACT244E</code> inputs at <code>U_DRAM_RESET_BUF</code>.
+          The buffer's four outputs carry the DRAM controller's FAST reset load;
+          it is not placed directly on this net.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            RESET_n logic-level compatibility
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">SN74LS14 guarantee</th>
+              <th scope="col">Receiving requirement</th>
+              <th scope="col">Margin</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>HIGH level</td>
+              <td><code>VOH(min) = 2.4 V</code> at IOH = -0.4 mA</td>
+              <td>
+                <code>VIH(min) = 2.0 V</code> for HCT and LS receiving inputs
+              </td>
+              <td>0.4 V</td>
+              <td>DC pass for defined loads</td>
+            </tr>
+
+            <tr>
+              <td>LOW level</td>
+              <td><code>VOL(max) = 0.5 V</code> at 8 mA</td>
+              <td>
+                <code>VIL(max) = 0.8 V</code> for HCT and LS receiving inputs
+              </td>
+              <td>0.3 V</td>
+              <td>DC pass for defined loads</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The defined RESET_n high-state load is 45 uA: 40 uA for the two LS07
+          inputs, 1 uA for the HCT74 preset, and 4 uA for the four ACT244
+          inputs. This leaves 355 uA of the LS14's 400 uA source budget. The
+          low-state load is 0.405 mA: 0.4 mA for the two LS07 inputs, 0.001 mA
+          for the HCT74 preset, and 0.004 mA for the four ACT inputs. This
+          leaves 7.595 mA of the LS14's 8 mA sink budget. Input-current figures
+          retain their individual datasheet test conditions. No switch,
+          capacitor, or pull-up connects directly to this push-pull output.
+        </p>
+
+        <h3>Boot-Overlay Preset Transition</h3>
+
+        <p>
+          The SN74HCT74 specifies a maximum input transition time of 500 ns.
+          Connecting the raw DS1233 reset node directly to this input would make
+          compliance dependent on the reset-node RC time constant.
+        </p>
+
+        <p>
+          The two-stage SN74LS14 conditioner removes that dependency.
+          <code>U_OVERLAY</code> receives the actively driven
+          <code>RESET_n</code> output rather than <code>RESET_RAW_n</code>.
+        </p>
+
+        <p>
+          <code>C_RESET_SW</code> remains 1 nF on RESET_RAW_n. The LS14
+          datasheet supports slow-input operation but does not specify a
+          guaranteed output rise/fall time. Its 22 ns propagation limit does not
+          prove the HCT74's 500 ns input-transition requirement. Record that
+          evidence gap separately from PCB parasitics. RESET_n includes the
+          HCT74's 10 pF maximum input capacitance plus two unspecified LS07
+          input capacitances; verify the conditioned output waveform under the
+          final load.
+        </p>
+
+        <h3>Processor Reset-Node Transition Times</h3>
+
+        <p>
+          The MC68EC000-specific AC timing table specifies a maximum input
+          transition time of 150 ns for both processor
+          <code>/RESET</code> and <code>/HALT</code>.
+        </p>
+
+        <p>
+          These two nodes are open-collector signals and rise through their
+          individual 3.9 kohm pull-up resistors. Their release rates therefore
+          depend on total node capacitance.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Processor reset-control transition requirements
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Pull-up</th>
+              <th scope="col">CPU requirement</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>CPU_RESET_n</code></td>
+              <td>3.9 kohm</td>
+              <td>150 ns maximum input transition time</td>
+              <td>Final capacitance and waveform measurement required</td>
+            </tr>
+
+            <tr>
+              <td><code>CPU_HALT_n</code></td>
+              <td>3.9 kohm</td>
+              <td>150 ns maximum input transition time</td>
+              <td>Final capacitance and waveform measurement required</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The 3.9 kohm values follow from the processor's guaranteed output
+          sink-current limits. They shall not be reduced solely to obtain a
+          faster release edge without repeating the processor-output current
+          calculation.
+        </p>
+
+        <p>
+          M68000UM section 10.5, Figure 10-2 uses 0.8 V and 2.0 V as input
+          timing thresholds, with test inputs driven to 0.5 V and 2.4 V. The
+          calculations below screen the 0.8-to-2.0 V release interval. Parameter
+          32 does not separately label its transition endpoints; retain a full
+          waveform capture rather than treating this threshold-window
+          calculation as complete AC certification. A 10-to-90-percent
+          measurement must state its endpoints and must not be substituted
+          silently.
+        </p>
+
+        <pre><code>Rmin = 3900 * 0.95 = 3705 ohm
+Rmax = 3900 * 1.05 = 4095 ohm
+Vfinal = VCC - Rmax * Ileak
+t(0.8 V to 2.0 V) = Rmax * Ctotal * ln((Vfinal - 0.8) / (Vfinal - 2.0))</code></pre>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Processor reset calculations before PCB parasitics
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Check</th>
+              <th scope="col">CPU_RESET_n</th>
+              <th scope="col">CPU_HALT_n</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Asserted current at CPU VOL = 0.5 V</td>
+              <td>
+                (5.25 - 0.5) / 3705 + 0.2 mA = 1.482 mA; below CPU 5 mA sink
+                rating
+              </td>
+              <td>
+                (5.25 - 0.5) / 3705 = 1.282 mA; below CPU 1.6 mA sink rating
+              </td>
+            </tr>
+            <tr>
+              <td>Zero-volt current screen</td>
+              <td>5.25 / 3705 + 0.2 mA = 1.617 mA</td>
+              <td>5.25 / 3705 = 1.417 mA</td>
+            </tr>
+            <tr>
+              <td>Released leakage budget</td>
+              <td>
+                LS07 output 250 uA + CPU 20 uA + LS07 channel-3 input 20 uA =
+                290 uA
+              </td>
+              <td>LS07 output 250 uA + CPU 20 uA = 270 uA</td>
+            </tr>
+            <tr>
+              <td>Released voltage screen at 4.75 V</td>
+              <td>3.562 V; 1.562 V above 2.0 V</td>
+              <td>3.644 V; 1.644 V above 2.0 V</td>
+            </tr>
+            <tr>
+              <td>Known CPU input capacitance</td>
+              <td>20 pF maximum at Vin = 0 V, 25 C, 1 MHz</td>
+              <td>20 pF maximum under the same conditions</td>
+            </tr>
+            <tr>
+              <td>Missing component capacitance, even before layout</td>
+              <td>
+                LS07 channel-1 output and channel-3 input; no guaranteed values
+                supplied
+              </td>
+              <td>LS07 channel-2 output; no guaranteed value supplied</td>
+            </tr>
+            <tr>
+              <td>CPU-only RC time constant</td>
+              <td>4095 ohm * 20 pF = 81.9 ns</td>
+              <td>81.9 ns</td>
+            </tr>
+            <tr>
+              <td>CPU-only 0.8-to-2.0 V release screen</td>
+              <td>46.7 ns with the stated leakage model</td>
+              <td>44.9 ns with the stated leakage model</td>
+            </tr>
+            <tr>
+              <td>150 ns threshold-window capacitance budget</td>
+              <td>64.3 pF total; 44.3 pF left after CPU input</td>
+              <td>66.8 pF total; 46.8 pF left after CPU input</td>
+            </tr>
+            <tr>
+              <td>10-to-90-percent comparison</td>
+              <td>ln(9) * 81.9 ns = 180 ns for a simple CPU-only RC model</td>
+              <td>
+                180 ns; different endpoints from the threshold-window
+                calculation
+              </td>
+            </tr>
+            <tr>
+              <td>Board parasitics</td>
+              <td>
+                Deferred; budget must include wiring, sockets, and probes when
+                applicable
+              </td>
+              <td>Deferred; same accounting required</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The LS07 250 uA off-state limit is tested at 30 V. Applying it at the
+          board voltage is a conservative screening assumption, not an
+          additional datasheet guarantee. The current-source leakage model is
+          approximate. No complete worst-case release time can be calculated
+          from the supplied component datasheets alone. Assertion also needs
+          verification: the LS07 specifies propagation delay, not guaranteed
+          output fall time.
+        </p>
+
+        <h3>Reset Duration Verification</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Reset-duration checks
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Requirement</th>
+              <th scope="col">Required duration</th>
+              <th scope="col">Provided duration</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>MC68EC000 power-up stabilization</td>
+              <td>520 clocks = 52 us at 10 MHz</td>
+              <td rowspan="3">
+                DS1233 raw output: 250 ms minimum after its threshold crossing;
+                delivery to CPU pins is conditional
+              </td>
+              <td>
+                Duration budget sufficient only with valid supply, clock, and
+                delivered common reset-low interval
+              </td>
+            </tr>
+
+            <tr>
+              <td>General initial power-up reset</td>
+              <td>At least 100 ms</td>
+              <td>
+                Duration budget sufficient only with valid supply, clock, and
+                delivered common reset-low interval
+              </td>
+            </tr>
+
+            <tr>
+              <td>Normal MC68EC000 external reset</td>
+              <td>At least 10 clocks = 1 us at 10 MHz</td>
+              <td>
+                Duration budget sufficient only with valid supply, clock, and
+                delivered common reset-low interval
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The raw-node timer starts at the DS1233's actual 4.50-to-4.75 V
+          threshold. The CPU, LS14, and LS07 require at least 4.75 V. Retain the
+          <a href="#reset-release-sequencing">conditional startup budget</a>:
+          valid CPU conditions by t0 + 150 ms allow a 100 ms hold before the
+          earliest supervisor release at t0 + 250 ms. External reset during a
+          CPU RESET instruction requires 132 clocks (13.2 us nominal), also
+          covered by that hold when valid at the pins.
+        </p>
+
+        <p>
+          Propagation and threshold differences can shorten or lengthen the
+          pulse at a receiver. In general, Wout = Win + drelease - dassert; it
+          is incorrect to claim that adding gates cannot reduce pulse width. The
+          44 ns two-stage conditioner figure applies only at its test load and 5
+          V. Verify common /RESET and /HALT assertion rather than using that
+          number as a full board delay bound.
+        </p>
+
+        <h3>Verification Status</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Clock/reset electrical-verification summary
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>DS1233 power-on reset duration</td>
+              <td>Verified</td>
+            </tr>
+
+            <tr>
+              <td>DS1233 to reset-conditioner compatibility</td>
+              <td>
+                DC screens filled in; Schmitt threshold limits specified at 5 V
+              </td>
+            </tr>
+
+            <tr>
+              <td>Slow RESET_RAW_n acceptance</td>
+              <td>Verified by SN74LS14 Schmitt-trigger architecture</td>
+            </tr>
+
+            <tr>
+              <td>RESET_n logic levels into HCT74 and LS07</td>
+              <td>Verified</td>
+            </tr>
+
+            <tr>
+              <td>Boot-overlay reset input transition</td>
+              <td>
+                Conditioned by SN74LS14; final routed waveform to be measured
+              </td>
+            </tr>
+
+            <tr>
+              <td>CPU_RESET_n transition time</td>
+              <td>
+                Component-only screens above; LS07 pin capacitance and edge
+                specifications missing; PCB parasitics deferred
+              </td>
+            </tr>
+
+            <tr>
+              <td>CPU_HALT_n transition time</td>
+              <td>
+                Component-only screens above; LS07 output capacitance and
+                fall-time specification missing; PCB parasitics deferred
+              </td>
+            </tr>
+
+            <tr>
+              <td>PERIPH_RESET_n pull-up and fanout</td>
+              <td>
+                1 kohm +/-5 percent: 5.53 mA maximum resistor current, 29.1 mW
+                maximum dissipation, 10.47 mA remaining against the LS07 16 mA /
+                0.4 V test point. Verify final receiver loading after the
+                peripheral adapters are defined. See
+                <a href="#reset-distribution">reset distribution</a>.
+              </td>
+            </tr>
+
+            <tr>
+              <td>CPU clock pulse widths and edges</td>
+              <td>
+                Measure against the design targets of 45 ns minimum pulse widths
+                and 10 ns maximum edges. See
+                <a href="#cpu-clock-timing">CPU clock timing</a>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Status</h3>
+
+        <p>
+          The board-level reset conditioner is frozen:
+          <code>U_RESET_COND</code> is an <code>SN74LS14N</code>,
+          <code>RESET_RAW_n</code> passes through two Schmitt-trigger inverter
+          stages, and the resulting <code>RESET_n</code> is the clean
+          motherboard-reset signal used by ordinary logic.
+        </p>
+
+        <p>
+          <code>C_RESET_SW</code> remains frozen at 1 nF on
+          <code>RESET_RAW_n</code>. PCB parasitics are deferred as requested.
+          Post-layout checks cover unspecified LS pin capacitances and output
+          edge limits, peripheral reset loads, and supply-ramp validation. The
+          CPU clock section defines the conservative timing targets.
+        </p>
+
+        <h3>Sources</h3>
+
+        <p>
+          Dallas Semiconductor / Analog Devices,
+          <cite>DS1233 5V EconoReset</cite>; Texas Instruments,
+          <cite
+            >SN5414 / SN54LS14 / SN7414 / SN74LS14 Hex Schmitt-Trigger
+            Inverters</cite
+          >; Texas Instruments,
+          <cite>SN74HCT74 Dual D-Type Flip-Flops With Clear and Preset</cite>;
+          and Motorola,
+          <cite>M68000 8-/16-/32-Bit Microprocessors User's Manual</cite>,
+          MC68EC000 electrical specifications. Local sources:
+          <a href="datasheets/ds1233.pdf">DS1233</a>, pages 2 and 5;
+          <a href="datasheets/sn74ls14.pdf">SN74LS14</a>, sections 5, 6.3, 6.5,
+          and 6.6 (<a href="https://www.ti.com/lit/ds/symlink/sn74ls14.pdf"
+            >TI copy</a
+          >); <a href="datasheets/sn74ls07.pdf">SN74LS07</a>, sections 6.5 and
+          6.6; <a href="datasheets/sn74hct74.pdf">SN74HCT74</a>, sections 5.2
+          and 5.4; <a href="datasheets/M68000UM.pdf">M68000UM</a>, sections 5.5,
+          10.5, 10.13, and 10.14.
+        </p>
+      </section>
+
+      <section id="post-layout-verification">
+        <h2>14. Post-Layout Verification</h2>
+
+        <p>
+          The circuit choices and nominal values in this document are final. The
+          checks below require routed-board data or measurements and do not
+          block schematic capture.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Board verification checklist
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Required result</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Supply ramp and brownout</td>
+              <td>
+                Confirm that +5 V reaches the CPU's 4.75 V minimum soon enough
+                to provide 100 ms of valid reset before the earliest DS1233
+                release. Test realistic power-up, power-down, and brownout
+                ramps.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock loading and waveform</td>
+              <td>
+                Include device, trace, socket, adapter, and probe capacitance.
+                Measure MASTER_CLK_40 at the divider and CPU_CLK_10 at both
+                receivers. Check divider pulse widths and the CPU clock targets
+                of 45 ns minimum high and low and 10 ns maximum rise and fall.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock frequency</td>
+              <td>
+                Record the loaded clock frequency and jitter. The accepted
+                C-grade tolerance gives 9.999 to 10.001 MHz at the CPU before
+                aging and jitter.
+              </td>
+            </tr>
+            <tr>
+              <td>Conditioned motherboard reset</td>
+              <td>
+                Measure RESET_n at the SN74HCT74 preset and both SN74LS07
+                inputs. Confirm logic levels and the HCT74's 500 ns maximum
+                input transition time.
+              </td>
+            </tr>
+            <tr>
+              <td>Processor reset and halt</td>
+              <td>
+                Measure assertion and release at CPU_RESET_n and CPU_HALT_n.
+                Confirm a common reset-low interval and transitions no longer
+                than 150 ns at both processor pins.
+              </td>
+            </tr>
+            <tr>
+              <td>Boot overlay</td>
+              <td>
+                Test reset during an overlay-disable write. Confirm that clear
+                returns inactive while preset remains asserted and that
+                OVERLAY_EN is high before CPU reset release.
+              </td>
+            </tr>
+            <tr>
+              <td>Peripheral reset</td>
+              <td>
+                Verify the total leakage, capacitance, polarity adapters, pulse
+                widths, and release edges driven by PERIPH_RESET_n. Confirm that
+                resetting peripherals do not drive shared bus signals before
+                they are ready.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The reset switch remains a normally open momentary SPST part selected
+          with the enclosure. C_RESET_SW remains a 1 nF ceramic capacitor, with
+          the exact part left to implementation. The processor MODE pin must be
+          high or unconnected during reset for 16-bit bus mode.
+        </p>
+      </section>
+
+      <section id="sources">
+        <h2>15. Sources</h2>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Datasheets used for clock and reset verification
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Document</th>
+              <th scope="col">Link</th>
+              <th scope="col">Used for</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>Epson SG-615PH Datasheet</td>
+              <td><a href="datasheets/SG-615PH_en.pdf">PDF</a></td>
+              <td>
+                PH-specific electrical limits, tolerance grades, startup, and
+                pin map. Downloaded from
+                <a
+                  href="https://download.epsondevice.com/td/pdf/brief/SG-615PH_en.pdf"
+                  >Epson</a
+                >.
+              </td>
+            </tr>
+            <tr>
+              <td>DS1233 5V EconoReset, revision 2</td>
+              <td><a href="datasheets/ds1233.pdf">PDF</a></td>
+              <td>
+                Supervisor pinout, threshold, delay, pull-up, and pushbutton
+                requirements.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74HCT74 Datasheet</td>
+              <td><a href="datasheets/sn74hct74.pdf">PDF</a></td>
+              <td>Boot-overlay preset-input transition limit.</td>
+            </tr>
+            <tr>
+              <td>M68000 User Manual, Ninth Edition</td>
+              <td><a href="datasheets/M68000UM.pdf">PDF</a></td>
+              <td>
+                Clock-table applicability, 10 MHz bus timing, reset operation,
+                CPU pin levels, and capacitance.
+              </td>
+            </tr>
+            <tr>
+              <td>MC68000 User Manual Addendum</td>
+              <td><a href="datasheets/addendum-M68000.pdf">PDF</a></td>
+              <td>Manual corrections and additional device specifications.</td>
+            </tr>
+            <tr>
+              <td>SN74F74 Datasheet</td>
+              <td><a href="datasheets/sn74f74.pdf">PDF</a></td>
+              <td>Divider pinout, timing, logic levels, and loading.</td>
+            </tr>
+            <tr>
+              <td>SN74LS14 Datasheet, revision C</td>
+              <td><a href="datasheets/sn74ls14.pdf">PDF</a></td>
+              <td>
+                Reset conditioner pinout, Schmitt thresholds, current and timing
+                limits.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74LS07 Datasheet, revision D</td>
+              <td><a href="datasheets/sn74ls07.pdf">PDF</a></td>
+              <td>
+                Processor reset/halt driver pinout, DC limits, and switching
+                test conditions.
+              </td>
+            </tr>
+            <tr>
+              <td>CD74HC4040 / CD74HCT4040 Datasheet</td>
+              <td><a href="datasheets/cd74hct4040.pdf">PDF</a></td>
+              <td>Timeout, startup, and refresh-counter input capacitance.</td>
+            </tr>
+            <tr>
+              <td>CD74ACT244 Datasheet</td>
+              <td><a href="datasheets/cd74act244.pdf">PDF</a></td>
+              <td>DRAM clock/reset buffer levels, loading, and delay.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The available MC68EC000 documentation does not give an unambiguous
+          device-specific clock-input table, so this design uses the
+          conservative targets stated in the CPU clock section. The F74 databook
+          Section 1 measurement definitions would improve comparison with its
+          switching table. The LS07 and LS14 datasheets do not specify every pin
+          capacitance or output edge needed for pre-layout timing closure; those
+          checks require measurements on the routed board.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

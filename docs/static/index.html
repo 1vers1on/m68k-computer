@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>68EC000 Computer</h1>
+
+      <p>
+        This site collects the design documents and datasheets for the 68EC000
+        computer. Every document is at revision 1.0: the parts, connections,
+        equations, and register maps are fixed, and what remains on each page is
+        board layout and measurement on the assembled machine. Schematics and
+        PCB files are not published yet.
+      </p>
+
+      <p>
+        Claude and Codex were used to help format and put my ideas into the
+        design documents.
+      </p>
+
+      <dl>
+        <dt>CPU</dt>
+        <dd>MC68EC000FN10</dd>
+
+        <dt>Address space</dt>
+        <dd>16 MiB</dd>
+
+        <dt>Data bus</dt>
+        <dd>16-bit</dd>
+
+        <dt>Main RAM</dt>
+        <dd>4 MiB of TMS44400 FPM DRAM</dd>
+
+        <dt>Firmware</dt>
+        <dd>128 KiB in four AT28C256-15PU EEPROMs, always read-only</dd>
+
+        <dt>Video controller</dt>
+        <dd>
+          CL-GD5428 VGA controller with its 16-bit byte lanes swapped for the
+          MC68EC000's big-endian bus and 2 MiB of video RAM
+        </dd>
+
+        <dt>Floppy controller</dt>
+        <dd>Intel 82077AA-1 using interrupt-driven programmed I/O</dd>
+
+        <dt>Floppy drives</dt>
+        <dd>
+          Two Mitsumi D359M3D 3.5-inch, 1.44 MB drives on one twisted cable
+        </dd>
+
+        <dt>Sound</dt>
+        <dd>
+          Yamaha YMF262 OPL3, two YAC512 converters, stereo headphone amplifier,
+          volume control, and 3.5 mm output
+        </dd>
+      </dl>
+    </header>
+
+    <main>
+      <section>
+        <h2>Design Documents</h2>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Project documents
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Document</th>
+              <th scope="col">Status</th>
+              <th scope="col">Contents</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><a href="memory-map.html">Memory Map</a></td>
+              <td>Revision 1.0; address specification frozen</td>
+              <td>
+                Address ranges, I/O slots, boot overlay, peripheral registers,
+                and DRAM organization.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="bus-and-decode.html">Bus and Address Decode</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Bus cycles, address decoders, boot-overlay logic, worked decode
+                examples, timing, and bus termination.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="clock-and-reset.html">Clock and Reset</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>10 MHz clock and active-low reset generation.</td>
+            </tr>
+            <tr>
+              <td><a href="interrupts.html">Interrupts</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Priority encoding, acknowledge decode, autovector and MFP
+                vectors, and spurious-interrupt handling.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="system-control.html">System Control</a></td>
+              <td>Revision 1.0</td>
+              <td>Boot-overlay and debug-register behavior.</td>
+            </tr>
+            <tr>
+              <td><a href="debug-display.html">Debug Display</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>Two-digit hexadecimal seven-segment display.</td>
+            </tr>
+            <tr>
+              <td><a href="dram.html">DRAM</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                DRAM organization, discrete controller, refresh, initialization,
+                timing, electrical checks, and assembled-board acceptance.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="firmware-rom.html">Firmware ROM</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                AT28C256 organization, read-only wiring, and completion timing.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="mfp.html">MC68901 MFP</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Bus interface, register map, timers, interrupt routing,
+                bidirectional PS/2 keyboard, and MAX232 RS-232 port.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="floppy.html">Floppy Controller</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Intel 82077AA-1 bus adapter, programmed-I/O interface, and two
+                Mitsumi D359M3D drives.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="vga.html">CL-GD5428 VGA</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                ISA-mode bus adapter, swapped byte lanes, linear 2 MiB aperture,
+                display memory, configuration EEPROM, dedicated clock, and DE-15
+                output.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="opl3.html">YMF262 OPL3</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                FM-synthesis bus adapter, dedicated clock, reset, two YAC512
+                converters, stereo mixing, volume control, and headphone output.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="midi.html">MC6850 MIDI</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                MC6850 bus adapter, register map, clocking, interrupts, and
+                isolated MIDI IN, OUT, and hardware THRU.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="rtc.html">DS1285 RTC</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Multiplexed-bus adapter, register map, timing, crystal, battery,
+                reset, firmware access rules, and interrupt wiring.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="expansion.html">Expansion Slots</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Two front-loading DIN 41612 slots, fixed address windows,
+                buffered bus interface, pinout, power, card rules, and example
+                card.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Datasheets</h2>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Component documentation used by the design
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Document</th>
+              <th scope="col">Link</th>
+              <th scope="col">Used for</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>MC68000 User Manual</td>
+              <td><a href="datasheets/M68000UM.pdf">PDF</a></td>
+              <td>
+                CPU architecture, bus cycles, function codes, and interrupts.
+              </td>
+            </tr>
+            <tr>
+              <td>MC68000 User Manual Addendum</td>
+              <td><a href="datasheets/addendum-M68000.pdf">PDF</a></td>
+              <td>Corrections to the MC68000 user manual.</td>
+            </tr>
+            <tr>
+              <td>Intel 82077AA-1</td>
+              <td><a href="datasheets/82077AA.pdf">PDF</a></td>
+              <td>
+                Floppy controller, FIFO, host timing, and drive interface.
+              </td>
+            </tr>
+            <tr>
+              <td>Mitsumi D359M3D</td>
+              <td>
+                <a href="datasheets/144-FDD.pdf">PDF</a>
+              </td>
+              <td>
+                Two 3.5-inch drives; capacity, data rate, power, and mechanical
+                specifications.
+              </td>
+            </tr>
+            <tr>
+              <td>Microchip AT28C256</td>
+              <td><a href="datasheets/AT28C256.pdf">PDF</a></td>
+              <td>
+                32K x 8 firmware EEPROM; four AT28C256-15PU devices are used.
+              </td>
+            </tr>
+            <tr>
+              <td>Microchip ATF16V8BQL</td>
+              <td><a href="datasheets/ATF16V8BQL.pdf">PDF</a></td>
+              <td>
+                Static hexadecimal seven-segment decoder for the debug display;
+                two ATF16V8BQL-15PU devices are used.
+              </td>
+            </tr>
+            <tr>
+              <td>Kingbright SA56-11EWA</td>
+              <td><a href="datasheets/SA56-11EWA.pdf">PDF</a></td>
+              <td>
+                0.56 inch red common-anode seven-segment display; two are used
+                by the debug display.
+              </td>
+            </tr>
+            <tr>
+              <td>Cirrus Logic CL-GD542X Data Book</td>
+              <td><a href="datasheets/CL-GD5428.pdf">PDF</a></td>
+              <td>
+                CL-GD5428 pinout, ISA host timing, configuration straps, and the
+                VGA register port map. Its little-endian byte lanes are swapped
+                at the MC68EC000 bus.
+              </td>
+            </tr>
+            <tr>
+              <td>Cirrus Logic CL-GD542X Technical Reference Manual</td>
+              <td><a href="datasheets/CL-GD542X-TRM.pdf">PDF</a></td>
+              <td>
+                CL-GD5428 extension registers, display-memory configurations,
+                MCLK and DRAM timing, EEPROM interface, and reference-design
+                circuits.
+              </td>
+            </tr>
+            <tr>
+              <td>Dallas DS1285</td>
+              <td><a href="datasheets/DS1285.pdf">PDF</a></td>
+              <td>Real-time clock and battery-backed CMOS RAM.</td>
+            </tr>
+            <tr>
+              <td>Motorola MC146818A</td>
+              <td><a href="datasheets/mc146818a.pdf">PDF</a></td>
+              <td>RTC register and programming reference.</td>
+            </tr>
+            <tr>
+              <td>Motorola MC6850</td>
+              <td><a href="datasheets/MC6850.pdf">PDF</a></td>
+              <td>MIDI ACIA.</td>
+            </tr>
+            <tr>
+              <td>6N138</td>
+              <td>
+                <a href="datasheets/AV02-1359EN.pdf">PDF</a>
+              </td>
+              <td>Isolated MIDI input receiver.</td>
+            </tr>
+            <tr>
+              <td>SN74LS390</td>
+              <td>
+                <a href="datasheets/sn74ls390.pdf">PDF</a>
+              </td>
+              <td>MIDI 5 MHz to 500 kHz clock divider.</td>
+            </tr>
+            <tr>
+              <td>Motorola MC68901</td>
+              <td><a href="datasheets/MC68901.pdf">PDF</a></td>
+              <td>USART, timers, interrupt controller, and GPIO.</td>
+            </tr>
+            <tr>
+              <td>Maxim MAX232</td>
+              <td>
+                <a href="datasheets/max220-max249.pdf">PDF</a>
+              </td>
+              <td>RS-232 voltage-level conversion for the MFP USART.</td>
+            </tr>
+            <tr>
+              <td>Texas Instruments TMS44400</td>
+              <td><a href="datasheets/TMS44400.pdf">PDF</a></td>
+              <td>1M x 4-bit FPM DRAM.</td>
+            </tr>
+            <tr>
+              <td>Yamaha YMF262</td>
+              <td><a href="datasheets/YMF262.pdf">PDF</a></td>
+              <td>OPL3 FM synthesizer, bus timing, and four-channel output.</td>
+            </tr>
+            <tr>
+              <td>Yamaha YAC512</td>
+              <td><a href="datasheets/yac512.pdf">PDF</a></td>
+              <td>
+                Two-channel converter used twice by the OPL3 audio circuit.
+              </td>
+            </tr>
+            <tr>
+              <td>LT1054</td>
+              <td>
+                <a href="datasheets/lt1054.pdf">PDF</a>
+              </td>
+              <td>Negative supply for the OPL3 converter buffers.</td>
+            </tr>
+            <tr>
+              <td>CD74HCT123</td>
+              <td>
+                <a href="datasheets/cd74hc123.pdf">PDF</a>
+              </td>
+              <td>Local YMF262 reset stretcher.</td>
+            </tr>
+            <tr>
+              <td>TL431</td>
+              <td>
+                <a href="datasheets/tl431.pdf">PDF</a>
+              </td>
+              <td>Shunt reference for the CL-GD5428 DAC current sink.</td>
+            </tr>
+            <tr>
+              <td>NJM4556A</td>
+              <td>
+                <a href="datasheets/NJM4556A_E.pdf">PDF</a>
+              </td>
+              <td>Dual high-current OPL3 headphone amplifier.</td>
+            </tr>
+            <tr>
+              <td>HARTING DIN 41612 Type C</td>
+              <td>
+                <a href="datasheets/harting-livebook.pdf">PDF</a>
+              </td>
+              <td>Two 96-contact front expansion-slot connectors.</td>
+            </tr>
+            <tr>
+              <td>Littelfuse RXEF Series</td>
+              <td>
+                <a
+                  href="https://www.littelfuse.com/assetdocs/littelfuse_ptc_radial_leaded_rxef_datasheet?assetguid=e9a7b6b3-79ce-478c-a39a-0a70ee48ccec"
+                  >PDF</a
+                >
+              </td>
+              <td>Resettable +5 V and +12 V expansion-slot fuses.</td>
+            </tr>
+            <tr>
+              <td>CD74HCT21</td>
+              <td><a href="datasheets/cd74hct21.pdf">PDF</a></td>
+              <td>
+                Dual four-input AND gates for the interrupt-acknowledge type
+                field, the unwired-level decode, and the firmware ROM byte
+                select.
+              </td>
+            </tr>
+            <tr>
+              <td>CD74HCT4040</td>
+              <td><a href="datasheets/cd74hct4040.pdf">PDF</a></td>
+              <td>Bus-timeout, DRAM startup, and refresh counters.</td>
+            </tr>
+            <tr>
+              <td>CD74ACT157</td>
+              <td><a href="datasheets/cd74act157.pdf">PDF</a></td>
+              <td>DRAM row/column address multiplexers.</td>
+            </tr>
+            <tr>
+              <td>CD74ACT244</td>
+              <td><a href="datasheets/cd74act244.pdf">PDF</a></td>
+              <td>DRAM clock, reset, and control-net buffers.</td>
+            </tr>
+            <tr>
+              <td>SN74F00 / F02 / F04 / F08 / F20 / F30 / F32 / F86</td>
+              <td>
+                <a href="datasheets/sn74f00.pdf">F00</a>,
+                <a href="datasheets/sn74f02.pdf">F02</a>,
+                <a href="datasheets/sn74f04.pdf">F04</a>,
+                <a href="datasheets/sn74f08.pdf">F08</a>,
+                <a href="datasheets/sn74f20.pdf">F20</a>,
+                <a href="datasheets/sn74f30.pdf">F30</a>,
+                <a href="datasheets/sn74f32.pdf">F32</a>,
+                <a href="datasheets/sn74f86.pdf">F86</a>
+              </td>
+              <td>
+                FAST glue logic used by the DRAM controller and by the floppy,
+                RTC, MIDI, OPL3, VGA, and expansion adapters. The F32 also
+                carries the final <code>DTACK_n</code> timeout mask.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74F10 / F21 / F138 / F161A / F175</td>
+              <td>
+                <a href="datasheets/sn74f10.pdf">F10</a>,
+                <a href="datasheets/sn74f21.pdf">F21</a>,
+                <a href="datasheets/sn74f138.pdf">F138</a>,
+                <a href="datasheets/sn74f161a.pdf">F161A</a>,
+                <a href="datasheets/sn74f175.pdf">F175</a>
+              </td>
+              <td>
+                DRAM timing, decode, state, and initialization logic. Two F21
+                packages form the motherboard completion-response tree, and the
+                F10 qualifies the DRAM acknowledgement with the raw bus strobes.
+              </td>
+            </tr>
+            <tr>
+              <td>Philips N74F194</td>
+              <td><a href="datasheets/74f194.pdf">PDF</a></td>
+              <td>DRAM transaction register.</td>
+            </tr>
+            <tr>
+              <td>Fairchild FAST Data Book (1980)</td>
+              <td><a href="datasheets/fairchild-fast-1980.pdf">PDF</a></td>
+              <td>
+                Historical source for the 74F191PC refresh-credit counter.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74HCT04</td>
+              <td><a href="datasheets/sn54hct04.pdf">PDF</a></td>
+              <td>Logic NOT gates.</td>
+            </tr>
+            <tr>
+              <td>SN74HCT08</td>
+              <td><a href="datasheets/sn74hct08.pdf">PDF</a></td>
+              <td>CPU-space detection and firmware ROM selection.</td>
+            </tr>
+            <tr>
+              <td>SN74HCT244</td>
+              <td><a href="datasheets/sn74hct244.pdf">PDF</a></td>
+              <td>
+                Normal-cycle distribution, expansion address/control buffers,
+                and RTC address driver.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74HCT245</td>
+              <td><a href="datasheets/sn74hct245.pdf">PDF</a></td>
+              <td>Expansion and RTC data-bus transceivers.</td>
+            </tr>
+            <tr>
+              <td>SN74HCT32</td>
+              <td><a href="datasheets/sn74hct32.pdf">PDF</a></td>
+              <td>Logic OR gates.</td>
+            </tr>
+            <tr>
+              <td>SN74HCT574</td>
+              <td><a href="datasheets/sn74hct574.pdf">PDF</a></td>
+              <td>Debug-byte register and MIDI read-data hold register.</td>
+            </tr>
+            <tr>
+              <td>SN74HCT74</td>
+              <td><a href="datasheets/sn74hct74.pdf">PDF</a></td>
+              <td>
+                Boot-overlay state, RTC request synchronizer, MFP clock divider,
+                MIDI adapter state, and the VGA wait synchronizer.
+              </td>
+            </tr>
+            <tr>
+              <td>CD74HCT164</td>
+              <td>
+                <a href="datasheets/cd74hc164.pdf">PDF</a>
+              </td>
+              <td>RTC, floppy, and VGA bus-cycle sequencers.</td>
+            </tr>
+            <tr>
+              <td>SN74HCT138</td>
+              <td><a href="datasheets/sn74hct138.pdf">PDF</a></td>
+              <td>Primary, system-register, and I/O-slot address decoding.</td>
+            </tr>
+            <tr>
+              <td>SN74F74</td>
+              <td><a href="datasheets/sn74f74.pdf">PDF</a></td>
+              <td>
+                40 MHz to 10 MHz CPU clock divider, DRAM request and startup
+                synchronizers, and the DRAM acknowledgement register.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74AHCT74</td>
+              <td><a href="datasheets/sn74ahct74.pdf">PDF</a></td>
+              <td>Firmware ROM four-stage read-delay shift register.</td>
+            </tr>
+            <tr>
+              <td>SN74AHCT32</td>
+              <td><a href="datasheets/sn74ahct32.pdf">PDF</a></td>
+              <td>Firmware ROM read-request and acknowledgement gating.</td>
+            </tr>
+            <tr>
+              <td>SN74LS148</td>
+              <td><a href="datasheets/sn74ls148.pdf">PDF</a></td>
+              <td>
+                8-line-to-3-line priority encoder for the <code>/IPL</code>
+                inputs.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74LS174</td>
+              <td><a href="datasheets/sn74ls174.pdf">PDF</a></td>
+              <td>Two-stage <code>/IPL</code> synchronizer.</td>
+            </tr>
+            <tr>
+              <td>Epson SG-615PH</td>
+              <td><a href="datasheets/SG-615PH_en.pdf">PDF</a></td>
+              <td>Installed 40 MHz C-grade CPU master oscillator.</td>
+            </tr>
+            <tr>
+              <td>Epson SG-51P</td>
+              <td>
+                <a href="datasheets/SG-615_531_51_Series_DS.pdf">PDF</a>
+              </td>
+              <td>
+                Through-hole 14.31818 MHz oscillator; one for the OPL3 and one
+                for the CL-GD5428.
+              </td>
+            </tr>
+            <tr>
+              <td>DS1233-5</td>
+              <td><a href="datasheets/ds1233.pdf">PDF</a></td>
+              <td>Power-on reset supervisor and manual-reset sensing.</td>
+            </tr>
+            <tr>
+              <td>SN74LS14N</td>
+              <td><a href="datasheets/sn74ls14.pdf">PDF</a></td>
+              <td>
+                Two-stage Schmitt-trigger reset conditioner and MIDI input
+                conditioner.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74LS07N</td>
+              <td><a href="datasheets/sn74ls07.pdf">PDF</a></td>
+              <td>
+                Open-collector CPU reset, halt, peripheral-reset, MIDI OUT, and
+                MIDI THRU drivers.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

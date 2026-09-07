@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Memory Map, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Memory Map</h1>
+      <p>
+        This document describes how the computer divides its 16 MiB address
+        space among RAM, expansion memory, CL-GD5428 video memory, I/O devices,
+        and firmware. <a href="index.html">Return to the main page</a>.
+      </p>
+      <p>
+        The revision 1.0 address specification is frozen. This document may be
+        corrected or expanded without a new revision. Any change to an address
+        range, slot assignment, or register address requires a new memory map
+        revision.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>Revision 1.0; the address specification is frozen</dd>
+        <dt>CPU</dt>
+        <dd>MC68EC000FN10</dd>
+        <dt>Address bus</dt>
+        <dd>24-bit (16 MiB address space)</dd>
+        <dt>Data bus</dt>
+        <dd>16-bit</dd>
+        <dt>Main RAM</dt>
+        <dd>4 MiB of FPM DRAM</dd>
+        <dt>Firmware ROM</dt>
+        <dd>
+          128 KiB, 16-bit wide, always read-only, built from four AT28C256-15PU
+          EEPROMs
+        </dd>
+        <dt>MIDI interface</dt>
+        <dd>MC6850 ACIA</dd>
+        <dt>Video controller</dt>
+        <dd>
+          CL-GD5428 VGA controller with swapped byte lanes for the MC68EC000's
+          big-endian bus and 2 MiB of video RAM
+        </dd>
+        <dt>Floppy controller</dt>
+        <dd>Intel 82077AA-1 with two Mitsumi D359M3D drives</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#main-memory-map">Main Memory Map</a></li>
+        <li><a href="#i-o-and-firmware-map">I/O and Firmware Map</a></li>
+        <li>
+          <a href="#cl-gd5428-vga-byte-lanes">CL-GD5428 VGA Byte Lanes</a>
+        </li>
+        <li><a href="#boot-rom-overlay">Boot ROM Overlay</a></li>
+        <li>
+          <a href="#system-control-registers">System Control Registers</a>
+        </li>
+        <li>
+          <a href="#8-bit-peripheral-addressing">8-bit Peripheral Addressing</a>
+        </li>
+        <li><a href="#dram-organization">DRAM Organization</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="main-memory-map">
+        <h2>1. Main Memory Map</h2>
+        <p>
+          The top 2 MiB of the address space contains I/O devices and the
+          firmware EEPROM. Each remaining region is 2 MiB wide.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Complete 24-bit address space
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
+              <th scope="col">Size</th>
+              <th scope="col">Function</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$000000</code></td>
+              <td><code>$1FFFFF</code></td>
+              <td>2 MiB</td>
+              <td>DRAM bank 0</td>
+              <td>
+                The boot ROM alias temporarily replaces the first 128 KiB after
+                reset.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$200000</code></td>
+              <td><code>$3FFFFF</code></td>
+              <td>2 MiB</td>
+              <td>DRAM bank 1</td>
+              <td>The second 2 MiB DRAM bank.</td>
+            </tr>
+            <tr>
+              <td><code>$400000</code></td>
+              <td><code>$5FFFFF</code></td>
+              <td>2 MiB</td>
+              <td>Expansion slot 1 memory</td>
+              <td>Fixed <code>EXP_MEM2_n</code> window for front slot 1.</td>
+            </tr>
+            <tr>
+              <td><code>$600000</code></td>
+              <td><code>$7FFFFF</code></td>
+              <td>2 MiB</td>
+              <td>Expansion slot 2 memory</td>
+              <td>Fixed <code>EXP_MEM3_n</code> window for front slot 2.</td>
+            </tr>
+            <tr>
+              <td><code>$800000</code></td>
+              <td><code>$9FFFFF</code></td>
+              <td>2 MiB</td>
+              <td>CL-GD5428 VGA host-memory window</td>
+              <td>
+                Mapped one-to-one onto the CL-GD5428 linear display-memory
+                aperture. The board has 2 MiB of video RAM, so the window is
+                fully populated.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$A00000</code></td>
+              <td><code>$BFFFFF</code></td>
+              <td>2 MiB</td>
+              <td>Unimplemented</td>
+              <td><code>EXP_MEM5_n</code> does not reach either slot.</td>
+            </tr>
+            <tr>
+              <td><code>$C00000</code></td>
+              <td><code>$DFFFFF</code></td>
+              <td>2 MiB</td>
+              <td>Unimplemented</td>
+              <td><code>EXP_MEM6_n</code> does not reach either slot.</td>
+            </tr>
+            <tr>
+              <td><code>$E00000</code></td>
+              <td><code>$FFFFFF</code></td>
+              <td>2 MiB</td>
+              <td>I/O and firmware</td>
+              <td>Divided into sixteen 128 KiB slots, listed below.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="i-o-and-firmware-map">
+        <h2>2. I/O and Firmware Map</h2>
+        <p>
+          The final 2 MiB of the address space is divided into sixteen 128 KiB
+          slots. A slot can contain a device, firmware, or space reserved for
+          later use.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            I/O and firmware slots from
+            <code>$E00000</code>
+            through
+            <code>$FFFFFF</code>
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Slot</th>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
+              <th scope="col">Size</th>
+              <th scope="col">Device</th>
+              <th scope="col">Purpose and connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">0</th>
+              <td><code>$E00000</code></td>
+              <td><code>$E1FFFF</code></td>
+              <td>128 KiB</td>
+              <td>MC68901 MFP</td>
+              <td>
+                Provides the UART, timers, interrupt controller, GPIO, and PS/2
+                keyboard interface. Its 24 canonical registers occupy odd
+                addresses <code>$E00001-$E0002F</code> on the lower data byte.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">1</th>
+              <td><code>$E20000</code></td>
+              <td><code>$E3FFFF</code></td>
+              <td>128 KiB</td>
+              <td>Intel 82077AA-1</td>
+              <td>
+                Controls two Mitsumi D359M3D drives. Eight canonical host
+                locations occupy odd addresses
+                <code>$E20001-$E2000F</code> on the lower data byte.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">2</th>
+              <td><code>$E40000</code></td>
+              <td><code>$E5FFFF</code></td>
+              <td>128 KiB</td>
+              <td>Yamaha YMF262 OPL3</td>
+              <td>
+                Provides FM synthesis. Its registers use the lower 8-bit data
+                lane. Four canonical ports occupy
+                <code>$E40001-$E40007</code>.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">3</th>
+              <td><code>$E60000</code></td>
+              <td><code>$E7FFFF</code></td>
+              <td>128 KiB</td>
+              <td>CL-GD5428 VGA I/O registers</td>
+              <td>
+                Provides the host-side interface to the CL-GD5428 registers. VGA
+                I/O port <code>P</code> appears at <code>$E60000 + P</code>.
+                <code>A16</code> is not decoded, so the 64 KiB port map repeats
+                once in the upper half of the slot. See
+                <a href="vga.html">CL-GD5428 VGA</a>.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">4</th>
+              <td><code>$E80000</code></td>
+              <td><code>$E9FFFF</code></td>
+              <td>128 KiB</td>
+              <td>System control registers</td>
+              <td>
+                Controls the boot ROM overlay and leaves room for future
+                motherboard controls and status registers.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">5</th>
+              <td><code>$EA0000</code></td>
+              <td><code>$EBFFFF</code></td>
+              <td>128 KiB</td>
+              <td>MC6850 MIDI ACIA</td>
+              <td>
+                Provides the MIDI serial interface on the lower 8-bit data lane.
+                Its primary registers are at <code>$EA0001</code> and
+                <code>$EA0003</code>.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">6</th>
+              <td><code>$EC0000</code></td>
+              <td><code>$EDFFFF</code></td>
+              <td>128 KiB</td>
+              <td>Expansion slot 1 I/O</td>
+              <td>Fixed <code>IO6_n</code> window for front slot 1.</td>
+            </tr>
+            <tr>
+              <th scope="row">7</th>
+              <td><code>$EE0000</code></td>
+              <td><code>$EFFFFF</code></td>
+              <td>128 KiB</td>
+              <td>Expansion slot 2 I/O</td>
+              <td>Fixed <code>IO7_n</code> window for front slot 2.</td>
+            </tr>
+            <tr>
+              <th scope="row">8</th>
+              <td><code>$F00000</code></td>
+              <td><code>$F1FFFF</code></td>
+              <td>128 KiB</td>
+              <td>DS1285 RTC</td>
+              <td>
+                Provides the real-time clock and battery-backed CMOS RAM. Its 64
+                canonical byte registers occupy odd addresses
+                <code>$F00001-$F0007F</code> on the lower data byte and repeat
+                every 128 bytes. See <a href="rtc.html">DS1285 RTC</a>.
+              </td>
+            </tr>
+            <tr>
+              <th scope="row">9</th>
+              <td><code>$F20000</code></td>
+              <td><code>$F3FFFF</code></td>
+              <td>128 KiB</td>
+              <td>Reserved</td>
+              <td>Available for future I/O.</td>
+            </tr>
+            <tr>
+              <th scope="row">10</th>
+              <td><code>$F40000</code></td>
+              <td><code>$F5FFFF</code></td>
+              <td>128 KiB</td>
+              <td>Reserved</td>
+              <td>Available for future I/O.</td>
+            </tr>
+            <tr>
+              <th scope="row">11</th>
+              <td><code>$F60000</code></td>
+              <td><code>$F7FFFF</code></td>
+              <td>128 KiB</td>
+              <td>Reserved</td>
+              <td>Available for future I/O.</td>
+            </tr>
+            <tr>
+              <th scope="row">12</th>
+              <td><code>$F80000</code></td>
+              <td><code>$F9FFFF</code></td>
+              <td>128 KiB</td>
+              <td>Reserved</td>
+              <td>Available for future I/O.</td>
+            </tr>
+            <tr>
+              <th scope="row">13</th>
+              <td><code>$FA0000</code></td>
+              <td><code>$FBFFFF</code></td>
+              <td>128 KiB</td>
+              <td>Reserved</td>
+              <td>Available for future I/O.</td>
+            </tr>
+            <tr>
+              <th scope="row">14</th>
+              <td><code>$FC0000</code></td>
+              <td><code>$FDFFFF</code></td>
+              <td>128 KiB</td>
+              <td>Reserved</td>
+              <td>Available for future I/O.</td>
+            </tr>
+            <tr>
+              <th scope="row">15</th>
+              <td><code>$FE0000</code></td>
+              <td><code>$FFFFFF</code></td>
+              <td>128 KiB</td>
+              <td>Firmware EEPROM</td>
+              <td>The permanent firmware mapping.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="cl-gd5428-vga-byte-lanes">
+        <h2>3. CL-GD5428 VGA Byte Lanes</h2>
+        <p>
+          The CL-GD5428 expects little-endian byte ordering, while the MC68EC000
+          uses big-endian byte ordering. The host interface crosses the 16-bit
+          data lanes: CPU <code>D15..D8</code> connects to CL-GD5428
+          <code>D7..D0</code>, and CPU <code>D7..D0</code> connects to CL-GD5428
+          <code>D15..D8</code>. The corresponding byte-enable connections are
+          swapped with the data lanes.
+        </p>
+        <p>
+          The byte enables cross with the data. CPU <code>/UDS</code> drives
+          CL-GD5428 <code>SA0</code> and CPU <code>/LDS</code> drives CL-GD5428
+          <code>SBHE*</code>, so a byte at CPU address <code>N</code> reaches
+          controller byte address <code>N</code>.
+        </p>
+        <p>
+          This wiring applies to the CL-GD5428 host-memory window and its
+          I/O-register interface. It does not change either address range in the
+          frozen memory-map specification.
+        </p>
+      </section>
+
+      <section id="boot-rom-overlay">
+        <h2>4. Boot ROM Overlay</h2>
+        <p>
+          After a hardware reset, the firmware EEPROM also appears at the bottom
+          of the address space so the CPU can read its reset vectors. Disabling
+          the overlay reveals DRAM bank 0 at those addresses. The EEPROM remains
+          available at its permanent high address throughout this process.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Devices visible in the boot and firmware address ranges
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">State</th>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
+              <th scope="col">Visible device</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Immediately after hardware reset</td>
+              <td><code>$000000</code></td>
+              <td><code>$01FFFF</code></td>
+              <td>Firmware EEPROM alias</td>
+            </tr>
+            <tr>
+              <td>After the firmware disables the boot overlay</td>
+              <td><code>$000000</code></td>
+              <td><code>$01FFFF</code></td>
+              <td>DRAM bank 0</td>
+            </tr>
+            <tr>
+              <td>Always</td>
+              <td><code>$FE0000</code></td>
+              <td><code>$FFFFFF</code></td>
+              <td>Firmware EEPROM</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The CPU reads its initial stack pointer at <code>$000000</code> and
+          its initial program counter at <code>$000004</code>, both from the
+          EEPROM alias. The program counter stored in ROM should point into the
+          permanent high mapping, such as <code>$FE0100</code>. The firmware can
+          then disable the low alias without hiding the code it is running.
+        </p>
+      </section>
+
+      <section id="system-control-registers">
+        <h2>5. System Control Registers</h2>
+        <p>
+          The system control block uses odd addresses on the lower 8-bit data
+          lane. Only the first two registers have functions.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Motherboard control and status registers in I/O slot 4
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Register</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E80001</code></td>
+              <td>SYSREG0 / SYSCTRL</td>
+              <td>Any write disables the boot ROM overlay.</td>
+            </tr>
+            <tr>
+              <td><code>$E80003</code></td>
+              <td>SYSREG1 / DEBUG</td>
+              <td>
+                Write-only 8-bit hexadecimal debug display register. The upper
+                and lower nibbles are continuously shown on two internal
+                seven-segment displays.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E80005</code></td>
+              <td>SYSREG2</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E80007</code></td>
+              <td>SYSREG3</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E80009</code></td>
+              <td>SYSREG4</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E8000B</code></td>
+              <td>SYSREG5</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E8000D</code></td>
+              <td>SYSREG6</td>
+              <td>Reserved.</td>
+            </tr>
+            <tr>
+              <td><code>$E8000F</code></td>
+              <td>SYSREG7</td>
+              <td>Reserved.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Lower-byte writes to SYSREG2 through SYSREG7 are acknowledged and
+          ignored. Reads from this block and upper-byte-only accesses end in a
+          bus error.
+        </p>
+      </section>
+
+      <section id="8-bit-peripheral-addressing">
+        <h2>6. 8-bit Peripheral Addressing</h2>
+        <p>
+          The 8-bit peripherals connect to <code>D7..D0</code> and use
+          <code>/LDS</code>. As a result, consecutive peripheral registers are
+          two bytes apart in the 68k address space and use odd addresses.
+        </p>
+        <p><code>peripheral register N = BASE + 1 + (N * 2)</code></p>
+
+        <h3>MC68901 MFP</h3>
+        <p>
+          The MC68901 occupies I/O slot 0 and connects to
+          <code>D7..D0</code>. CPU address lines <code>A1..A5</code> connect to
+          register selects <code>RS1..RS5</code>. The 24 defined registers run
+          from GPDR at <code>$E00001</code> through UDR at <code>$E0002F</code>;
+          the complete table is in
+          <a href="mfp.html#register-map">MC68901 MFP</a>. Because local address
+          lines <code>A16..A6</code> are not decoded, the 64-byte register block
+          repeats across the slot.
+        </p>
+
+        <h3>Intel 82077AA-1 Floppy Controller</h3>
+        <p>
+          The 82077AA-1 occupies I/O slot 1 and connects to
+          <code>D7..D0</code>. CPU address lines <code>A1..A3</code> drive the
+          controller's <code>A0..A2</code> inputs. Reads and writes to the same
+          address can reach different registers.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            82077AA-1 canonical register addresses
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E20001</code></td>
+              <td>Status Register A</td>
+              <td>Undefined</td>
+            </tr>
+            <tr>
+              <td><code>$E20003</code></td>
+              <td>Status Register B</td>
+              <td>Undefined</td>
+            </tr>
+            <tr>
+              <td><code>$E20005</code></td>
+              <td>Digital Output Register</td>
+              <td>Digital Output Register</td>
+            </tr>
+            <tr>
+              <td><code>$E20007</code></td>
+              <td>Tape Drive Register</td>
+              <td>Tape Drive Register</td>
+            </tr>
+            <tr>
+              <td><code>$E20009</code></td>
+              <td>Main Status Register</td>
+              <td>Data Rate Select Register</td>
+            </tr>
+            <tr>
+              <td><code>$E2000B</code></td>
+              <td>FIFO data</td>
+              <td>FIFO data</td>
+            </tr>
+            <tr>
+              <td><code>$E2000D</code></td>
+              <td>Reserved</td>
+              <td>Reserved</td>
+            </tr>
+            <tr>
+              <td><code>$E2000F</code></td>
+              <td>Digital Input Register</td>
+              <td>Configuration Control Register</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Address lines <code>A16..A4</code> are not decoded, so this 16-byte
+          register pattern repeats throughout the slot. Firmware uses the first
+          copy shown above. The full circuit and programming rules are in
+          <a href="floppy.html">Floppy Controller</a>.
+        </p>
+
+        <h3>Yamaha YMF262 OPL3</h3>
+        <p>
+          The OPL3 exposes four ports at the start of I/O slot 2. All four
+          accept writes; only port 0 accepts a read.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            OPL3 port addresses
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">OPL3 port</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E40001</code></td>
+              <td>Port 0</td>
+              <td>Timer status</td>
+              <td>Register-array-0 address</td>
+            </tr>
+            <tr>
+              <td><code>$E40003</code></td>
+              <td>Port 1</td>
+              <td>Bus error</td>
+              <td>Register-array-0 data</td>
+            </tr>
+            <tr>
+              <td><code>$E40005</code></td>
+              <td>Port 2</td>
+              <td>Bus error</td>
+              <td>Register-array-1 address</td>
+            </tr>
+            <tr>
+              <td><code>$E40007</code></td>
+              <td>Port 3</td>
+              <td>Bus error</td>
+              <td>Register-array-1 data</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          CPU A1 and A2 drive YMF262 A0 and A1. The pattern repeats every eight
+          bytes because A16 through A3 are not decoded. Firmware uses the
+          canonical copy above. Upper-byte accesses and reads from ports 1
+          through 3 end through the motherboard timeout. See
+          <a href="opl3.html">YMF262 OPL3</a> for the complete interface.
+        </p>
+
+        <h3>MC6850 MIDI ACIA</h3>
+        <p>
+          The MC6850 connects to <code>D7..D0</code> and uses <code>/LDS</code>.
+          CPU address line <code>A1</code> drives the ACIA's register-select
+          input, so reads and writes to the same address can access different
+          registers.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC6850 register addresses and operations
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+              <th scope="col">MC6850 RS</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$EA0001</code></td>
+              <td>Status register</td>
+              <td>Control register</td>
+              <td>0</td>
+            </tr>
+            <tr>
+              <td><code>$EA0003</code></td>
+              <td>Receive data register</td>
+              <td>Transmit data register</td>
+              <td>1</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The MC6850 occupies I/O slot 5. Address lines
+          <code>A16..A2</code> are not decoded, so the two-register pattern
+          repeats every four bytes throughout the 128 KiB slot. Firmware uses
+          <code>$EA0001</code> and <code>$EA0003</code> as the canonical copy.
+          The complete interface is defined in the
+          <a href="midi.html">MC6850 MIDI design</a>.
+        </p>
+      </section>
+
+      <section id="dram-organization">
+        <h2>7. DRAM Organization</h2>
+        <p>
+          Two 2 MiB banks provide 4 MiB of system DRAM. Each bank uses four 1M x
+          4 devices to form the computer's 16-bit data width.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Physical DRAM banks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Bank</th>
+              <th scope="col">Address range</th>
+              <th scope="col">DRAM devices</th>
+              <th scope="col">Width</th>
+              <th scope="col">Capacity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">0</th>
+              <td><code>$000000</code>-<code>$1FFFFF</code></td>
+              <td>4 x TMS44400DJ-70 (1M x 4)</td>
+              <td>16-bit</td>
+              <td>2 MiB</td>
+            </tr>
+            <tr>
+              <th scope="row">1</th>
+              <td><code>$200000</code>-<code>$3FFFFF</code></td>
+              <td>4 x TMS44400DJ-70 (1M x 4)</td>
+              <td>16-bit</td>
+              <td>2 MiB</td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <th scope="row" colspan="4">Total system DRAM</th>
+              <td>4 MiB</td>
+            </tr>
+          </tfoot>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

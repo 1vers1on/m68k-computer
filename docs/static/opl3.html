@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - YMF262 OPL3, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>YMF262 OPL3</h1>
+      <p>
+        This document defines the Yamaha YMF262 FM synthesizer, its MC68EC000
+        bus adapter, two YAC512 converters, stereo mixer, volume control, and
+        headphone output. <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>Revision 1.0 pre-layout design</dd>
+        <dt>Synthesizer</dt>
+        <dd>Yamaha YMF262-M, 24-pin SOP</dd>
+        <dt>Bus connection</dt>
+        <dd>
+          I/O slot 2, <code>$E40000-$E5FFFF</code>, on <code>D7..D0</code>
+        </dd>
+        <dt>Canonical ports</dt>
+        <dd><code>$E40001-$E40007</code>, odd byte addresses</dd>
+        <dt>Master clock</dt>
+        <dd>14.31818 MHz from a dedicated Epson SG-51P</dd>
+        <dt>Converters</dt>
+        <dd>Two Yamaha YAC512-M devices, four analog channels</dd>
+        <dt>Stereo mix</dt>
+        <dd>Channels A+C to left; channels B+D to right</dd>
+        <dt>Output</dt>
+        <dd>
+          3.5 mm stereo jack, analog volume control, 32-ohm-or-higher headphones
+        </dd>
+        <dt>Timer handling</dt>
+        <dd>Status polling; the YMF262 <code>/IRQ</code> pin is not routed</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#bus-interface">Bus Interface</a></li>
+        <li><a href="#adapter">Bus Adapter and Write Recovery</a></li>
+        <li><a href="#ports">Ports and Register Groups</a></li>
+        <li><a href="#clock-reset">Clock and Reset</a></li>
+        <li><a href="#firmware">Firmware Contract</a></li>
+        <li><a href="#dac">YAC512 Interface</a></li>
+        <li><a href="#mixing">Filtering and Stereo Mixing</a></li>
+        <li><a href="#headphones">Headphone Output</a></li>
+        <li><a href="#power">Power and Grounding</a></li>
+        <li><a href="#pins">Package and Pin Maps</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#acceptance">Assembled-System Acceptance</a></li>
+        <li><a href="#signals">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The YMF262 supplies 18 two-operator voices, up to six four-operator
+          voices, five rhythm sounds, eight waveforms, two timers, and four
+          selectable output channels. Two YAC512 converters turn its serial
+          output into channels A through D. The motherboard mixes A with C for
+          the left ear and B with D for the right ear, then drives a 3.5 mm
+          stereo jack through a dual headphone amplifier.
+        </p>
+        <p>
+          The <a href="memory-map.html">Memory Map</a> owns I/O slot 2 and the
+          canonical port addresses.
+          <a href="bus-and-decode.html">Bus and Address Decode</a> owns
+          <code>IO2_n</code>, the completion tree, and timeout behavior. The
+          <a href="clock-and-reset.html">Clock and Reset</a> design owns
+          <code>PERIPH_RESET_n</code>. This page owns the dedicated clock, reset
+          stretcher, bus response, conversion, mixing, and output circuits.
+        </p>
+        <p>
+          Signal names ending in <code>_n</code>, and names written with a
+          leading slash, are active low. Logic uses +5 V. The headphone stage
+          uses +12 V. ICs use through-hole packages except the YMF262-M and two
+          YAC512-M devices, which have no DIP version and mount directly to the
+          motherboard. Every IC family selected here existed before 1994.
+        </p>
+      </section>
+
+      <section id="architecture">
+        <h2>2. Architecture</h2>
+        <pre><code>MC68EC000 lower byte                    YMF262-M
+
+D7..D0 &lt;----------------------------&gt; D7..D0
+A1 ----------------------------------&gt; A0
+A2 ----------------------------------&gt; A1
+IO2_n + LDS_n --&gt; OPL3_CYCLE --------&gt; request synchronizer
+AS_n --&gt; inverter -------------------&gt; adapter state hold
+OPL3_CLK_14 --&gt; counter and state ---&gt; /CS, /RD, /WR
+adapter completion ------------------&gt; OPL3_DTACK_n
+PERIPH_RESET_n --&gt; reset stretcher --&gt; /IC
+
+SG-51P 14.31818 MHz -----------------&gt; OPL3_CLK_14
+
+YMF262-M                              two YAC512-M converters
+
+DOAB -------------------------------&gt; DAC_AB DIN --&gt; channels A and B
+DOCD -------------------------------&gt; DAC_CD DIN --&gt; channels C and D
+phiSY ------------------------------&gt; both DAC CLK inputs
+SMPAC ------------------------------&gt; both DAC SMP1 inputs
+SMPBD ------------------------------&gt; both DAC SMP2 inputs
+
+A -- filter --+
+              +-- left mix -- volume -- NJM4556D -- tip
+C -- filter --+
+
+B -- filter --+
+              +-- right mix - volume -- NJM4556D -- ring
+D -- filter --+
+
+audio ground ------------------------------------------- sleeve</code></pre>
+        <p>
+          The bus adapter runs from the YMF262 master clock. Reads wait for
+          valid status data. Writes end after four counter clocks, but the CPU
+          remains stopped until 64 counter clocks have elapsed. The next access
+          cannot violate the YMF262's 32-clock write-recovery rule.
+        </p>
+      </section>
+
+      <section id="bus-interface">
+        <h2>3. Bus Interface</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            YMF262 processor-bus connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Motherboard signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>YMF262 <code>D7..D0</code></td>
+              <td>Addresses, register data, and timer status.</td>
+            </tr>
+            <tr>
+              <td><code>A1</code></td>
+              <td>YMF262 <code>A0</code></td>
+              <td>Selects address or data access.</td>
+            </tr>
+            <tr>
+              <td><code>A2</code></td>
+              <td>YMF262 <code>A1</code></td>
+              <td>Selects register array 0 or 1.</td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>Adapter gates</td>
+              <td>Selects a status read or port write.</td>
+            </tr>
+            <tr>
+              <td><code>AS_n</code></td>
+              <td>U_OPL_INV</td>
+              <td>Holds adapter state and completion through the bus cycle.</td>
+            </tr>
+            <tr>
+              <td><code>IO2_n</code></td>
+              <td>U_OPL_REQ</td>
+              <td>Selects I/O slot 2.</td>
+            </tr>
+            <tr>
+              <td><code>LDS_n</code></td>
+              <td>U_OPL_REQ</td>
+              <td>Restricts the device to the lower byte.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_DTACK_n</code></td>
+              <td>U_OPL_ACK</td>
+              <td>Returns a completed valid transfer.</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>Cycle Qualification</h3>
+        <p>
+          U_OPL_REQ, one SN74F02N gate, asserts <code>OPL3_CYCLE</code> only
+          while slot 2 and the lower byte lane are selected.
+        </p>
+        <pre><code>OPL3_CYCLE = NOT (IO2_n OR LDS_n)</code></pre>
+        <p>
+          Upper-byte accesses reach the motherboard timeout. A word access
+          completes through its lower lane, but only <code>D7..D0</code> carry
+          OPL3 data. Firmware shall use byte accesses at odd addresses. Address
+          lines <code>A16..A3</code> are not decoded, so the eight-byte pattern
+          repeats through the slot.
+        </p>
+        <h3>Valid Operations</h3>
+        <p>
+          All four ports accept writes. Only port 0 supports a read. Reads from
+          ports 1 through 3 are withheld from the YMF262 and end through the
+          normal bus timeout, avoiding an undefined device-bus mode.
+        </p>
+        <pre><code>OPL3_STATUS_ADDRESS = NOT (A1 OR A2)
+OPL3_READ_CYCLE = OPL3_CYCLE AND R/W AND OPL3_STATUS_ADDRESS
+OPL3_WRITE_CYCLE = OPL3_CYCLE AND NOT R/W</code></pre>
+      </section>
+
+      <section id="adapter">
+        <h2>4. Bus Adapter and Write Recovery</h2>
+        <p>
+          U_OPL_SYNC is an SN74HCT74N. Its first half samples
+          <code>OPL3_CYCLE</code> on each rising <code>OPL3_CLK_14</code> edge;
+          its second half samples the first output. Both active-low clears
+          connect to <code>OPL3_AS_ACTIVE</code>, the inverse of
+          <code>AS_n</code>. Raising <code>AS_n</code> clears the request
+          without waiting for a clock edge.
+        </p>
+        <p>
+          U_OPL_COUNT is a CD74HCT4040E. U_OPL_INV holds its master reset high
+          until <code>OPL3_REQ_SYNC</code> asserts. The counter then advances on
+          falling clock edges. Q3 rises after four falling edges and Q7 rises
+          after 64.
+        </p>
+        <p>
+          U_OPL_STATE is a second SN74HCT74N. Its first half clocks from Q3 and
+          records <code>OPL3_STROBE_DONE</code>. Its second half clocks from Q7
+          and samples <code>OPL3_WRITE_CYCLE</code> to produce
+          <code>OPL3_WRITE_DONE</code>. Both halves clear while
+          <code>OPL3_REQ_SYNC</code> is low.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Adapter sequence
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Phase</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Request synchronization</td>
+              <td><code>/CS</code> and <code>/RD</code> high</td>
+              <td><code>/CS</code> and <code>/WR</code> high</td>
+            </tr>
+            <tr>
+              <td>Counter clocks 0 through 3</td>
+              <td><code>/CS</code> and <code>/RD</code> low</td>
+              <td><code>/CS</code> and <code>/WR</code> low</td>
+            </tr>
+            <tr>
+              <td>Q3 rises</td>
+              <td>Assert <code>OPL3_DTACK_n</code></td>
+              <td>End <code>/CS</code> and <code>/WR</code></td>
+            </tr>
+            <tr>
+              <td>Counter clocks 4 through 63</td>
+              <td>CPU releases the cycle</td>
+              <td>Hold the CPU during recovery</td>
+            </tr>
+            <tr>
+              <td>Q7 rises</td>
+              <td>Not reached</td>
+              <td>Assert <code>OPL3_DTACK_n</code></td>
+            </tr>
+            <tr>
+              <td>CPU releases <code>AS_n</code></td>
+              <td colspan="2">Clear state and release completion</td>
+            </tr>
+          </tbody>
+        </table>
+        <pre><code>OPL3_AS_ACTIVE = NOT AS_n
+OPL3_READ_QUALIFIER = R/W AND OPL3_STATUS_ADDRESS
+OPL3_READ_STROBE = OPL3_REQ_SYNC AND OPL3_READ_CYCLE
+
+OPL3_WRITE_STROBE =
+    OPL3_REQ_SYNC AND OPL3_WRITE_CYCLE AND NOT OPL3_STROBE_DONE
+
+OPL3_RD_n = NOT OPL3_READ_STROBE
+OPL3_WR_n = NOT OPL3_WRITE_STROBE
+OPL3_CS_n = NOT (OPL3_READ_STROBE OR OPL3_WRITE_STROBE)
+
+OPL3_READ_DONE = OPL3_READ_QUALIFIER AND OPL3_STROBE_DONE
+OPL3_ACK_READY = OPL3_READ_DONE OR OPL3_WRITE_DONE
+OPL3_DTACK_n = NOT (OPL3_AS_ACTIVE AND OPL3_ACK_READY)</code></pre>
+        <p>
+          At 14.31818 MHz, four periods are 279.4 ns and 64 periods are 4.469
+          us. The interval from Q3 to Q7 is 60 clocks, safely beyond the
+          required 32 clocks. The slower write response remains far inside the
+          motherboard's 51.1 us minimum timeout.
+        </p>
+        <p>
+          Gating completion with <code>OPL3_AS_ACTIVE</code> keeps
+          <code>OPL3_DTACK_n</code> low if the CPU releases
+          <code>LDS_n</code> before <code>AS_n</code>. It releases completion
+          when <code>AS_n</code> rises.
+        </p>
+      </section>
+
+      <section id="ports">
+        <h2>5. Ports and Register Groups</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Canonical OPL3 ports
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">YMF262 inputs</th>
+              <th scope="col">Read</th>
+              <th scope="col">Write</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E40001</code></td>
+              <td><code>A1=0, A0=0</code></td>
+              <td>Timer status</td>
+              <td>Array-0 address</td>
+            </tr>
+            <tr>
+              <td><code>$E40003</code></td>
+              <td><code>A1=0, A0=1</code></td>
+              <td>Bus error</td>
+              <td>Array-0 data</td>
+            </tr>
+            <tr>
+              <td><code>$E40005</code></td>
+              <td><code>A1=1, A0=0</code></td>
+              <td>Bus error</td>
+              <td>Array-1 address</td>
+            </tr>
+            <tr>
+              <td><code>$E40007</code></td>
+              <td><code>A1=1, A0=1</code></td>
+              <td>Bus error</td>
+              <td>Array-1 data</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Register groups
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Register</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$01</code></td>
+              <td>Test register; leave undocumented bits clear.</td>
+            </tr>
+            <tr>
+              <td><code>$02-$04</code>, array 0</td>
+              <td>Timers, masks, starts, and flag reset.</td>
+            </tr>
+            <tr>
+              <td><code>$04</code>, array 1</td>
+              <td>Six four-operator channel-pair selections.</td>
+            </tr>
+            <tr>
+              <td><code>$05</code>, array 1</td>
+              <td>Bit 0 enables OPL3 operation.</td>
+            </tr>
+            <tr>
+              <td><code>$08</code></td>
+              <td>Keyboard-split selection for key scaling.</td>
+            </tr>
+            <tr>
+              <td><code>$20-$35</code></td>
+              <td>Operator modulation, envelope, scaling, and multiplier.</td>
+            </tr>
+            <tr>
+              <td><code>$40-$55</code></td>
+              <td>Key-scale level and total level.</td>
+            </tr>
+            <tr>
+              <td><code>$60-$75</code></td>
+              <td>Attack and decay rates.</td>
+            </tr>
+            <tr>
+              <td><code>$80-$95</code></td>
+              <td>Sustain level and release rate.</td>
+            </tr>
+            <tr>
+              <td><code>$A0-$A8</code></td>
+              <td>Channel frequency-number low byte.</td>
+            </tr>
+            <tr>
+              <td><code>$B0-$B8</code></td>
+              <td>Key-on, octave block, and frequency-number high bits.</td>
+            </tr>
+            <tr>
+              <td><code>$BD</code>, array 0</td>
+              <td>Rhythm keys and modulation depths.</td>
+            </tr>
+            <tr>
+              <td><code>$C0-$C8</code></td>
+              <td>Output routing, feedback, and operator connection.</td>
+            </tr>
+            <tr>
+              <td><code>$E0-$F5</code></td>
+              <td>Operator waveform selection.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Yamaha's non-linear operator table assigns the addresses within the
+          operator ranges. Firmware shall use that table rather than treating
+          the ranges as contiguous voice records.
+        </p>
+      </section>
+
+      <section id="clock-reset">
+        <h2>6. Clock and Reset</h2>
+        <h3>Dedicated Master Clock</h3>
+        <p>
+          Y_OPL_CLK is an Epson SG-51P made for 14.31818 MHz, C grade (+/-100
+          ppm). Its output reaches YMF262 pin 24 through R_OPL_CLK, a 33 ohm
+          source-series resistor. Oscillator enable is tied high. No other
+          subsystem uses <code>OPL3_CLK_14</code>.
+        </p>
+        <p>
+          The nominal sample rate is 49.716 kHz because the YMF262 divides its
+          clock by 288. The oscillator's CMOS output meets the YMF262 clock
+          input's 3.5 V high threshold.
+        </p>
+        <h3>Reset Stretcher</h3>
+        <p>
+          The YMF262 requires <code>/IC</code> low for at least 400 clock
+          periods, or 27.94 us at the nominal frequency. A CPU RESET instruction
+          holds <code>PERIPH_RESET_n</code> low for about 12.4 us, so a direct
+          connection is too short.
+        </p>
+        <p>
+          U_OPL_RESET is one half of a CD74HCT123E. Its <code>/A</code> input is
+          grounded, B is high, and <code>/CLR</code> receives
+          <code>PERIPH_RESET_n</code>. R_OPL_RESET is 100 kohms and C_OPL_RESET
+          is 100 nF, producing a nominal 4.5 ms pulse from
+          <code>tW = 0.45RC</code>. U_OPL_RESET_GATE combines the incoming reset
+          with the complementary pulse output.
+        </p>
+        <pre><code>OPL3_IC_n = PERIPH_RESET_n AND OPL3_RESET_PULSE_n</code></pre>
+        <p>
+          The unused monostable half has <code>/CLR</code> grounded and fixed
+          trigger inputs. Reset clears every YMF262 register.
+        </p>
+      </section>
+
+      <section id="firmware">
+        <h2>7. Firmware Contract</h2>
+        <ol>
+          <li>
+            Wait for <code>OPL3_IC_n</code> release before the first access.
+          </li>
+          <li>
+            Write <code>$05</code> to port 2, then <code>$01</code> to port 3 to
+            enable OPL3 operation.
+          </li>
+          <li>
+            Program operators, channels, and routing before setting key-on.
+          </li>
+          <li>
+            Route voices to A and C for left output and B and D for right
+            output.
+          </li>
+          <li>
+            Write a register number to its address port, then its value to the
+            matching data port. Hardware supplies the recovery delay.
+          </li>
+          <li>
+            Poll port 0 for timers. Bit 7 is the combined request, bit 6 is
+            timer 1 overflow, and bit 5 is timer 2 overflow.
+          </li>
+          <li>
+            Reset timer flags through array-0 register <code>$04</code>. The
+            physical <code>/IRQ</code> pin is unused.
+          </li>
+        </ol>
+      </section>
+
+      <section id="dac">
+        <h2>8. YAC512 Interface</h2>
+        <p>
+          U_OPL_DAC_AB and U_OPL_DAC_CD are YAC512-M two-channel floating
+          converters. Both <code>FSEL</code> pins connect to +5 V for
+          offset-binary input. Both <code>CLK</code> pins receive YMF262
+          <code>phiSY</code>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            DAC wiring and channel order
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">DAC</th>
+              <th scope="col">DIN</th>
+              <th scope="col">SMP1</th>
+              <th scope="col">SMP2</th>
+              <th scope="col">CH1</th>
+              <th scope="col">CH2</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>U_OPL_DAC_AB</td>
+              <td>DOAB</td>
+              <td>SMPAC</td>
+              <td>SMPBD</td>
+              <td>A</td>
+              <td>B</td>
+            </tr>
+            <tr>
+              <td>U_OPL_DAC_CD</td>
+              <td>DOCD</td>
+              <td>SMPAC</td>
+              <td>SMPBD</td>
+              <td>C</td>
+              <td>D</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          This is Yamaha's second connection example. Each converter follows
+          Yamaha's sample circuit. CV has 10 uF to ground and drives MP through
+          a unity-gain NJM4560D section. Another section returns AOUT to SWIN
+          through 33 ohms; 47 pF connects from AOUT to the amplifier output. CH1
+          and CH2 each have 2700 pF to ground and a unity-gain buffer.
+        </p>
+        <p>
+          Two NJM4560D packages serve each converter. The four packages run from
+          <code>AUDIO_5V</code> and <code>AUDIO_NEG_5</code>, keeping the 2.5 V
+          converter center voltage inside their input and output ranges.
+        </p>
+      </section>
+
+      <section id="mixing">
+        <h2>9. Filtering and Stereo Mixing</h2>
+        <p>
+          Each buffered channel passes through 3.3 kohms to a 2.2 nF capacitor
+          to ground. This 21.9 kHz single-pole filter reduces sampling energy. A
+          1 uF film capacitor then removes the converter bias.
+        </p>
+        <pre><code>DAC A -- 3.3k --+-- 1uF -- 47k --+
+                |                 |
+               2.2nF              +-- VOLUME_L high terminal
+                |                 |
+               GND                |
+                                  |
+DAC C -- 3.3k --+-- 1uF -- 47k --+
+                |
+               2.2nF
+                |
+               GND
+
+DAC B and DAC D use the same network for VOLUME_R.</code></pre>
+        <p>
+          RV_OPL_VOLUME is a dual-gang 10 kohm logarithmic potentiometer. Its
+          low terminals connect to audio ground. Each wiper feeds one headphone
+          channel through 2.2 uF. The 47 kohm summing resistors prevent one DAC
+          channel from driving another.
+        </p>
+      </section>
+
+      <section id="headphones">
+        <h2>10. Headphone Output</h2>
+        <p>
+          U_OPL_HP is an NJM4556D dual high-current amplifier on
+          <code>AUDIO_12V</code> and ground. Two 10 kohm resistors create
+          <code>OPL3_AUDIO_BIAS</code> at half supply; 100 uF and 100 nF bypass
+          that node.
+        </p>
+        <p>
+          Each channel is non-inverting. A 100 kohm resistor biases its positive
+          input. A 10 kohm resistor from the negative input to the bias node and
+          a 10 kohm feedback resistor set gain to two. Each output reaches the
+          jack through 470 uF, positive terminal toward the amplifier, followed
+          by 10 ohms.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            J_OPL_AUDIO 3.5 mm TRS jack
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Contact</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Tip</td>
+              <td>Left output through C_OPL_HP_L and R_OPL_HP_L</td>
+            </tr>
+            <tr>
+              <td>Ring</td>
+              <td>Right output through C_OPL_HP_R and R_OPL_HP_R</td>
+            </tr>
+            <tr>
+              <td>Sleeve</td>
+              <td>Audio ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The 10 ohm resistors isolate cable capacitance and limit fault
+          current. The intended load is 32 ohms or higher. The AC-coupled output
+          can also feed a line input at a reduced volume setting.
+        </p>
+      </section>
+
+      <section id="power">
+        <h2>11. Power and Grounding</h2>
+        <h3>Converter Supplies</h3>
+        <p>
+          FB_OPL_5V feeds <code>AUDIO_5V</code> from +5 V. The YAC512 VDD pins
+          and NJM4560D positive-supply pins use this rail. Each supply pin has
+          100 nF, and each converter has 10 uF beside the package. The YMF262
+          and bus adapter remain on the logic rail.
+        </p>
+        <p>
+          U_OPL_NEG is an LT1054CN8 data-sheet voltage inverter. A 10 uF flying
+          capacitor connects CAP+ to CAP-, 2.2 uF bypasses VCC, and 100 uF
+          connects VOUT to ground with its positive terminal at ground. FB/SHDN
+          and OSC remain open.
+        </p>
+        <p>
+          Ten ohms separates VOUT from <code>AUDIO_NEG_5</code>. A 470 uF
+          capacitor, positive terminal at ground, and 100 nF bypass the filtered
+          rail. Only the four NJM4560D packages use it. Their load remains below
+          the LT1054's 100 mA rating.
+        </p>
+        <h3>Headphone Supply</h3>
+        <p>
+          FB_OPL_12V feeds <code>AUDIO_12V</code> from +12 V. A 470 uF
+          electrolytic and 100 nF ceramic capacitor sit beside U_OPL_HP. Audio
+          returns join the continuous ground plane in the audio area. There is
+          no isolated audio ground.
+        </p>
+      </section>
+
+      <section id="pins">
+        <h2>12. Package and Pin Maps</h2>
+        <h3>YMF262-M</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_OPL 24-pin SOP connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">Signals</th>
+              <th scope="col">Connections</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1, 12</td>
+              <td>VDD, VSS</td>
+              <td>+5 V and ground</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>/IRQ</code></td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>/IC</code></td>
+              <td><code>OPL3_IC_n</code></td>
+            </tr>
+            <tr>
+              <td>4, 5</td>
+              <td>A0, A1</td>
+              <td>CPU A1, CPU A2</td>
+            </tr>
+            <tr>
+              <td>6, 7, 8</td>
+              <td><code>/WR</code>, <code>/RD</code>, <code>/CS</code></td>
+              <td>Adapter strobes</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td>TEST</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>10, 11, 13-18</td>
+              <td>D0-D7</td>
+              <td>CPU D0-D7</td>
+            </tr>
+            <tr>
+              <td>19, 20</td>
+              <td>SMPBD, SMPAC</td>
+              <td>Both YAC512 sample inputs</td>
+            </tr>
+            <tr>
+              <td>21, 22</td>
+              <td>DOAB, DOCD</td>
+              <td>DAC_AB DIN, DAC_CD DIN</td>
+            </tr>
+            <tr>
+              <td>23</td>
+              <td><code>phiSY</code></td>
+              <td>Both YAC512 CLK inputs</td>
+            </tr>
+            <tr>
+              <td>24</td>
+              <td><code>phiM</code></td>
+              <td><code>OPL3_CLK_14</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>YAC512-M</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Both 16-pin SOP converter connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1, 3</td>
+              <td>VDD</td>
+              <td><code>AUDIO_5V</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>VSS</td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>DIN</td>
+              <td>DOAB or DOCD</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>CLK</td>
+              <td><code>OPL3_DAC_CLK</code></td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>FSEL</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>7, 8</td>
+              <td>SMP2, SMP1</td>
+              <td>SMPBD, SMPAC</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td>TST1</td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>10, 11</td>
+              <td>CH1, CH2</td>
+              <td>2700 pF hold capacitors and buffers</td>
+            </tr>
+            <tr>
+              <td>12, 13</td>
+              <td>SWIN, AOUT</td>
+              <td>33 ohm settling loop and buffer</td>
+            </tr>
+            <tr>
+              <td>14, 16</td>
+              <td>MP, CV</td>
+              <td>Reference follower; 10 uF at CV</td>
+            </tr>
+            <tr>
+              <td>15</td>
+              <td>TST2</td>
+              <td>No connection</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>Adapter and Analog Packages</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Standard package assignments
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Part</th>
+              <th scope="col">Package</th>
+              <th scope="col">Pin use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>SN74HCT74N</td>
+              <td>14-pin DIP</td>
+              <td>
+                Standard dual-D pinout; local cycle state drives asynchronous
+                clears.
+              </td>
+            </tr>
+            <tr>
+              <td>CD74HCT4040E</td>
+              <td>16-pin DIP</td>
+              <td>Pin 10 clock, pin 11 reset, pin 6 Q3, pin 4 Q7.</td>
+            </tr>
+            <tr>
+              <td>CD74HCT123E</td>
+              <td>16-pin DIP</td>
+              <td>
+                First half uses pins 1-7; pin 3 receives peripheral reset and
+                pin 5 supplies <code>OPL3_RESET_PULSE_n</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>NJM4560D</td>
+              <td>8-pin DIP</td>
+              <td>
+                Standard dual-op-amp pinout; pin 8 is +5 V and pin 4 is
+                <code>AUDIO_NEG_5</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>NJM4556D</td>
+              <td>8-pin DIP</td>
+              <td>
+                Standard dual-op-amp pinout; pin 8 is <code>AUDIO_12V</code> and
+                pin 4 is ground.
+              </td>
+            </tr>
+            <tr>
+              <td>LT1054CN8</td>
+              <td>8-pin DIP</td>
+              <td>
+                1 FB/SHDN, 2 CAP+, 3 GND, 4 CAP-, 5 VOUT, 6 VREF, 7 OSC, 8 VCC.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="timing">
+        <h2>13. Timing and Electrical Checks</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Timing margins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Requirement</th>
+              <th scope="col">Device limit</th>
+              <th scope="col">Circuit result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Master clock</td>
+              <td>10 to 16 MHz; 40% to 60% duty</td>
+              <td>14.31818 MHz SG-51P</td>
+            </tr>
+            <tr>
+              <td>Write width</td>
+              <td>100 ns minimum</td>
+              <td>More than 218 ns at the 16 MHz device limit</td>
+            </tr>
+            <tr>
+              <td>Read width and access</td>
+              <td>150 ns</td>
+              <td>Q3 completion after four edges, nominally 279.4 ns</td>
+            </tr>
+            <tr>
+              <td>Write recovery</td>
+              <td>32 clocks minimum</td>
+              <td>60 clocks from strobe completion to acknowledgement</td>
+            </tr>
+            <tr>
+              <td>Reset low</td>
+              <td>400 clocks minimum</td>
+              <td>4.5 ms nominal after incoming reset release</td>
+            </tr>
+            <tr>
+              <td>YAC512 clock</td>
+              <td>0.65 to 6 MHz</td>
+              <td>YMF262 <code>phiSY</code>, about 2.386 MHz</td>
+            </tr>
+            <tr>
+              <td>Headphone load</td>
+              <td>NJM4556 high-current output</td>
+              <td>32 ohms or higher through 10 ohms per channel</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>Completion Release</h3>
+        <p>
+          The MC68EC000FN10 requires <code>/DTACK</code> to negate no later than
+          110 ns after <code>AS_n</code> or the data strobes negate.
+          <code>OPL3_DTACK_n</code> releases from <code>AS_n</code> alone,
+          through the U_OPL_INV inverter and the U_OPL_ACK NAND, without waiting
+          for the counter or the state registers. Release is a rising edge at
+          every node after the inverter.
+        </p>
+        <pre><code>U_OPL_INV SN74F04, tPHL      5.3 ns maximum
+U_OPL_ACK SN74F00, tPLH      6.0 ns maximum
+group SN74F21, tPLH          5.3 ns maximum
+final SN74F21, tPLH          5.3 ns maximum
+timeout-mask SN74F32, tPLH   6.6 ns maximum
+------------------------------------------------
+component total             28.5 ns
+MC68EC000 limit            110.0 ns
+board allowance             81.5 ns</code></pre>
+        <h3>Loading</h3>
+        <p>
+          The YMF262 adds one CMOS load to each lower-byte bus line. The local
+          oscillator adds no motherboard clock load. U_OPL_RESET and
+          U_OPL_RESET_GATE add two HCT inputs to <code>PERIPH_RESET_n</code>.
+        </p>
+      </section>
+
+      <section id="parts">
+        <h2>14. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            OPL3 subsystem ICs and controls
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_OPL</code></td>
+              <td>YMF262-M</td>
+              <td>FM synthesizer, 24-pin SOP.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_DAC_AB</code>, <code>U_OPL_DAC_CD</code></td>
+              <td>2 x YAC512-M</td>
+              <td>Four-channel conversion, 16-pin SOP.</td>
+            </tr>
+            <tr>
+              <td><code>Y_OPL_CLK</code></td>
+              <td>SG-51P, 14.31818 MHz</td>
+              <td>Dedicated master oscillator.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_SYNC</code>, <code>U_OPL_STATE</code></td>
+              <td>2 x SN74HCT74N</td>
+              <td>Synchronization and state.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_COUNT</code></td>
+              <td>CD74HCT4040E</td>
+              <td>Read and write timing.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_RESET</code></td>
+              <td>CD74HCT123E</td>
+              <td>Reset stretcher.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_REQ</code></td>
+              <td>SN74F02N</td>
+              <td>Cycle, address, and chip-select logic.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_INV</code></td>
+              <td>SN74F04N</td>
+              <td>Direction, reset, and strobe inversion.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_STROBE_A</code>, <code>U_OPL_STROBE_B</code></td>
+              <td>2 x SN74F08N</td>
+              <td>Read, write, and completion terms.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_ACK_OR</code></td>
+              <td>SN74F32N</td>
+              <td>Completion combination.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_ACK</code></td>
+              <td>SN74F00N</td>
+              <td>Active-low completion.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_RESET_GATE</code></td>
+              <td>SN74HCT08N</td>
+              <td>Reset combination.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_DAC_BUF_1..4</code></td>
+              <td>4 x NJM4560D</td>
+              <td>DAC references and buffers.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_NEG</code></td>
+              <td>LT1054CN8</td>
+              <td>Negative converter-buffer supply.</td>
+            </tr>
+            <tr>
+              <td><code>U_OPL_HP</code></td>
+              <td>NJM4556D</td>
+              <td>Stereo headphone amplifier.</td>
+            </tr>
+            <tr>
+              <td><code>RV_OPL_VOLUME</code></td>
+              <td>Dual 10 kohm logarithmic potentiometer</td>
+              <td>Volume control.</td>
+            </tr>
+            <tr>
+              <td><code>J_OPL_AUDIO</code></td>
+              <td>3.5 mm TRS jack</td>
+              <td>Stereo output.</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            OPL3 subsystem passive parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Quantity and value</th>
+              <th scope="col">Use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1 x 33 ohms</td>
+              <td>OPL3 clock source termination.</td>
+            </tr>
+            <tr>
+              <td>2 x 33 ohms, 2 x 47 pF</td>
+              <td>YAC512 settling loops.</td>
+            </tr>
+            <tr>
+              <td>4 x 2700 pF</td>
+              <td>YAC512 channel hold capacitors.</td>
+            </tr>
+            <tr>
+              <td>4 x 3.3 kohms, 4 x 2.2 nF</td>
+              <td>Reconstruction filters.</td>
+            </tr>
+            <tr>
+              <td>4 x 1 uF film, 4 x 47 kohms</td>
+              <td>DAC bias blocking and stereo summing.</td>
+            </tr>
+            <tr>
+              <td>2 x 2.2 uF</td>
+              <td>Volume-wiper coupling.</td>
+            </tr>
+            <tr>
+              <td>4 x 10 kohms, 2 x 100 kohms</td>
+              <td>Headphone bias and gain networks.</td>
+            </tr>
+            <tr>
+              <td>2 x 470 uF, 2 x 10 ohms</td>
+              <td>Headphone output coupling and isolation.</td>
+            </tr>
+            <tr>
+              <td>1 x 100 kohms, 1 x 100 nF</td>
+              <td>Reset one-shot timing.</td>
+            </tr>
+            <tr>
+              <td>1 x 10 uF, 1 x 2.2 uF, 1 x 100 uF</td>
+              <td>LT1054 flying, input, and output capacitors.</td>
+            </tr>
+            <tr>
+              <td>1 x 10 ohms, 1 x 470 uF</td>
+              <td>Negative-rail post-filter.</td>
+            </tr>
+            <tr>
+              <td>4 x 10 uF</td>
+              <td>YAC512 CV bypass and local rail reservoirs.</td>
+            </tr>
+            <tr>
+              <td>1 x 470 uF, 1 x 100 uF</td>
+              <td>Headphone-supply and bias reservoirs.</td>
+            </tr>
+            <tr>
+              <td>2 x ferrite beads</td>
+              <td>Filtered +5 V and +12 V audio feeds.</td>
+            </tr>
+            <tr>
+              <td>One 100 nF per IC supply pin</td>
+              <td>Local high-frequency bypassing.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The YMF262 and YAC512 were sold as an OPL3 pair before 1994. Their SOP
+          packages are exceptions to the through-hole IC rule. Yamaha's period
+          YAC512 circuit names the NJM4560. The NJM4556, LT1054, HCT, and FAST
+          families also predate 1994. All other ICs use DIP packages. Each IC
+          has a 100 nF ceramic bypass capacitor at its supply pins.
+        </p>
+      </section>
+
+      <section id="layout">
+        <h2>15. Board Layout</h2>
+        <ul>
+          <li>
+            Place the YMF262 and YAC512 SOP footprints directly on the board.
+            Mark pin 1 on copper and silkscreen.
+          </li>
+          <li>
+            Place Y_OPL_CLK beside YMF262 pin 24 and R_OPL_CLK at the oscillator
+            output.
+          </li>
+          <li>
+            Keep DOAB, DOCD, phiSY, SMPAC, and SMPBD short and away from
+            headphone and volume traces.
+          </li>
+          <li>
+            Copy the two YAC512 support networks symmetrically. Put each 2700 pF
+            capacitor at its channel pin.
+          </li>
+          <li>
+            Place U_OPL_NEG and its capacitors away from DAC outputs. Keep the
+            25 kHz switching loop compact.
+          </li>
+          <li>Keep CPU bus and 14.31818 MHz traces out of the analog area.</li>
+          <li>
+            Put RV_OPL_VOLUME and J_OPL_AUDIO at the selected board edge. Mark
+            volume direction and label the jack HEADPHONES.
+          </li>
+          <li>
+            Match left and right placement from the summing resistors through
+            the jack.
+          </li>
+          <li>
+            Place the 470 uF output capacitors and 10 ohm resistors beside the
+            jack. Mark capacitor polarity.
+          </li>
+          <li>
+            Join audio returns to the ground plane without a narrow shared path
+            carrying charge-pump or digital current.
+          </li>
+          <li>
+            Measure <code>OPL3_CLK_14</code> at pin 24 and verify frequency,
+            duty cycle, and monotonic edges.
+          </li>
+          <li>
+            Measure all three YMF262 strobes and <code>OPL3_DTACK_n</code> at
+            their receiving pins. Keep the routed
+            <code>OPL3_DTACK_n</code> release contribution below 81.5 ns.
+          </li>
+          <li>
+            Include the YMF262 in lower-byte bus capacitance and both
+            reset-adapter inputs in the peripheral-reset load.
+          </li>
+          <li>
+            Measure <code>AUDIO_NEG_5</code> ripple under the four-buffer load.
+          </li>
+          <li>
+            Measure DC at tip and ring before connecting headphones. Each
+            contact must settle below 50 mV.
+          </li>
+        </ul>
+      </section>
+
+      <section id="acceptance">
+        <h2>16. Assembled-System Acceptance</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Required subsystem results
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Test</th>
+              <th scope="col">Required result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Reset</td>
+              <td>
+                <code>OPL3_IC_n</code> stays low during reset and for at least
+                40 us after release.
+              </td>
+            </tr>
+            <tr>
+              <td>Port decode</td>
+              <td>
+                Four byte-write ports complete; only port 0 reads; invalid reads
+                and upper-byte accesses produce a bus error.
+              </td>
+            </tr>
+            <tr>
+              <td>Write spacing</td>
+              <td>
+                Successive writes have at least 32 master clocks between strobe
+                endings.
+              </td>
+            </tr>
+            <tr>
+              <td>Timer polling</td>
+              <td>
+                Both flags appear at port 0 and clear through register
+                <code>$04</code> without an MFP interrupt.
+              </td>
+            </tr>
+            <tr>
+              <td>Channel identity</td>
+              <td>
+                A and C reach left; B and D reach right before software routing.
+              </td>
+            </tr>
+            <tr>
+              <td>Channel match</td>
+              <td>
+                Left and right stay within 1 dB from 100 Hz through 10 kHz at
+                equal settings.
+              </td>
+            </tr>
+            <tr>
+              <td>Headphones</td>
+              <td>
+                A 32 ohm stereo load plays cleanly without sustained oscillation
+                or excessive U_OPL_HP heating.
+              </td>
+            </tr>
+            <tr>
+              <td>Silence</td>
+              <td>
+                No digital clock or 25 kHz charge-pump tone dominates with all
+                operators keyed off.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="signals">
+        <h2>17. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            OPL3 subsystem signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>OPL3_CYCLE</code></td>
+              <td>U_OPL_REQ</td>
+              <td>Synchronizer and access gates.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_AS_ACTIVE</code></td>
+              <td>U_OPL_INV from <code>AS_n</code></td>
+              <td>Synchronizer clears and completion gate.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_CLK_14</code></td>
+              <td>Y_OPL_CLK</td>
+              <td>YMF262, synchronizer, and counter.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_REQ_SYNC</code></td>
+              <td>U_OPL_SYNC</td>
+              <td>Counter, state, and strobe gates.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_STROBE_DONE</code></td>
+              <td>U_OPL_STATE first half</td>
+              <td>Read completion and write-strobe end.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_WRITE_DONE</code></td>
+              <td>U_OPL_STATE second half</td>
+              <td>Completion OR gate.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>OPL3_CS_n</code>, <code>OPL3_RD_n</code>,
+                <code>OPL3_WR_n</code>
+              </td>
+              <td>Adapter gates</td>
+              <td>YMF262.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_DTACK_n</code></td>
+              <td>U_OPL_ACK</td>
+              <td>Motherboard completion tree.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_IC_n</code></td>
+              <td>U_OPL_RESET_GATE</td>
+              <td>YMF262 initial clear.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_DAC_CLK</code></td>
+              <td>YMF262 phiSY</td>
+              <td>Both YAC512 CLK inputs.</td>
+            </tr>
+            <tr>
+              <td><code>AUDIO_5V</code></td>
+              <td>FB_OPL_5V</td>
+              <td>Both YAC512 devices and four NJM4560D packages.</td>
+            </tr>
+            <tr>
+              <td><code>AUDIO_NEG_5</code></td>
+              <td>U_OPL_NEG and filter</td>
+              <td>Four NJM4560D packages.</td>
+            </tr>
+            <tr>
+              <td><code>AUDIO_12V</code></td>
+              <td>FB_OPL_12V</td>
+              <td>U_OPL_HP and bias divider.</td>
+            </tr>
+            <tr>
+              <td><code>OPL3_AUDIO_BIAS</code></td>
+              <td>10 kohm divider</td>
+              <td>Both headphone channels.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources">
+        <h2>18. Sources</h2>
+        <ul>
+          <li>
+            Yamaha,
+            <a href="datasheets/YMF262.pdf"
+              ><cite>YMF262 FM Operator Type L3</cite></a
+            >. CPU interface, registers, serial output, clock, reset, and
+            timing.
+          </li>
+          <li>
+            Yamaha,
+            <a href="datasheets/yac512.pdf"
+              ><cite>YAC512 2-Channel Floating D/A Converter</cite></a
+            >. Pinout, YMF262 connection, sample circuit, and analog limits.
+          </li>
+          <li>
+            Epson,
+            <a href="datasheets/SG-615_531_51_Series_DS.pdf"
+              ><cite>SG-615, SG-531, and SG-51 Series</cite></a
+            >. Clock output, supply, tolerance, and loading.
+          </li>
+          <li>
+            Seiko Epson,
+            <a href="https://www.epsondevice.com/crystal/en/company/history/"
+              ><cite>The History of Epson Crystal Devices</cite></a
+            >. Manufacturer history recording SG-51 commercialization in 1986.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/lt1054.pdf"
+              ><cite>LT1054 Switched-Capacitor Voltage Converter</cite></a
+            >. Basic inverter, pinout, and capacitors.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/cd74hc123.pdf"
+              ><cite
+                >CD74HCT123 Dual Retriggerable Monostable Multivibrator</cite
+              ></a
+            >. Reset stretching and RC timing.
+          </li>
+          <li>
+            Nisshinbo Micro Devices,
+            <a href="datasheets/NJM4556A_E.pdf"
+              ><cite>NJM4556A Dual High-Current Operational Amplifier</cite></a
+            >. Supply range, current output, and gain stability for the NJM4556
+            family.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hct74.pdf"><cite>SN74HCT74</cite></a
+            >, <a href="datasheets/cd74hct4040.pdf"><cite>CD74HCT4040</cite></a
+            >, <a href="datasheets/sn74hct08.pdf"><cite>SN74HCT08</cite></a
+            >, and local FAST-logic data sheets. Adapter pinouts, thresholds,
+            and timing.
+          </li>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >. Byte-lane selection, bus timing, and bus-error behavior.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

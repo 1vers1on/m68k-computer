@@ -1,0 +1,2673 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - CL-GD5428 VGA, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>CL-GD5428 VGA</h1>
+      <p>
+        This document defines the Cirrus Logic CL-GD5428 video controller, its
+        MC68EC000 bus adapter, 2 MiB of display memory, the configuration
+        EEPROM, the dedicated clock, reset, and the DE-15 monitor output.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>Revision 1.0 pre-layout design</dd>
+        <dt>Controller</dt>
+        <dd>CL-GD5428-80QC-A, 160-pin PQFP</dd>
+        <dt>Host interface</dt>
+        <dd>ISA bus mode, 16-bit, swapped byte lanes</dd>
+        <dt>Host-memory window</dt>
+        <dd>
+          <code>$800000-$9FFFFF</code>, 2 MiB linear, one-to-one with display
+          memory
+        </dd>
+        <dt>Register window</dt>
+        <dd>
+          I/O slot 3, VGA I/O port <code>P</code> at
+          <code>$E60000 + P</code>
+        </dd>
+        <dt>Display memory</dt>
+        <dd>2 MiB in four 256K x 16 dual-CAS* FPM DRAMs, 70 ns</dd>
+        <dt>Master clock</dt>
+        <dd>14.31818 MHz from a dedicated Epson SG-51P</dd>
+        <dt>Memory clock</dt>
+        <dd>41.16477 MHz, strapped, standard six-MCLK RAS* timing</dd>
+        <dt>Configuration EEPROM</dt>
+        <dd>NM93C46N, 64 x 16, driven through the controller</dd>
+        <dt>Video output</dt>
+        <dd>DE-15 connector, 0.69 V peak white into 75 ohms</dd>
+        <dt>Interrupt</dt>
+        <dd><code>VSYNC</code> to MC68901 GPIP2, vector <code>$42</code></dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#bus-interface">Bus Interface</a></li>
+        <li><a href="#apertures">Address Apertures</a></li>
+        <li><a href="#adapter">Bus Adapter and Wait Handling</a></li>
+        <li><a href="#straps">Configuration Straps</a></li>
+        <li><a href="#display-memory">Display Memory</a></li>
+        <li><a href="#clock-reset">Clock and Reset</a></li>
+        <li><a href="#config-eeprom">Configuration EEPROM</a></li>
+        <li><a href="#video-output">Video Output and Monitor Connector</a></li>
+        <li><a href="#interrupts">Interrupts</a></li>
+        <li><a href="#firmware">Firmware Contract</a></li>
+        <li><a href="#pins">Package and Pin Maps</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#acceptance">Assembled-System Acceptance</a></li>
+        <li><a href="#signals">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The CL-GD5428 is a VGA controller with a 32-bit BitBLT engine, a
+          programmable dual-frequency synthesizer, and an integrated 24-bit
+          palette DAC. It drives 2 MiB of its own display memory and produces
+          analog RGB with separate horizontal and vertical sync. This board
+          operates it in ISA bus mode, which uses asynchronous
+          <code>MEMR*</code>, <code>MEMW*</code>, <code>IOR*</code>, and
+          <code>IOW*</code> strobes with an <code>IOCHRDY</code> wait output.
+          The local-bus modes require a synchronous 386 or 486 protocol with
+          <code>ADS#</code> and <code>RDYRTN#</code>, which the MC68EC000 does
+          not produce.
+        </p>
+        <p>
+          The <a href="memory-map.html">Memory Map</a> owns the host-memory
+          window and I/O slot 3.
+          <a href="bus-and-decode.html">Bus and Address Decode</a> owns
+          <code>VGA_MEM_n</code>, <code>IO3_n</code>, the completion tree, and
+          timeout behavior. The
+          <a href="clock-and-reset.html">Clock and Reset</a> design owns
+          <code>PERIPH_RESET_n</code>. The
+          <a href="mfp.html#gpip">MC68901 MFP</a> owns GPIP2 and the interrupt
+          vector. This page owns the address translation, bus adapter, wait
+          handling, display memory, configuration EEPROM, dedicated clock, reset
+          polarity, and analog output.
+        </p>
+        <p>
+          Mode setting, palette loading, BitBLT programming, and the hardware
+          cursor belong to firmware. This page defines what the hardware makes
+          reachable and the rules firmware must obey to reach it.
+        </p>
+        <p>
+          Signal names ending in <code>_n</code>, and names written with a
+          leading slash, are active low. Cirrus Logic writes its own active-low
+          names with a trailing asterisk, and this page keeps that spelling for
+          controller pins. Logic uses +5 V. Every IC family selected here
+          existed before 1994. The CL-GD5428 has no DIP version and mounts
+          directly to the motherboard, as do the four display-memory DRAMs.
+        </p>
+      </section>
+
+      <section id="architecture">
+        <h2>2. Architecture</h2>
+        <pre><code>MC68EC000                              CL-GD5428 (ISA bus mode)
+
+D15..D8 &lt;--------------------------&gt; SD7..SD0
+D7..D0  &lt;--------------------------&gt; SD15..SD8
+A23..A17 -------------------------&gt; LA23..LA17
+A16..A1  -------------------------&gt; SA16..SA1
+UDS_n ----------------------------&gt; SA0
+LDS_n ----------------------------&gt; SBHE*
+VGA_MEM_n, IO3_n, R/W ------------&gt; adapter
+AS_n, UDS_n, LDS_n ---------------&gt; adapter
+VGA_CLK_14 --&gt; U_VGA_SEQ ---------&gt; BALE, MEMR*, MEMW*, IOR*, IOW*
+IOCHRDY --&gt; U_VGA_SYNC -----------&gt; wait hold
+adapter completion ---------------&gt; VGA_DTACK_n
+PERIPH_RESET_n --&gt; inverter ------&gt; RESET
+                          +5 V ---&gt; REFRESH*, TWR*, EDCLK*
+                           GND ---&gt; AEN
+
+Y_VGA_CLK 14.31818 MHz --&gt; R_VGA_CLK --&gt; OSC
+                        --&gt; U_VGA_INV_B --&gt; VGA_CLK_14
+
+CL-GD5428                              four 256K x 16 DRAMs
+
+RAS*, OE* as RAS1* ---------------&gt; bank 0 and bank 1 RAS*
+CAS* as WE* ----------------------&gt; all four WE*
+WE3..WE0* as CAS3..CAS0* ---------&gt; upper and lower CAS* of each device
+MA8..MA0 -------------------------&gt; ADDR8..ADDR0
+MD31..MD16 -----------------------&gt; bank data, planes 2 and 3
+MD15..MD0  -----------------------&gt; bank data, planes 0 and 1
+MD28, MD25 --&gt; 6.8 kohm pull-downs --&gt; configuration straps
+
+CL-GD5428                              output and storage
+
+RED, GREEN, BLUE --&gt; 150 ohm --&gt; pi filter --&gt; DE-15 pins 1, 2, 3
+HSYNC ----------------------------------------&gt; DE-15 pin 13
+VSYNC ----------------------------------------&gt; DE-15 pin 14
+                                             +-&gt; MC68901 GPIP2
+IREF &lt;-- Q_VGA_IREF collector, 6.6 mA sink
+EECS, ESYNC*, EVIDEO*, EEDI ------------------&gt; U_VGA_CFG NM93C46N</code></pre>
+        <p>
+          The adapter runs from the same 14.31818 MHz reference the controller
+          uses for its internal synthesizer. One shift register produces the
+          address-latch pulse, the command strobe, and the completion instant.
+          Display-memory cycles additionally wait for <code>IOCHRDY</code>,
+          which the controller drives low while a display-memory transfer is
+          still in progress.
+        </p>
+      </section>
+
+      <section id="bus-interface">
+        <h2>3. Bus Interface</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            CL-GD5428 processor-bus connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Motherboard signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D15..D8</code></td>
+              <td>CL-GD5428 <code>SD7..SD0</code></td>
+              <td>Carries the even byte of every transfer.</td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>CL-GD5428 <code>SD15..SD8</code></td>
+              <td>Carries the odd byte of every transfer.</td>
+            </tr>
+            <tr>
+              <td><code>A23..A17</code></td>
+              <td>CL-GD5428 <code>LA23..LA17</code></td>
+              <td>Upper address, latched on the falling BALE edge.</td>
+            </tr>
+            <tr>
+              <td><code>A16..A1</code></td>
+              <td>CL-GD5428 <code>SA16..SA1</code></td>
+              <td>Lower address, held valid throughout the cycle.</td>
+            </tr>
+            <tr>
+              <td><code>UDS_n</code></td>
+              <td>CL-GD5428 <code>SA0</code></td>
+              <td>
+                Supplies the byte address bit the MC68EC000 does not drive.
+              </td>
+            </tr>
+            <tr>
+              <td><code>LDS_n</code></td>
+              <td>CL-GD5428 <code>SBHE*</code></td>
+              <td>Selects the controller's upper byte lane.</td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>U_VGA_INV, U_VGA_AND_A</td>
+              <td>Selects a read or write strobe.</td>
+            </tr>
+            <tr>
+              <td><code>AS_n</code></td>
+              <td>U_VGA_INV, U_VGA_SEQ clear</td>
+              <td>Holds adapter state and completion through the bus cycle.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_MEM_n</code></td>
+              <td>U_VGA_AND_A, U_VGA_INV</td>
+              <td>Selects the host-memory window.</td>
+            </tr>
+            <tr>
+              <td><code>IO3_n</code></td>
+              <td>U_VGA_AND_A, U_VGA_INV</td>
+              <td>Selects I/O slot 3.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_DTACK_n</code></td>
+              <td>U_VGA_NAND_B</td>
+              <td>Returns a completed transfer to the acknowledgement tree.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Byte Lanes</h3>
+        <p>
+          The CL-GD5428 orders bytes little-endian and the MC68EC000 orders them
+          big-endian, so the two 8-bit halves of the data bus cross. CPU
+          <code>D15..D8</code> carries the even byte, which the controller
+          expects on <code>SD7..SD0</code>. CPU <code>D7..D0</code> carries the
+          odd byte, which the controller expects on <code>SD15..SD8</code>.
+        </p>
+        <p>
+          The byte enables cross with the data. The controller decodes width and
+          alignment from <code>SBHE*</code> and <code>SA0</code>, and the two
+          MC68EC000 data strobes supply both directly with no gates.
+        </p>
+        <pre><code>CL-GD5428 SA0   = UDS_n
+CL-GD5428 SBHE* = LDS_n</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Byte-lane translation
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">MC68EC000 access</th>
+              <th scope="col"><code>UDS_n</code></th>
+              <th scope="col"><code>LDS_n</code></th>
+              <th scope="col"><code>SBHE*</code>, <code>SA0</code></th>
+              <th scope="col">Controller transfer</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Byte at an even address</td>
+              <td>0</td>
+              <td>1</td>
+              <td>1, 0</td>
+              <td>Lower byte on <code>SD7..SD0</code></td>
+            </tr>
+            <tr>
+              <td>Byte at an odd address</td>
+              <td>1</td>
+              <td>0</td>
+              <td>0, 1</td>
+              <td>Upper byte on <code>SD15..SD8</code></td>
+            </tr>
+            <tr>
+              <td>Word at an even address</td>
+              <td>0</td>
+              <td>0</td>
+              <td>0, 0</td>
+              <td>16-bit transfer on <code>SD15..SD0</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          A byte at MC68EC000 address <code>N</code> therefore reaches
+          controller byte address <code>N</code>. No address arithmetic and no
+          software byte swapping are needed at either aperture.
+        </p>
+
+        <h3>Cycle Qualification</h3>
+        <p>
+          <code>VGA_MEM_n</code> and <code>IO3_n</code> already include
+          <code>NORMAL_CYCLE_n</code>, so neither asserts during a CPU-space
+          cycle. The adapter adds the requirement that at least one byte strobe
+          is active.
+        </p>
+        <pre><code>VGA_DS_n  = UDS_n AND LDS_n
+VGA_SEL_n = VGA_MEM_n AND IO3_n
+VGA_CYCLE = NOT (VGA_SEL_n OR VGA_DS_n)</code></pre>
+        <p>
+          On a write the MC68EC000 asserts its data strobes one clock after
+          <code>AS_n</code>, so <code>VGA_CYCLE</code> starts one clock later
+          than on a read. The adapter measures every interval from
+          <code>VGA_CYCLE</code>, so the write data is already valid when the
+          command strobe asserts.
+        </p>
+      </section>
+
+      <section id="apertures">
+        <h2>4. Address Apertures</h2>
+        <p>
+          Because the address path passes through unchanged, the controller sees
+          the processor's own address. Firmware places the controller's linear
+          display-memory aperture at the same place the memory map already
+          reserves for it, and the two agree without translation hardware.
+        </p>
+
+        <h3>Host-Memory Window</h3>
+        <p>
+          <code>SR7[7:4]</code> selects which 1 MiB segment of the 16 MiB
+          address space the controller claims, comparing the field against
+          address bits 23 through 20. Setting <code>GRB[5]</code> extends the
+          claim to a 2 MiB range aligned on a 2 MiB boundary, and
+          <code>SR7[4]</code> becomes a don't care. Programming
+          <code>SR7[7:4]</code> to <code>1000</code> with
+          <code>GRB[5] = 1</code> makes the controller claim
+          <code>$800000-$9FFFFF</code>, which is exactly
+          <code>REGION4</code> and exactly the 2 MiB of installed display
+          memory.
+        </p>
+        <p>
+          The window is fully populated. There is no aliased region and no
+          unmapped region inside it. The controller's own address decode answers
+          every access the motherboard forwards.
+        </p>
+        <p>
+          <code>SR7</code> resets to <code>$00</code>, which configures a
+          standard VGA responding at <code>$0A0000-$0BFFFF</code>. That range is
+          DRAM bank 0 on this board and is never presented to the controller, so
+          between reset and the firmware write that sets <code>SR7[7:4]</code>,
+          the controller claims nothing in the host window. Reads there return
+          the floating bus and writes are discarded. The firmware contract in
+          section 12 makes enabling linear addressing a precondition for using
+          the window.
+        </p>
+
+        <h3>Register Window</h3>
+        <p>
+          The controller decodes <code>SA15..SA0</code> for I/O accesses and
+          ignores <code>LA23..LA17</code> and <code>SA16</code>. Slot 3 begins
+          at <code>$E60000</code>, so the low 16 address bits of any access in
+          <code>$E60000-$E6FFFF</code> are the VGA I/O port number, and the
+          straight-through address path delivers them with no multiplexer.
+        </p>
+        <pre><code>VGA I/O port P appears at MC68EC000 byte address $E60000 + P</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            VGA register ports at their board addresses
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Port</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E60094</code></td>
+              <td><code>94</code></td>
+              <td>POS 94, port 102 access control.</td>
+            </tr>
+            <tr>
+              <td><code>$E60102</code></td>
+              <td><code>102</code></td>
+              <td>POS102 register.</td>
+            </tr>
+            <tr>
+              <td><code>$E603B4</code>, <code>$E603B5</code></td>
+              <td><code>3B4</code>, <code>3B5</code></td>
+              <td>CRT controller index and data, monochrome addressing.</td>
+            </tr>
+            <tr>
+              <td><code>$E603BA</code></td>
+              <td><code>3BA</code></td>
+              <td>
+                Feature control on write, input status register 1 on read,
+                monochrome addressing.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E603C0</code>, <code>$E603C1</code></td>
+              <td><code>3C0</code>, <code>3C1</code></td>
+              <td>Attribute controller index and data.</td>
+            </tr>
+            <tr>
+              <td><code>$E603C2</code></td>
+              <td><code>3C2</code></td>
+              <td>
+                Miscellaneous output on write, input status register 0 on read.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E603C3</code></td>
+              <td><code>3C3</code></td>
+              <td>Motherboard sleep.</td>
+            </tr>
+            <tr>
+              <td><code>$E603C4</code>, <code>$E603C5</code></td>
+              <td><code>3C4</code>, <code>3C5</code></td>
+              <td>
+                Sequencer index and data, including every SR extension register.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E603C6</code>-<code>$E603C9</code></td>
+              <td><code>3C6</code>-<code>3C9</code></td>
+              <td>
+                Palette DAC pixel mask, hidden DAC register, read and write
+                pixel address, and pixel data.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E603CA</code>, <code>$E603CC</code></td>
+              <td><code>3CA</code>, <code>3CC</code></td>
+              <td>Feature control and miscellaneous output readback.</td>
+            </tr>
+            <tr>
+              <td><code>$E603CE</code>, <code>$E603CF</code></td>
+              <td><code>3CE</code>, <code>3CF</code></td>
+              <td>
+                Graphics controller index and data, including every GR extension
+                register.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E603D4</code>, <code>$E603D5</code></td>
+              <td><code>3D4</code>, <code>3D5</code></td>
+              <td>CRT controller index and data, color addressing.</td>
+            </tr>
+            <tr>
+              <td><code>$E603DA</code></td>
+              <td><code>3DA</code></td>
+              <td>
+                Feature control on write, input status register 1 on read, color
+                addressing.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E646E8</code></td>
+              <td><code>46E8</code></td>
+              <td>
+                Adapter sleep. <code>CF[3]</code> is strapped high, so this
+                address holds the video system sleep register.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every port sits in the first 64 KiB of the slot. <code>A16</code>
+          is not decoded, so the port map repeats once in the upper half of the
+          slot, and firmware uses the copy listed above. Accesses to slot 3
+          addresses that no port claims receive completion from the adapter and
+          transfer nothing useful, which matches how an unclaimed ISA I/O
+          address behaves.
+        </p>
+
+        <h3>Aperture Summary</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Address ranges owned by this page
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Range</th>
+              <th scope="col">Size</th>
+              <th scope="col">Select</th>
+              <th scope="col">Contents</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$800000-$9FFFFF</code></td>
+              <td>2 MiB</td>
+              <td><code>VGA_MEM_n</code></td>
+              <td>Linear display memory, byte for byte.</td>
+            </tr>
+            <tr>
+              <td><code>$E60000-$E7FFFF</code></td>
+              <td>128 KiB</td>
+              <td><code>IO3_n</code></td>
+              <td>
+                VGA I/O ports at their native numbers, repeating once above
+                <code>$E70000</code>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <pre><code>VGA_MEM_SEL = NOT VGA_MEM_n
+VGA_IO_SEL  = NOT IO3_n</code></pre>
+      </section>
+
+      <section id="adapter">
+        <h2>5. Bus Adapter and Wait Handling</h2>
+        <p>
+          U_VGA_SEQ is a CD74HCT164E clocked by <code>VGA_CLK_14</code>. Its
+          active-low clear connects to <code>VGA_AS_ACTIVE</code>, so all stages
+          hold at zero whenever <code>AS_n</code> is high. Both serial inputs
+          connect to <code>VGA_CYCLE</code>, so shifting begins only after the
+          address, the select, and a byte strobe are all present.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Adapter sequence, measured from the first rising
+            <code>VGA_CLK_14</code>
+            edge after
+            <code>VGA_CYCLE</code>
+            asserts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Stage</th>
+              <th scope="col">Elapsed</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Before QA</td>
+              <td>0</td>
+              <td>
+                <code>BALE</code> high, controller address latch transparent.
+              </td>
+            </tr>
+            <tr>
+              <td>QA</td>
+              <td>69.8 ns</td>
+              <td>
+                <code>BALE</code> falls and latches <code>LA23..LA17</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>QB</td>
+              <td>139.7 ns</td>
+              <td>
+                The selected command strobe asserts.
+                <code>VGA_READY</code> reaches the idle-high state carried in
+                from the pull-up.
+              </td>
+            </tr>
+            <tr>
+              <td>QC</td>
+              <td>209.5 ns</td>
+              <td>
+                First synchronizer stage samples <code>IOCHRDY</code>, which the
+                controller has already driven for at least 41.8 ns.
+              </td>
+            </tr>
+            <tr>
+              <td>QD</td>
+              <td>279.3 ns</td>
+              <td>
+                The controller's <code>IOCHRDY</code> level reaches
+                <code>VGA_READY</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>QE</td>
+              <td>349.2 ns</td>
+              <td>
+                Register cycles complete. Display-memory cycles complete if
+                <code>VGA_READY</code> is high, and otherwise wait.
+              </td>
+            </tr>
+            <tr>
+              <td><code>AS_n</code> rises</td>
+              <td>End of cycle</td>
+              <td>
+                Strobes negate, the shift register clears, and completion
+                releases.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Address Latch Enable</h3>
+        <p>
+          The controller latches <code>LA23..LA17</code> on the falling
+          <code>BALE</code> edge and needs 20 ns of setup, 20 ns of hold, and a
+          20 ns pulse. Driving <code>BALE</code> from the first shift stage
+          gives one full clock period, 69.8 ns, for each of the three.
+        </p>
+        <pre><code>VGA_BALE = NOT QA</code></pre>
+
+        <h3>Command Strobes</h3>
+        <p>
+          The strobes assert one clock after <code>BALE</code> falls, which
+          keeps the ISA address phase and command phase in the order the
+          controller expects.
+        </p>
+        <pre><code>VGA_RW_n = NOT R/W
+VGA_RD   = QB AND R/W
+VGA_WR   = QB AND VGA_RW_n
+
+VGA_MEMR_n = NOT (VGA_RD AND VGA_MEM_SEL)
+VGA_MEMW_n = NOT (VGA_WR AND VGA_MEM_SEL)
+VGA_IOR_n  = NOT (VGA_RD AND VGA_IO_SEL)
+VGA_IOW_n  = NOT (VGA_WR AND VGA_IO_SEL)</code></pre>
+        <p>
+          <code>VGA_MEM_SEL</code> and <code>VGA_IO_SEL</code> both fall when
+          <code>AS_n</code> rises, because their sources include
+          <code>NORMAL_CYCLE_n</code>. Every strobe therefore negates at the end
+          of the processor cycle without a separate release term. The MC68EC000
+          holds write data past <code>AS_n</code> negation, which covers the
+          controller's 10 ns data hold from <code>IOW*</code> or
+          <code>MEMW*</code> going inactive.
+        </p>
+
+        <h3>Wait Handling</h3>
+        <p>
+          <code>IOCHRDY</code> is a three-state output. On a display-memory read
+          the controller drives it low within 28 ns of <code>MEMR*</code> and
+          raises it when the data is ready. On a display-memory write it drives
+          it high immediately if the write buffer has space, and low until space
+          appears if it does not. It is never driven during I/O cycles, and it
+          floats between cycles. R_VGA_RDY, 1 kohm to +5 V, defines the floating
+          state and keeps the rising edge inside one clock period at the
+          expected trace capacitance.
+        </p>
+        <p>
+          U_VGA_SYNC is an SN74HCT74N used as a two-stage synchronizer on
+          <code>VGA_CLK_14</code>. Both active-low clears connect to
+          <code>VGA_CYCLE</code>, so the pair starts from zero at each new
+          cycle. The first stage samples <code>IOCHRDY</code>, the second stage
+          samples the first, and the second stage output is
+          <code>VGA_READY</code>.
+        </p>
+        <pre><code>U_VGA_SYNC stage 1 D = IOCHRDY
+U_VGA_SYNC stage 2 D = stage 1 Q
+VGA_READY = U_VGA_SYNC stage 2 Q</code></pre>
+        <p>
+          The first sample that can see a controller-driven level happens at QC,
+          one clock period after the strobe asserted at QB. The controller
+          guarantees the level within 28 ns, leaving 41.8 ns of setup, far
+          beyond the SN74HCT74N requirement. The synchronizer therefore never
+          samples a transition, and no completion decision rests on a metastable
+          resolution.
+        </p>
+        <p>
+          Waiting two stages costs two clock periods after
+          <code>IOCHRDY</code> rises. A display-memory read whose data is ready
+          before QC completes at QE with no added wait.
+        </p>
+
+        <h3>Completion</h3>
+        <pre><code>VGA_AS_ACTIVE = NOT AS_n
+
+VGA_QE_MEM    = QE AND VGA_MEM_SEL
+VGA_MEM_DONE  = VGA_QE_MEM AND VGA_READY
+VGA_IO_DONE   = QE AND VGA_IO_SEL
+
+VGA_ACK_READY = VGA_MEM_DONE OR VGA_IO_DONE
+VGA_DTACK_n   = NOT (VGA_AS_ACTIVE AND VGA_ACK_READY)</code></pre>
+        <p>
+          Both paths complete at QE so that they share one timing reference and
+          neither races the synchronizer.
+        </p>
+        <p>
+          Gating completion with <code>VGA_AS_ACTIVE</code> holds
+          <code>VGA_DTACK_n</code> low if the processor releases its data
+          strobes before <code>AS_n</code>, and releases it from
+          <code>AS_n</code> through two gates.
+        </p>
+        <p>
+          A display-memory read can wait as long as the controller needs, and
+          the wait length depends on the video mode and on contention with
+          screen refresh. The motherboard timeout of at least 51.1 us is the
+          backstop.
+        </p>
+
+        <h3>Static Host Inputs</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            ISA host pins with fixed connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>AEN</code></td>
+              <td>Ground</td>
+              <td>
+                A high level makes the controller ignore I/O cycles. This board
+                has no DMA.
+              </td>
+            </tr>
+            <tr>
+              <td><code>REFRESH*</code></td>
+              <td>+5 V</td>
+              <td>
+                A low level makes the controller ignore memory reads. It
+                refreshes display memory itself.
+              </td>
+            </tr>
+            <tr>
+              <td><code>TWR*</code></td>
+              <td>10 kohm to +5 V</td>
+              <td>
+                A low level during a rising <code>RESET</code> enters pin scan
+                mode and disables most outputs.
+              </td>
+            </tr>
+            <tr>
+              <td><code>EDCLK*</code></td>
+              <td>10 kohm to +5 V</td>
+              <td>Keeps <code>DCLK</code> an output.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>IOCS16*</code>, <code>MCS16*</code>, <code>0WS</code>
+              </td>
+              <td>Open</td>
+              <td>
+                Open-collector ISA sizing and wait-state outputs with no
+                consumer here.
+              </td>
+            </tr>
+            <tr>
+              <td><code>EROM*</code>, <code>IRQ</code></td>
+              <td>Open</td>
+              <td>
+                No BIOS ROM is fitted, and vertical retrace reaches the MFP
+                through <code>VSYNC</code>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="straps">
+        <h2>6. Configuration Straps</h2>
+        <p>
+          The controller latches configuration register CF1 from
+          <code>MD30..MD16</code> on the falling edge of <code>RESET</code>.
+          Internal 250 kohm pull-ups make every bit read as one, and a 6.8 kohm
+          external pull-down makes a bit read as zero. The memory data pins are
+          forced high impedance while <code>RESET</code> is active so the
+          pull-downs win, and the display-memory DRAMs cannot drive them because
+          the controller holds its own <code>RAS*</code> and
+          <code>CAS*</code> outputs inactive.
+        </p>
+        <p>This design needs two zeros, so it installs two resistors.</p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Installed configuration pull-downs
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Pin</th>
+              <th scope="col">CF bit</th>
+              <th scope="col">Selects</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>R_VGA_CF12</code></td>
+              <td><code>MD28</code>, pin 100</td>
+              <td><code>CF[12] = 0</code></td>
+              <td>
+                <code>CAS3..CAS0*</code> with a single <code>WE*</code>, which
+                the TRM prefers over multiple write enables.
+              </td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_CF9</code></td>
+              <td><code>MD25</code>, pin 104</td>
+              <td><code>CF[9] = 0</code></td>
+              <td>41.16477 MHz MCLK together with <code>CF[10] = 1</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Resulting CF1 configuration
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">CF bits</th>
+              <th scope="col">Memory data pins</th>
+              <th scope="col">Value</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>14, 7, 5</code></td>
+              <td><code>MD30</code>, <code>MD23</code>, <code>MD21</code></td>
+              <td><code>111</code></td>
+              <td>ISA bus interface.</td>
+            </tr>
+            <tr>
+              <td><code>13</code></td>
+              <td><code>MD29</code></td>
+              <td><code>1</code></td>
+              <td>Symmetric DRAM addressing, nine rows and nine columns.</td>
+            </tr>
+            <tr>
+              <td><code>12</code></td>
+              <td><code>MD28</code></td>
+              <td><code>0</code></td>
+              <td>
+                <code>WE3..WE0*</code> become <code>CAS3..CAS0*</code> and
+                <code>CAS*</code> becomes <code>WE*</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>11</code></td>
+              <td><code>MD27</code></td>
+              <td><code>1</code></td>
+              <td>Standard six-MCLK RAS* cycle.</td>
+            </tr>
+            <tr>
+              <td><code>10, 9</code></td>
+              <td><code>MD26</code>, <code>MD25</code></td>
+              <td><code>10</code></td>
+              <td>41.16477 MHz MCLK.</td>
+            </tr>
+            <tr>
+              <td><code>8, 6</code></td>
+              <td><code>MD24</code>, <code>MD22</code></td>
+              <td><code>11</code></td>
+              <td>
+                BIOS ROM size and width. Both are unused because no BIOS ROM is
+                fitted and <code>EROM*</code> is unconnected.
+              </td>
+            </tr>
+            <tr>
+              <td><code>4</code></td>
+              <td><code>MD20</code></td>
+              <td><code>1</code></td>
+              <td>
+                Internal MCLK oscillator; pin 157 is an unconnected output.
+              </td>
+            </tr>
+            <tr>
+              <td><code>3</code></td>
+              <td><code>MD19</code></td>
+              <td><code>1</code></td>
+              <td>
+                Port <code>46E8</code> holds the video system sleep register.
+              </td>
+            </tr>
+            <tr>
+              <td><code>2, 1, 0, 15</code></td>
+              <td>
+                <code>MD18</code>, <code>MD17</code>, <code>MD16</code>,
+                <code>MD31</code>
+              </td>
+              <td><code>1</code></td>
+              <td>
+                Reserved, zero-wait disabled, and two CL-GD5425-only bits.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>CF[1]</code> stays high, disabling <code>0WS*</code>. That pin
+          exists to shorten ISA host cycles and this adapter derives its own
+          timing, so leaving it disabled removes one output that would otherwise
+          need a pull-up.
+        </p>
+      </section>
+
+      <section id="display-memory">
+        <h2>7. Display Memory</h2>
+        <p>
+          The controller drives a 32-bit display-memory bus and supports 256K x
+          4, 512K x 8, and 256K x 16 organizations up to 2 MiB. It presents nine
+          address lines in the symmetric configurations, so a 1M x 4 device such
+          as the TMS44400 used for main memory cannot be wired as display
+          memory.
+        </p>
+        <p>
+          Four 256K x 16 dual-CAS* devices give the full 2 MiB in four packages
+          and fill the host window exactly. Each device must have separate lower
+          and upper column-address strobes, one write enable, one output enable,
+          nine symmetric address inputs, and a 70 ns row access time. The
+          HM514260-70 is the reference device; the TRM characterizes it in its
+          own 70 ns DRAM table.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Display-memory connections, per TRM table B7-11
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">DRAM input</th>
+              <th scope="col">U_VGA_VRAM0</th>
+              <th scope="col">U_VGA_VRAM1</th>
+              <th scope="col">U_VGA_VRAM2</th>
+              <th scope="col">U_VGA_VRAM3</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row"><code>RAS*</code></th>
+              <td><code>RAS*</code>, pin 142</td>
+              <td><code>RAS*</code>, pin 142</td>
+              <td><code>OE*</code>, pin 141</td>
+              <td><code>OE*</code>, pin 141</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>LCAS*</code></th>
+              <td><code>WE2*</code>, pin 116</td>
+              <td><code>WE0*</code>, pin 138</td>
+              <td><code>WE2*</code>, pin 116</td>
+              <td><code>WE0*</code>, pin 138</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>UCAS*</code></th>
+              <td><code>WE3*</code>, pin 106</td>
+              <td><code>WE1*</code>, pin 127</td>
+              <td><code>WE3*</code>, pin 106</td>
+              <td><code>WE1*</code>, pin 127</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>WE*</code></th>
+              <td colspan="4"><code>CAS*</code>, pin 139</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>OE*</code></th>
+              <td colspan="4">Ground</td>
+            </tr>
+            <tr>
+              <th scope="row"><code>ADDR8..ADDR0</code></th>
+              <td colspan="4"><code>MA8..MA0</code>, pins 145 to 153</td>
+            </tr>
+            <tr>
+              <th scope="row">Data</th>
+              <td><code>MD31..MD16</code></td>
+              <td><code>MD15..MD0</code></td>
+              <td><code>MD31..MD16</code></td>
+              <td><code>MD15..MD0</code></td>
+            </tr>
+            <tr>
+              <th scope="row">Planes</th>
+              <td>2, 3</td>
+              <td>0, 1</td>
+              <td>2, 3</td>
+              <td>0, 1</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          With <code>CF[12]</code> low the controller renames three pin groups.
+          <code>WE3..WE0*</code> become <code>CAS3..CAS0*</code>,
+          <code>CAS*</code> becomes <code>WE*</code>, and
+          <code>OE*</code> becomes <code>RAS1*</code>. Each DRAM output enable
+          ties to ground, because the controller gates reads with the column
+          strobes. <code>MA9</code>, pin 143, has no function in this
+          configuration and is left open.
+        </p>
+        <p>
+          The controller refreshes display memory from its internal counter. No
+          motherboard refresh signal reaches it, and <code>REFRESH*</code> stays
+          high.
+        </p>
+
+        <h3>MCLK Selection</h3>
+        <p>
+          Strapping 41.16477 MHz gives a 24.29 ns memory clock. The TRM's
+          standard-RAS* formulas resolve to the times below, all of which exceed
+          what a 70 ns device requires.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Display-memory timing at 41.16477 MHz, standard RAS*
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Formula</th>
+              <th scope="col">Available</th>
+              <th scope="col">Required at 70 ns</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>tRCD</code>, RAS* to CAS*</td>
+              <td><code>2.5m - 2</code></td>
+              <td>58.7 ns</td>
+              <td>20 ns</td>
+            </tr>
+            <tr>
+              <td><code>tRAC</code>, data from RAS*</td>
+              <td><code>4m - 1</code></td>
+              <td>96.2 ns</td>
+              <td>70 ns</td>
+            </tr>
+            <tr>
+              <td><code>tRP</code>, RAS* precharge</td>
+              <td><code>2.5m - 2</code></td>
+              <td>58.7 ns</td>
+              <td>50 ns</td>
+            </tr>
+            <tr>
+              <td><code>tRAS</code>, RAS* pulse width</td>
+              <td><code>3.5m</code></td>
+              <td>85.0 ns</td>
+              <td>70 ns</td>
+            </tr>
+            <tr>
+              <td><code>tRC</code>, random cycle</td>
+              <td><code>6m</code></td>
+              <td>145.8 ns</td>
+              <td>130 ns</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The remaining column and write parameters fall between the 41.2 MHz
+          and 43.0 MHz columns of TRM table B19-1, and every one of them clears
+          the 70 ns requirements in table B19-4. The next faster strap, 44.74431
+          MHz, brings <code>tRC</code> down to 134.1 ns against a 130 ns
+          requirement and is not used.
+        </p>
+        <p>
+          Firmware may reprogram MCLK through <code>SR1F[5:0]</code>. Doing so
+          overrides the strap and moves every number in the table above, so
+          firmware that changes MCLK owns the resulting DRAM timing.
+        </p>
+      </section>
+
+      <section id="clock-reset">
+        <h2>8. Clock and Reset</h2>
+        <h3>Dedicated Reference Oscillator</h3>
+        <p>
+          Y_VGA_CLK is an Epson SG-51P made for 14.31818 MHz, C grade. Its
+          output reaches CL-GD5428 <code>OSC</code>, pin 159, through R_VGA_CLK,
+          a 33 ohm source-series resistor, and reaches U_VGA_INV_B for the
+          adapter clock. Oscillator enable is tied high. <code>XTAL</code>, pin
+          158, is left open because no crystal is fitted.
+        </p>
+        <p>
+          The controller requires 14.31818 MHz within 0.01 percent at a duty
+          cycle of 50 percent plus or minus 10 percent. C grade is 100 parts per
+          million, which is 0.01 percent, and the SG-51P symmetry limit is 40 to
+          60 percent. Both parameters meet the requirement with no margin, so
+          both appear on the assembled-board measurement list.
+        </p>
+        <p>
+          The OPL3 uses a separate SG-51P at the same frequency. Sharing one
+          oscillator would put the video PLL reference and the audio master
+          clock on the same net, so each subsystem keeps its own.
+        </p>
+        <pre><code>Y_VGA_CLK
+    |
+    +-- R_VGA_CLK --&gt; CL-GD5428 OSC, pin 159
+    |
+    +-- U_VGA_INV_B stage 1 --&gt; stage 2 --&gt; VGA_CLK_14
+                                              |
+                                              +-- U_VGA_SEQ CP
+                                              +-- U_VGA_SYNC both CP inputs</code></pre>
+        <p>
+          Two cascaded inverters give a non-inverting buffered copy. No
+          motherboard clock net gains a load, so
+          <a href="dram.html#clock-distribution"
+            >the clock distribution budget</a
+          >
+          is unchanged.
+        </p>
+
+        <h3>Synthesizer Filters</h3>
+        <p>
+          The internal dual-frequency synthesizer needs one loop filter per
+          clock. The CL-GD5428 is an N-WELL device, so the video filter returns
+          to <code>AVSS1</code> rather than <code>AVDD1</code>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Clock synthesizer supply and filter networks
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Network</th>
+              <th scope="col">Pins</th>
+              <th scope="col">Components</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Video clock supply</td>
+              <td><code>AVDD1</code>, pin 66</td>
+              <td>
+                33 ohms from +5 V, bypassed with 10 uF and 0.1 uF to
+                <code>AVSS1</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Video clock filter</td>
+              <td><code>VFILTER</code>, pin 65</td>
+              <td>
+                75 ohms in series with 2.2 uF, and 0.1 uF in shunt, both
+                returned to <code>AVSS1</code>, pin 64.
+              </td>
+            </tr>
+            <tr>
+              <td>Memory clock supply</td>
+              <td><code>AVDD4</code>, pin 154</td>
+              <td>
+                33 ohms from +5 V, bypassed with 10 uF to
+                <code>AVSS4</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Memory clock filter</td>
+              <td><code>MFILTER</code>, pin 155</td>
+              <td>
+                75 ohms in series with 2.2 uF, and 0.1 uF in shunt, both
+                returned to <code>AVSS4</code>, pin 156.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          TRM appendix B17 gives the video filter values for an N-WELL device
+          and notes that the 2.2 uF capacitor's polarity is reversed relative to
+          the P-WELL arrangement. The data book requires the same pi topology at
+          <code>MFILTER</code> but the copy of the ISA adapter schematic in the
+          manual is withheld, so the memory filter here repeats the
+          characterized video filter values. Measured MCLK jitter at the DRAM
+          strobes is on the acceptance list.
+        </p>
+
+        <h3>Reset</h3>
+        <p>
+          The controller's <code>RESET</code> input, pin 41, is active high. One
+          U_VGA_INV_B channel inverts <code>PERIPH_RESET_n</code>, which places
+          the video subsystem in the peripheral reset domain alongside the MFP,
+          MIDI, OPL3, RTC, and floppy. A processor RESET instruction therefore
+          clears the controller and re-latches CF1 from the strap resistors, and
+          firmware must set the video mode again afterwards.
+        </p>
+        <pre><code>VGA_RESET = NOT PERIPH_RESET_n</code></pre>
+        <p>
+          <code>RESET</code> must stay high for at least 12 MCLK periods, 291.5
+          ns at the strapped frequency, and firmware must not issue the first
+          <code>IOW*</code> until 12 MCLK periods after it falls. A processor
+          RESET instruction supplies about 12.4 us through the peripheral reset
+          domain, and the power-on and manual reset pulses are far longer, so
+          the pulse width is met by more than four orders of magnitude.
+        </p>
+        <p>
+          <code>PERIPH_RESET_n</code> is an open-collector net with a 1 kohm
+          pull-up, so its release edge is RC-limited. The floppy controller
+          takes the same signal through the same kind of plain inverter, and the
+          release-edge check in
+          <a href="clock-and-reset.html">Clock and Reset</a> covers this input
+          as well.
+        </p>
+        <p>
+          The controller's memory data pins float during reset so the CF1
+          pull-downs can be read. Straps need 2 ns of setup and 25 ns of hold
+          around the falling edge, which static resistors satisfy.
+        </p>
+      </section>
+
+      <section id="config-eeprom">
+        <h2>9. Configuration EEPROM</h2>
+        <p>
+          U_VGA_CFG is an NM93C46N, a 1 Kbit serial EEPROM organized as 64
+          sixteen-bit words. It holds monitor timing and configuration data that
+          must survive power-off. The controller reaches it through
+          <code>SR8</code>, and the interface exists only in ISA bus mode.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            NM93C46N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">EEPROM pin</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Controlled by</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>CS</code>, pin 1</td>
+              <td>CL-GD5428 <code>EECS</code>, pin 74</td>
+              <td><code>SR8[0]</code></td>
+            </tr>
+            <tr>
+              <td><code>SK</code>, pin 2</td>
+              <td>CL-GD5428 <code>ESYNC*</code>, pin 95</td>
+              <td><code>SR8[2]</code> when <code>SR8[4] = 1</code></td>
+            </tr>
+            <tr>
+              <td><code>DI</code>, pin 3</td>
+              <td>CL-GD5428 <code>EVIDEO*</code>, pin 94</td>
+              <td><code>SR8[3]</code> when <code>SR8[4] = 1</code></td>
+            </tr>
+            <tr>
+              <td><code>DO</code>, pin 4</td>
+              <td>CL-GD5428 <code>EEDI</code>, pin 73</td>
+              <td>Read at <code>SR8[7]</code> when <code>SR8[1] = 1</code></td>
+            </tr>
+            <tr>
+              <td><code>GND</code>, pin 5</td>
+              <td>Ground</td>
+              <td>Fixed</td>
+            </tr>
+            <tr>
+              <td><code>ORG</code>, pin 6</td>
+              <td>+5 V</td>
+              <td>Selects 64 x 16 organization</td>
+            </tr>
+            <tr>
+              <td><code>VCC</code>, pin 8</td>
+              <td>+5 V with a 0.1 uF bypass</td>
+              <td>Fixed</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>ESYNC*</code> and <code>EVIDEO*</code> are bidirectional. They
+          are inputs during normal operation and become outputs carrying the
+          serial clock and serial data when firmware sets <code>SR8[4]</code>.
+          They therefore take 10 kohm pull-ups, R_VGA_ESYNC and R_VGA_EVIDEO,
+          rather than a hard tie to +5 V. The pull-ups draw 0.5 mA against a 12
+          mA sink rating.
+        </p>
+        <p>
+          <code>SR8[5]</code> latches the levels present on those two pins
+          before <code>SR8[4]</code> turns them into outputs, and the latched
+          levels keep driving <code>HSYNC</code>, <code>VSYNC</code>,
+          <code>BLANK*</code>, and <code>P7..P0</code>. Sync therefore continues
+          uninterrupted while firmware talks to the EEPROM, and the MFP keeps
+          receiving vertical retrace edges. Firmware that omits
+          <code>SR8[5]</code> will blank the display.
+        </p>
+        <p>
+          R_VGA_EEDI, 10 kohm to +5 V, defines <code>EEDI</code> while the
+          EEPROM output is high impedance. <code>SR8[0]</code> resets to zero,
+          so chip select is low and the device ignores the pulled-up clock and
+          data lines until firmware drives them.
+        </p>
+        <p>
+          The device needs 1 us of data setup and hold around each rising serial
+          clock edge, 2 us of clock high and low time, 2 us before output data
+          is valid, and 10 us after the last bit of a write. Firmware supplies
+          all of these as software delays; no hardware sequencer is involved.
+        </p>
+      </section>
+
+      <section id="video-output">
+        <h2>10. Video Output and Monitor Connector</h2>
+        <h3>DAC Reference</h3>
+        <p>
+          The palette DAC draws its full-scale reference through
+          <code>IREF</code>, pin 78. Full-scale output current follows
+          <code>If = (63 / 30) x IREF</code>. The reference design draws 6.7 mA,
+          loads each analog output with 150 ohms on the board, and relies on the
+          monitor's own 75 ohm termination for an effective 50 ohms.
+        </p>
+        <p>
+          D_VGA_REF is a TL431 wired as a shunt reference with its reference pin
+          tied to its cathode, giving 2.495 V. R_VGA_REF supplies it with 1.5
+          kohms from +5 V, drawing 1.67 mA, and C_VGA_REF is a 0.1 uF bypass at
+          the cathode. Q_VGA_IREF is a 2N3904 with its base at that node, its
+          emitter to ground through R_VGA_IREF, and its collector on
+          <code>IREF</code>.
+        </p>
+        <pre><code>R_VGA_IREF = 270 ohms, 1 percent
+IREF  = (2.495 - Vbe) / 270 = 6.6 mA at Vbe = 0.7 V
+If    = 2.1 x 6.6 mA = 13.9 mA
+Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
+        <p>
+          Peak white lands 10 mV below the 0.7 V VGA level. The residual error
+          follows the transistor's base-emitter voltage, so R_VGA_IREF is the
+          single component to adjust if a measured white level needs correcting.
+        </p>
+
+        <h3>Analog Filtering</h3>
+        <p>
+          Each of <code>RED</code>, <code>GREEN</code>, and <code>BLUE</code>
+          takes a 150 ohm resistor to analog ground placed at the controller
+          pin, then a pi filter of two 47 pF capacitors around a ferrite bead on
+          the way to the connector. The source resistor sits as close to the
+          controller as the layout allows so the analog output sees no
+          unterminated stub.
+        </p>
+
+        <h3>Monitor Connector</h3>
+        <p>
+          J_VGA is a DE-15 receptacle at the board edge. The CL-GD5428 has no
+          DDC engine, so the display data channel and monitor identification
+          pins are unconnected.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            J_VGA DE-15 pinout
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Direction at motherboard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>RED</code></td>
+              <td>Analog output</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>GREEN</code></td>
+              <td>Analog output</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>BLUE</code></td>
+              <td>Analog output</td>
+            </tr>
+            <tr>
+              <td>4, 9, 11, 12, 15</td>
+              <td>Not connected</td>
+              <td>None</td>
+            </tr>
+            <tr>
+              <td>5, 10</td>
+              <td>Ground</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>Red return</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>Green return</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>Blue return</td>
+              <td>Return</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td><code>HSYNC</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td><code>VSYNC</code></td>
+              <td>Output</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Sync polarity is programmable through the miscellaneous output
+          register, and firmware sets it to match the mode it selects.
+        </p>
+
+        <h3>Unused Video Pins</h3>
+        <p>
+          No VESA feature connector is provided. <code>P7..P0</code>,
+          <code>DCLK</code>, <code>BLANK*</code>, and <code>OVRW</code> are left
+          open. <code>EVIDEO*</code> and <code>EDCLK*</code> stay high through
+          their pull-ups, so <code>P7..P0</code> and <code>DCLK</code>
+          remain outputs and drive nothing.
+        </p>
+      </section>
+
+      <section id="interrupts">
+        <h2>11. Interrupts</h2>
+        <p>
+          <code>VSYNC</code>, pin 68, connects to the monitor and to MC68901
+          GPIP2. The MFP senses a programmed edge, so a push-pull source needs
+          no inverter and no pull-up. Both edges occur once per frame, and
+          firmware chooses one through the MFP active-edge register. The MFP
+          assigns vector <code>$42</code>. See
+          <a href="mfp.html#interrupts">MC68901 MFP</a> and
+          <a href="interrupts.html">Interrupts</a>.
+        </p>
+        <p>
+          <code>VSYNC</code> is high impedance whenever <code>ESYNC*</code> is
+          low. R_VGA_ESYNC holds <code>ESYNC*</code> high, and the
+          <code>SR8[5]</code> latch keeps the internal enable high while the pin
+          drives the configuration EEPROM clock, so the pin is an output at all
+          times after reset.
+        </p>
+        <p>
+          The controller also has an <code>IRQ</code> output on pin 52 that
+          asserts at the start of the bottom border under
+          <code>CR11</code> control. It duplicates what
+          <code>VSYNC</code> already provides and would need a second GPIP
+          input, so it has no board connection.
+        </p>
+      </section>
+
+      <section id="firmware">
+        <h2>12. Firmware Contract</h2>
+        <p>
+          The bit-level register descriptions are in the technical reference
+          manual. This section states only what the hardware requires.
+        </p>
+        <ol>
+          <li>
+            Wait at least 292 ns after <code>PERIPH_RESET_n</code> releases
+            before the first register write. Any reset path on this board
+            exceeds that by a wide margin.
+          </li>
+          <li>
+            Unlock the extension registers by writing <code>$12</code> to
+            <code>SR6</code> at <code>$E603C4</code> and <code>$E603C5</code>.
+            The extension registers are inaccessible until this is done.
+          </li>
+          <li>
+            Set <code>GRB[5]</code> to 1 for a 2 MiB address range, set
+            <code>GRB[0]</code> to 0 so offset register 0 is always selected,
+            and set <code>SR7[7:4]</code> to <code>1000</code>. Only after this
+            does the controller answer accesses in <code>$800000-$9FFFFF</code>.
+          </li>
+          <li>
+            Set the video mode, CRTC timing, sync polarity, clock synthesizer
+            numerators and denominators, palette, and any BitBLT or hardware
+            cursor state. All of it is firmware's responsibility because the
+            machine has no x86 video BIOS to run.
+          </li>
+          <li>
+            Repeat every step above after each processor RESET instruction. The
+            controller sits in the peripheral reset domain and loses all state.
+          </li>
+          <li>
+            Read and write registers at odd or even byte addresses freely. The
+            byte-lane crossing is symmetric and the address of a byte is the
+            same on both sides of the bus.
+          </li>
+          <li>
+            A 16-bit write to an index port is permitted. The controller expects
+            the index on <code>SD7..SD0</code> and the data on
+            <code>SD15..SD8</code>, which after the lane crossing means a
+            MC68EC000 word whose high byte is the index and whose low byte is
+            the data.
+          </li>
+          <li>
+            Set <code>SR8[5]</code> before setting <code>SR8[4]</code> when
+            using the configuration EEPROM, and clear them in the reverse order
+            afterwards. Skipping the latch step blanks the display and stops the
+            vertical retrace interrupt.
+          </li>
+          <li>
+            Preserve <code>SR8[6]</code> across every write to <code>SR8</code>.
+            It also controls <code>MCS16*</code>.
+          </li>
+          <li>
+            Own the display-memory timing if <code>SR1F[5:0]</code> is used to
+            change MCLK away from the strapped 41.16477 MHz.
+          </li>
+        </ol>
+      </section>
+
+      <section id="pins">
+        <h2>13. Package and Pin Maps</h2>
+        <h3>CL-GD5428 Host Interface</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_VGA host pins, ISA bus mode
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2</td>
+              <td><code>EROM*</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>3, 4, 5, 6, 8, 9, 10, 11</td>
+              <td><code>SD15..SD8</code></td>
+              <td>CPU <code>D7..D0</code>, in that order</td>
+            </tr>
+            <tr>
+              <td>13, 14</td>
+              <td><code>MEMW*</code>, <code>MEMR*</code></td>
+              <td><code>VGA_MEMW_n</code>, <code>VGA_MEMR_n</code></td>
+            </tr>
+            <tr>
+              <td>15 to 21</td>
+              <td><code>LA17..LA23</code></td>
+              <td>CPU <code>A17..A23</code>, in that order</td>
+            </tr>
+            <tr>
+              <td>22, 23</td>
+              <td><code>IOCS16*</code>, <code>MCS16*</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>24</td>
+              <td><code>SBHE*</code></td>
+              <td>CPU <code>LDS_n</code></td>
+            </tr>
+            <tr>
+              <td>25</td>
+              <td><code>BALE</code></td>
+              <td><code>VGA_BALE</code></td>
+            </tr>
+            <tr>
+              <td>27</td>
+              <td><code>SA0</code></td>
+              <td>CPU <code>UDS_n</code></td>
+            </tr>
+            <tr>
+              <td>28 to 39, 42 to 45</td>
+              <td><code>SA1..SA16</code></td>
+              <td>CPU <code>A1..A16</code>, in that order</td>
+            </tr>
+            <tr>
+              <td>41</td>
+              <td><code>RESET</code></td>
+              <td><code>VGA_RESET</code></td>
+            </tr>
+            <tr>
+              <td>46</td>
+              <td><code>AEN</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>47</td>
+              <td><code>IOCHRDY</code></td>
+              <td>U_VGA_SYNC stage 1 D, with R_VGA_RDY to +5 V</td>
+            </tr>
+            <tr>
+              <td>48</td>
+              <td><code>REFRESH*</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>49, 50</td>
+              <td><code>IOR*</code>, <code>IOW*</code></td>
+              <td><code>VGA_IOR_n</code>, <code>VGA_IOW_n</code></td>
+            </tr>
+            <tr>
+              <td>51, 52</td>
+              <td><code>0WS</code>, <code>IRQ</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>54, 55, 56, 57, 59, 60, 62, 63</td>
+              <td><code>SD0..SD7</code></td>
+              <td>CPU <code>D8..D15</code>, in that order</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>CL-GD5428 Video, Clock, and Serial Pins</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_VGA video interface, synthesizer, and EEPROM pins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>64, 65, 66</td>
+              <td>
+                <code>AVSS1</code>, <code>VFILTER</code>, <code>AVDD1</code>
+              </td>
+              <td>Video clock filter and supply network</td>
+            </tr>
+            <tr>
+              <td>67</td>
+              <td><code>TWR*</code></td>
+              <td>R_VGA_TWR, 10 kohm to +5 V</td>
+            </tr>
+            <tr>
+              <td>68</td>
+              <td><code>VSYNC</code></td>
+              <td>J_VGA pin 14 and MC68901 GPIP2</td>
+            </tr>
+            <tr>
+              <td>69</td>
+              <td><code>HSYNC</code></td>
+              <td>J_VGA pin 13</td>
+            </tr>
+            <tr>
+              <td>70, 72</td>
+              <td><code>AVSS2</code>, <code>AVDD2</code></td>
+              <td>DAC ground and supply</td>
+            </tr>
+            <tr>
+              <td>71</td>
+              <td><code>OVRW</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>73</td>
+              <td><code>EEDI</code></td>
+              <td>U_VGA_CFG <code>DO</code>, with R_VGA_EEDI to +5 V</td>
+            </tr>
+            <tr>
+              <td>74</td>
+              <td><code>EECS</code></td>
+              <td>U_VGA_CFG <code>CS</code></td>
+            </tr>
+            <tr>
+              <td>75, 76, 77</td>
+              <td><code>BLUE</code>, <code>GREEN</code>, <code>RED</code></td>
+              <td>150 ohms to analog ground, then a pi filter to J_VGA</td>
+            </tr>
+            <tr>
+              <td>78</td>
+              <td><code>IREF</code></td>
+              <td>Q_VGA_IREF collector</td>
+            </tr>
+            <tr>
+              <td>79, 82 to 84, 86 to 89</td>
+              <td><code>P0..P7</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>85, 90</td>
+              <td><code>AVDD3</code>, <code>AVSS3</code></td>
+              <td>DAC supply and ground</td>
+            </tr>
+            <tr>
+              <td>92, 93</td>
+              <td><code>DCLK</code>, <code>BLANK*</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>94</td>
+              <td><code>EVIDEO*</code></td>
+              <td>U_VGA_CFG <code>DI</code>, with R_VGA_EVIDEO to +5 V</td>
+            </tr>
+            <tr>
+              <td>95</td>
+              <td><code>ESYNC*</code></td>
+              <td>U_VGA_CFG <code>SK</code>, with R_VGA_ESYNC to +5 V</td>
+            </tr>
+            <tr>
+              <td>96</td>
+              <td><code>EDCLK*</code></td>
+              <td>R_VGA_EDCLK, 10 kohm to +5 V</td>
+            </tr>
+            <tr>
+              <td>154, 155, 156</td>
+              <td>
+                <code>AVDD4</code>, <code>MFILTER</code>, <code>AVSS4</code>
+              </td>
+              <td>Memory clock filter and supply network</td>
+            </tr>
+            <tr>
+              <td>157</td>
+              <td><code>MCLK</code></td>
+              <td>Open; an output because <code>CF[4]</code> is high</td>
+            </tr>
+            <tr>
+              <td>158</td>
+              <td><code>XTAL</code></td>
+              <td>Open; no crystal fitted</td>
+            </tr>
+            <tr>
+              <td>159</td>
+              <td><code>OSC</code></td>
+              <td>R_VGA_CLK from Y_VGA_CLK</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>CL-GD5428 Display-Memory Pins</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_VGA display-memory pins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>97 to 100, 102 to 105, 108 to 115, 117 to 119</td>
+              <td><code>MD31..MD13</code></td>
+              <td>
+                DRAM data. R_VGA_CF12 pulls down pin 100 and R_VGA_CF9 pulls
+                down pin 104.
+              </td>
+            </tr>
+            <tr>
+              <td>106, 116, 127, 138</td>
+              <td>
+                <code>WE3*</code>, <code>WE2*</code>, <code>WE1*</code>,
+                <code>WE0*</code>
+              </td>
+              <td>
+                Column strobes <code>CAS3..CAS0*</code> because
+                <code>CF[12]</code> is low
+              </td>
+            </tr>
+            <tr>
+              <td>122 to 126, 129 to 136</td>
+              <td><code>MD12..MD0</code></td>
+              <td>DRAM data</td>
+            </tr>
+            <tr>
+              <td>139</td>
+              <td><code>CAS*</code></td>
+              <td>DRAM <code>WE*</code> because <code>CF[12]</code> is low</td>
+            </tr>
+            <tr>
+              <td>141</td>
+              <td><code>OE*</code></td>
+              <td>
+                DRAM bank 1 <code>RAS*</code> because <code>CF[12]</code> is low
+              </td>
+            </tr>
+            <tr>
+              <td>142</td>
+              <td><code>RAS*</code></td>
+              <td>DRAM bank 0 <code>RAS*</code></td>
+            </tr>
+            <tr>
+              <td>143</td>
+              <td><code>MA9</code></td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>145 to 153</td>
+              <td><code>MA8..MA0</code></td>
+              <td>DRAM <code>ADDR8..ADDR0</code>, in that order</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>CL-GD5428 Power and Ground</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_VGA supply pins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Group</th>
+              <th scope="col">Pins</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>VDD7..VDD1</code></td>
+              <td>1, 26, 58, 81, 107, 121, 140</td>
+              <td>+5 V, each with its own 0.1 uF bypass at the pin</td>
+            </tr>
+            <tr>
+              <td><code>VSS13..VSS1</code></td>
+              <td>7, 12, 40, 53, 61, 80, 91, 101, 120, 128, 137, 144, 160</td>
+              <td>Ground plane, each pin connected directly</td>
+            </tr>
+            <tr>
+              <td><code>AVDD3</code>, <code>AVDD2</code></td>
+              <td>85, 72</td>
+              <td>+5 V, each with a 0.1 uF bypass at the pin</td>
+            </tr>
+            <tr>
+              <td><code>AVDD4</code>, <code>AVDD1</code></td>
+              <td>154, 66</td>
+              <td>+5 V through 33 ohms with 10 uF and 0.1 uF bypasses</td>
+            </tr>
+            <tr>
+              <td>
+                <code>AVSS4</code>, <code>AVSS3</code>, <code>AVSS2</code>,
+                <code>AVSS1</code>
+              </td>
+              <td>156, 90, 70, 64</td>
+              <td>Ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          TRM appendix B10 suggests feeding the logic supply through two 1 ohm
+          resistors in parallel for extra latch-up margin. At the rated 260 mA
+          that pair drops 130 mV, which would leave 4.62 V at the device when
+          the rail sits at its 4.75 V minimum, below the controller's own 4.75 V
+          floor. The logic supply therefore connects directly and relies on
+          per-pin bypassing and the internal latch-up protection instead.
+        </p>
+
+        <h3>Adapter Packages</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Adapter logic gate assignments
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Device</th>
+              <th scope="col">Gate use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_VGA_INV</code></td>
+              <td>SN74F04N</td>
+              <td>
+                <code>VGA_RW_n</code>, <code>VGA_MEM_SEL</code>,
+                <code>VGA_IO_SEL</code>, <code>VGA_AS_ACTIVE</code>, two spare
+                inputs to ground
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_INV_B</code></td>
+              <td>SN74F04N</td>
+              <td>
+                <code>VGA_BALE</code>, <code>VGA_RESET</code>, two cascaded
+                clock-buffer stages, two spare inputs to ground
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_OR</code></td>
+              <td>SN74F32N</td>
+              <td><code>VGA_ACK_READY</code>, three spare gates</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_AND_A</code></td>
+              <td>SN74F08N</td>
+              <td>
+                <code>VGA_DS_n</code>, <code>VGA_SEL_n</code>,
+                <code>VGA_RD</code>, <code>VGA_WR</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_AND_B</code></td>
+              <td>SN74F08N</td>
+              <td>
+                <code>VGA_QE_MEM</code>, <code>VGA_MEM_DONE</code>,
+                <code>VGA_IO_DONE</code>, one spare gate
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_NOR</code></td>
+              <td>SN74F02N</td>
+              <td><code>VGA_CYCLE</code>, three spare gates</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_NAND</code></td>
+              <td>SN74F00N</td>
+              <td>
+                <code>VGA_MEMR_n</code>, <code>VGA_MEMW_n</code>,
+                <code>VGA_IOR_n</code>, <code>VGA_IOW_n</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_NAND_B</code></td>
+              <td>SN74F00N</td>
+              <td><code>VGA_DTACK_n</code>, three spare gates</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_SEQ</code></td>
+              <td>CD74HCT164E</td>
+              <td>
+                Serial inputs A and B to <code>VGA_CYCLE</code>, clear to
+                <code>VGA_AS_ACTIVE</code>, clock <code>VGA_CLK_14</code>,
+                outputs QA, QB, and QE used
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_SYNC</code></td>
+              <td>SN74HCT74N</td>
+              <td>
+                Two-stage <code>IOCHRDY</code> synchronizer, both clears to
+                <code>VGA_CYCLE</code>, both presets to +5 V
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every spare gate input ties to ground and every spare output is left
+          open.
+        </p>
+      </section>
+
+      <section id="timing">
+        <h2>14. Timing and Electrical Checks</h2>
+        <p>
+          <code>VGA_CLK_14</code> has a 69.83 ns period. The strapped MCLK has a
+          24.29 ns period. Every adapter interval below is a whole number of
+          <code>VGA_CLK_14</code> periods measured from the first rising edge
+          after <code>VGA_CYCLE</code> asserts.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Host interface timing margins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Requirement</th>
+              <th scope="col">Controller limit</th>
+              <th scope="col">Adapter value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BALE</code> pulse width</td>
+              <td>20 ns minimum</td>
+              <td>69.8 ns</td>
+            </tr>
+            <tr>
+              <td>
+                <code>LA23..LA17</code> and <code>SBHE*</code> setup to falling
+                <code>BALE</code>
+              </td>
+              <td>20 ns minimum</td>
+              <td>69.8 ns and longer, since the address precedes AS_n</td>
+            </tr>
+            <tr>
+              <td>
+                <code>LA23..LA17</code> and <code>SBHE*</code> hold from falling
+                <code>BALE</code>
+              </td>
+              <td>20 ns minimum</td>
+              <td>Held to the end of the processor cycle</td>
+            </tr>
+            <tr>
+              <td>Address and <code>SBHE*</code> setup to any command</td>
+              <td>5 ns minimum</td>
+              <td>139.7 ns</td>
+            </tr>
+            <tr>
+              <td><code>IOR*</code> pulse width</td>
+              <td>70 ns minimum</td>
+              <td>209.5 ns plus the processor's response to /DTACK</td>
+            </tr>
+            <tr>
+              <td><code>IOW*</code> pulse width</td>
+              <td>40 ns minimum</td>
+              <td>209.5 ns plus the processor's response to /DTACK</td>
+            </tr>
+            <tr>
+              <td><code>MEMW*</code> pulse width</td>
+              <td>3 MCLK, 72.9 ns</td>
+              <td>209.5 ns plus the processor's response to /DTACK</td>
+            </tr>
+            <tr>
+              <td>Data delay from <code>IOR*</code> active</td>
+              <td>60 ns maximum</td>
+              <td>209.5 ns available before completion</td>
+            </tr>
+            <tr>
+              <td>Data delay from <code>IOCHRDY</code> active</td>
+              <td>15 ns maximum</td>
+              <td>Two synchronizer clocks, 139.7 ns</td>
+            </tr>
+            <tr>
+              <td><code>IOW*</code> inactive to any command active</td>
+              <td>80 ns minimum</td>
+              <td>
+                239.5 ns, from one processor clock of AS_n high plus two adapter
+                clocks
+              </td>
+            </tr>
+            <tr>
+              <td><code>MEMW*</code> inactive to next <code>MEMW*</code></td>
+              <td>3 MCLK, 72.9 ns</td>
+              <td>239.5 ns</td>
+            </tr>
+            <tr>
+              <td>Data hold from <code>IOW*</code> inactive</td>
+              <td>10 ns minimum</td>
+              <td>
+                The MC68EC000 holds write data past AS_n negation into the next
+                cycle
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>MEMR*</code> or <code>MEMW*</code> active to
+                <code>IOCHRDY</code> low
+              </td>
+              <td>28 ns maximum</td>
+              <td>
+                69.8 ns before the first synchronizer sample, leaving 41.8 ns of
+                setup
+              </td>
+            </tr>
+            <tr>
+              <td><code>RESET</code> pulse width</td>
+              <td>12 MCLK, 291.5 ns</td>
+              <td>About 12.4 us from a processor RESET instruction</td>
+            </tr>
+            <tr>
+              <td><code>RESET</code> low to first <code>IOW*</code></td>
+              <td>12 MCLK, 291.5 ns</td>
+              <td>Firmware contract item 1</td>
+            </tr>
+            <tr>
+              <td>CF1 strap setup and hold around falling RESET</td>
+              <td>2 ns and 25 ns</td>
+              <td>Static resistors</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Completion Release</h3>
+        <p>
+          The MC68EC000FN10 requires <code>/DTACK</code> to negate within 110 ns
+          of <code>AS_n</code> or the data strobes negating.
+          <code>VGA_DTACK_n</code> releases through one SN74F04N inverter and
+          one SN74F00N NAND driven directly from <code>AS_n</code>, so the path
+          is two FAST gate delays and does not wait for the shift register to
+          clear.
+        </p>
+        <pre><code>U_VGA_INV SN74F04, tPHL      5.3 ns maximum
+U_VGA_NAND_B SN74F00, tPLH   6.0 ns maximum
+group SN74F21, tPLH          5.3 ns maximum
+final SN74F21, tPLH          5.3 ns maximum
+timeout-mask SN74F32, tPLH   6.6 ns maximum
+------------------------------------------------
+component total             28.5 ns
+MC68EC000 limit            110.0 ns
+board allowance             81.5 ns</code></pre>
+
+        <h3>Cycle Length</h3>
+        <p>
+          Completion arrives 349.2 ns after <code>VGA_CYCLE</code> asserts.
+          <code>VGA_CYCLE</code> is not phase-aligned with
+          <code>VGA_CLK_14</code>, so the first clock edge falls anywhere in one
+          period and completion lands between 349.2 ns and 419.0 ns after the
+          qualifying strobe.
+        </p>
+        <p>
+          The MC68EC000 tests <code>/DTACK</code> at the falling edge of S4 and
+          again once per clock period after that, needing 20 ns of setup. At 10
+          MHz the decision points fall 80, 180, 280, 380, and 480 ns after
+          <code>AS_n</code>. A register access therefore takes three or four
+          wait states, for a 500 to 600 ns cycle. Confirm the count on the
+          assembled board.
+        </p>
+        <p>
+          A display-memory access adds however long the controller holds
+          <code>IOCHRDY</code> low, which depends on the video mode and on
+          contention with screen refresh, plus two synchronizer clocks. The
+          motherboard's minimum 51.1 us timeout bounds it.
+        </p>
+
+        <h3>Loading</h3>
+        <p>
+          The CL-GD5428 specifies 10 pF maximum input and output capacitance. It
+          adds one input to each of <code>A23..A1</code>, <code>UDS_n</code>,
+          and <code>LDS_n</code>, and one bidirectional pin to each of
+          <code>D15..D0</code>. Its <code>SD15..SD8</code> pins carry internal
+          pull-ups, which appear on CPU <code>D7..D0</code> after the lane
+          crossing. Recount the address, data, <code>AS_n</code>, and
+          data-strobe capacitance with these loads included when the board is
+          routed.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Static voltage margins
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Driver to receiver</th>
+              <th scope="col">Driver VOH / VOL</th>
+              <th scope="col">Receiver VIH / VIL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>MC68EC000 to CL-GD5428</td>
+              <td>4.00 V / 0.50 V</td>
+              <td>2.0 V / 0.8 V</td>
+            </tr>
+            <tr>
+              <td>CL-GD5428 to MC68EC000 or FAST</td>
+              <td>2.40 V at 400 uA / 0.50 V at 4 mA</td>
+              <td>2.0 V / 0.8 V</td>
+            </tr>
+            <tr>
+              <td>FAST to CL-GD5428</td>
+              <td>2.5 V / 0.5 V</td>
+              <td>2.0 V / 0.8 V</td>
+            </tr>
+            <tr>
+              <td>SG-51P to CL-GD5428 <code>OSC</code></td>
+              <td>4.6 V / 0.4 V</td>
+              <td>2.0 V / 0.8 V</td>
+            </tr>
+            <tr>
+              <td>CL-GD5428 <code>VSYNC</code> to MC68901 GPIP2</td>
+              <td>2.40 V / 0.50 V</td>
+              <td>2.0 V / 0.8 V</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The controller-to-processor high margin is 0.40 V at its rated 400 uA
+          source current, matching the firmware ROM case. Include every disabled
+          output, receiver, and pull resistor when calculating load on the
+          shared data bus.
+        </p>
+
+        <h3>Supply Current</h3>
+        <p>
+          The CL-GD5428 draws 260 mA at an 80 MHz video clock and a 50 MHz
+          memory clock, and dissipates up to 1.5 W. Four 256K x 16 DRAMs, one
+          SG-51P at 23 mA, and ten logic packages add to that. Fold the total
+          into the board supply budget before layout.
+        </p>
+      </section>
+
+      <section id="parts">
+        <h2>15. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Video subsystem integrated circuits
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_VGA</code></td>
+              <td>CL-GD5428-80QC-A</td>
+              <td>VGA controller, 160-pin PQFP.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_VRAM0..3</code></td>
+              <td>4 x HM514260-70 or equivalent</td>
+              <td>
+                256K x 16 FPM DRAM with separate lower and upper
+                <code>CAS*</code>, one <code>WE*</code>, one <code>OE*</code>,
+                nine symmetric address inputs, and 70 ns row access. 2 MiB
+                total.
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_CFG</code></td>
+              <td>NM93C46N</td>
+              <td>Configuration EEPROM, 64 x 16, 8-pin PDIP.</td>
+            </tr>
+            <tr>
+              <td><code>Y_VGA_CLK</code></td>
+              <td>SG-51P, 14.31818 MHz, C grade</td>
+              <td>Dedicated synthesizer reference.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_SEQ</code></td>
+              <td>CD74HCT164E</td>
+              <td>Adapter sequencer.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_SYNC</code></td>
+              <td>SN74HCT74N</td>
+              <td><code>IOCHRDY</code> synchronizer.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_INV</code>, <code>U_VGA_INV_B</code></td>
+              <td>2 x SN74F04N</td>
+              <td>Select inversion, BALE, reset polarity, clock buffer.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_OR</code></td>
+              <td>SN74F32N</td>
+              <td>Completion combination.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_AND_A</code>, <code>U_VGA_AND_B</code></td>
+              <td>2 x SN74F08N</td>
+              <td>Cycle, direction, and completion terms.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_NOR</code></td>
+              <td>SN74F02N</td>
+              <td>Cycle qualification.</td>
+            </tr>
+            <tr>
+              <td><code>U_VGA_NAND</code>, <code>U_VGA_NAND_B</code></td>
+              <td>2 x SN74F00N</td>
+              <td>Command strobes and completion.</td>
+            </tr>
+            <tr>
+              <td><code>Q_VGA_IREF</code></td>
+              <td>2N3904</td>
+              <td>DAC reference current sink.</td>
+            </tr>
+            <tr>
+              <td><code>D_VGA_REF</code></td>
+              <td>TL431</td>
+              <td>2.495 V shunt reference for the current sink.</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Video subsystem passives and connector
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Value</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>J_VGA</code></td>
+              <td>DE-15 receptacle</td>
+              <td>Monitor output at the board edge.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_CLK</code></td>
+              <td>33 ohms</td>
+              <td>Oscillator source-series termination.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_CF12</code>, <code>R_VGA_CF9</code></td>
+              <td>2 x 6.8 kohms</td>
+              <td>CF1 straps on <code>MD28</code> and <code>MD25</code>.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_RDY</code></td>
+              <td>1 kohm</td>
+              <td><code>IOCHRDY</code> pull-up.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>R_VGA_TWR</code>, <code>R_VGA_EDCLK</code>,
+                <code>R_VGA_ESYNC</code>, <code>R_VGA_EVIDEO</code>,
+                <code>R_VGA_EEDI</code>
+              </td>
+              <td>5 x 10 kohms</td>
+              <td>
+                Test-mode defeat, dot-clock direction, and the three
+                configuration EEPROM lines.
+              </td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_REF</code></td>
+              <td>1.5 kohms</td>
+              <td>TL431 cathode current, 1.67 mA.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_IREF</code></td>
+              <td>270 ohms, 1 percent</td>
+              <td>Sets the 6.6 mA DAC reference.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_RED</code> and two more</td>
+              <td>3 x 150 ohms</td>
+              <td>Analog output source loads at the controller pins.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_AVDD1</code>, <code>R_VGA_AVDD4</code></td>
+              <td>2 x 33 ohms</td>
+              <td>Synthesizer supply filters.</td>
+            </tr>
+            <tr>
+              <td><code>R_VGA_VFILT</code>, <code>R_VGA_MFILT</code></td>
+              <td>2 x 75 ohms</td>
+              <td>Synthesizer loop filter series resistors.</td>
+            </tr>
+            <tr>
+              <td>Loop filter capacitors</td>
+              <td>2 x 2.2 uF, 2 x 0.1 uF</td>
+              <td>
+                Video and memory loop filters, returned to
+                <code>AVSS1</code> and <code>AVSS4</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Synthesizer supply capacitors</td>
+              <td>2 x 10 uF, 1 x 0.1 uF</td>
+              <td><code>AVDD1</code> and <code>AVDD4</code> bypassing.</td>
+            </tr>
+            <tr>
+              <td>Analog pi filters</td>
+              <td>6 x 47 pF, 3 ferrite beads</td>
+              <td>RGB emission filtering between the controller and J_VGA.</td>
+            </tr>
+            <tr>
+              <td><code>C_VGA_REF</code></td>
+              <td>0.1 uF</td>
+              <td>TL431 cathode bypass.</td>
+            </tr>
+            <tr>
+              <td>Digital bypass capacitors</td>
+              <td>7 x 0.1 uF at U_VGA, plus one per other package</td>
+              <td>Supply decoupling.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="layout">
+        <h2>16. Board Layout</h2>
+        <ul>
+          <li>
+            Place the CL-GD5428 160-pin PQFP footprint and the four DRAM
+            footprints on the board. Mark pin 1 on copper and silkscreen for
+            each.
+          </li>
+          <li>
+            Follow the TRM placement order of controller, then display memory,
+            keeping the display-memory bus short and matched across the four
+            devices.
+          </li>
+          <li>
+            Keep <code>OSC</code> at pin 159 and <code>RESET</code> at pin 41 as
+            short as the layout allows, and route them away from the
+            display-memory bus.
+          </li>
+          <li>
+            Place R_VGA_CLK at the oscillator output and Y_VGA_CLK beside the
+            controller.
+          </li>
+          <li>
+            Place the <code>VFILTER</code> and <code>MFILTER</code> networks
+            against pins 65 and 155, with the series resistor and the input
+            capacitor closest to the pin. Lay out the video filter so it accepts
+            either N-WELL or P-WELL capacitor polarity, and populate the N-WELL
+            arrangement.
+          </li>
+          <li>
+            Place the two 6.8 kohm CF1 straps at controller pins 100 and 104,
+            away from DRAM data stubs.
+          </li>
+          <li>
+            Place the 150 ohm source resistors against controller pins 75, 76,
+            and 77, then the pi filters, then J_VGA.
+          </li>
+          <li>
+            Isolate the connector chassis ground plane from digital ground and
+            join it only at the J_VGA mounting holes.
+          </li>
+          <li>
+            Keep the IREF reference circuit and its bypass away from the
+            display-memory bus and the DAC outputs.
+          </li>
+          <li>
+            Choose the J_VGA board-edge position and the exact receptacle part,
+            and label the connector.
+          </li>
+          <li>
+            Give each of the seven <code>VDD</code> pins its own 0.1 uF bypass
+            at the pin and connect all thirteen <code>VSS</code> pins directly
+            to the ground plane.
+          </li>
+          <li>
+            Isolate <code>RESET</code> and <code>IOCHRDY</code> from the
+            high-speed data lines with a ground trace.
+          </li>
+          <li>
+            Measure <code>VGA_CLK_14</code> at controller pin 159 and confirm
+            frequency within 100 parts per million and duty cycle between 40 and
+            60 percent, both of which sit exactly at the controller's limit.
+          </li>
+          <li>
+            Measure <code>BALE</code>, all four command strobes,
+            <code>IOCHRDY</code>, and <code>VGA_DTACK_n</code> at their
+            receiving pins. Keep the routed <code>VGA_DTACK_n</code> release
+            contribution below 81.5 ns.
+          </li>
+          <li>
+            Measure MCLK jitter and all four DRAM strobes at the DRAM pins,
+            since the memory loop filter values are inferred from the video
+            filter.
+          </li>
+          <li>
+            Include the CL-GD5428 in the address, data, and data-strobe
+            capacitance budgets.
+          </li>
+          <li>
+            Add the video subsystem to the +5 V supply budget, including the 260
+            mA controller rating.
+          </li>
+          <li>
+            Measure peak white at J_VGA pins 1, 2, and 3 with a monitor
+            connected and adjust R_VGA_IREF if it falls outside 0.7 V by more
+            than the monitor tolerates.
+          </li>
+        </ul>
+      </section>
+
+      <section id="acceptance">
+        <h2>17. Assembled-System Acceptance</h2>
+        <ol>
+          <li>
+            With the board reset and no firmware writes, confirm
+            <code>VGA_RESET</code> follows <code>PERIPH_RESET_n</code> and that
+            <code>MD28</code> and <code>MD25</code> sit below 0.8 V while
+            <code>RESET</code> falls.
+          </li>
+          <li>
+            Read <code>CR27</code>, the ID register, through
+            <code>$E603D4</code> and <code>$E603D5</code> and confirm the
+            controller answers.
+          </li>
+          <li>
+            Write and read back a scratch pad register, <code>SR9</code> at
+            <code>$E603C4</code> and <code>$E603C5</code>, after unlocking with
+            <code>SR6 = $12</code>. Confirm the byte survives.
+          </li>
+          <li>
+            Confirm a read of <code>$800000</code> before linear addressing is
+            enabled returns without asserting <code>/BERR</code>, then enable
+            <code>GRB[5]</code> and <code>SR7[7:4]</code> and confirm the same
+            address now stores and returns a written pattern.
+          </li>
+          <li>
+            Write a unique byte to the first and last address of each 256 KiB
+            block across <code>$800000-$9FFFFF</code> and read them all back.
+            Every location must be distinct, which proves the full 2 MiB is
+            present and unaliased.
+          </li>
+          <li>
+            Write a word to display memory and read back both bytes
+            individually. Confirm the even byte matches <code>D15..D8</code> of
+            the word and the odd byte matches <code>D7..D0</code>.
+          </li>
+          <li>
+            Capture <code>IOCHRDY</code> and <code>VGA_DTACK_n</code> during a
+            display-memory read and confirm completion follows the rising
+            <code>IOCHRDY</code> edge by two adapter clocks.
+          </li>
+          <li>
+            Confirm <code>VGA_DTACK_n</code> releases within 110 ns of
+            <code>AS_n</code> rising.
+          </li>
+          <li>
+            Write a configuration EEPROM word and read it back after a power
+            cycle. Confirm the display stays lit and the MFP keeps receiving
+            GPIP2 edges throughout the transfer.
+          </li>
+          <li>
+            Enable the vertical retrace interrupt at the MFP and count edges on
+            GPIP2. The rate must match the programmed vertical frequency.
+          </li>
+          <li>
+            Issue a processor RESET instruction and confirm the controller
+            blanks, re-latches CF1, and comes back after firmware repeats its
+            initialization.
+          </li>
+          <li>
+            Display a full-screen white field and measure the analog outputs at
+            the connector with a monitor attached.
+          </li>
+          <li>
+            Run the board for an hour at the highest mode firmware supports and
+            confirm the display memory still passes the pattern test.
+          </li>
+        </ol>
+      </section>
+
+      <section id="signals">
+        <h2>18. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Signals owned by this page
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Active level</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>VGA_ACK_READY</code></td>
+              <td>High</td>
+              <td>Either completion term is satisfied.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_AS_ACTIVE</code></td>
+              <td>High</td>
+              <td>Inverted <code>AS_n</code>; holds adapter state.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_BALE</code></td>
+              <td>High</td>
+              <td>Controller address latch transparent; falls at QA.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_CLK_14</code></td>
+              <td>Clock</td>
+              <td>Buffered 14.31818 MHz adapter clock.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_CYCLE</code></td>
+              <td>High</td>
+              <td>
+                A selected video access with at least one byte strobe active.
+              </td>
+            </tr>
+            <tr>
+              <td><code>VGA_DS_n</code></td>
+              <td>Low</td>
+              <td>At least one MC68EC000 data strobe is active.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_DTACK_n</code></td>
+              <td>Low</td>
+              <td>
+                Completion into the <code>U_DTACK_A</code> acknowledgement
+                stage.
+              </td>
+            </tr>
+            <tr>
+              <td><code>VGA_IO_DONE</code></td>
+              <td>High</td>
+              <td>Register access has reached QE.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_IO_SEL</code></td>
+              <td>High</td>
+              <td>Inverted <code>IO3_n</code>.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_IOR_n</code>, <code>VGA_IOW_n</code></td>
+              <td>Low</td>
+              <td>Controller I/O read and write strobes.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_MEM_DONE</code></td>
+              <td>High</td>
+              <td>Display-memory access has reached QE with ready high.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_MEM_SEL</code></td>
+              <td>High</td>
+              <td>Inverted <code>VGA_MEM_n</code>.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_MEMR_n</code>, <code>VGA_MEMW_n</code></td>
+              <td>Low</td>
+              <td>Controller memory read and write strobes.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_QE_MEM</code></td>
+              <td>High</td>
+              <td>Display-memory access has reached QE.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_RD</code>, <code>VGA_WR</code></td>
+              <td>High</td>
+              <td>Strobe phase reached with the matching direction.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_READY</code></td>
+              <td>High</td>
+              <td>Synchronized <code>IOCHRDY</code>.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_RESET</code></td>
+              <td>High</td>
+              <td>Controller reset; inverted peripheral reset.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_RW_n</code></td>
+              <td>High on write</td>
+              <td>Inverted <code>R/W</code>.</td>
+            </tr>
+            <tr>
+              <td><code>VGA_SEL_n</code></td>
+              <td>Low</td>
+              <td>
+                Either <code>VGA_MEM_n</code> or <code>IO3_n</code> is active.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources">
+        <h2>19. Sources</h2>
+        <ul>
+          <li>
+            Cirrus Logic,
+            <a href="datasheets/CL-GD5428.pdf"
+              ><cite
+                >CL-GD542X True Color VGA Family Preliminary Data Book, version
+                7.0</cite
+              ></a
+            >. Pin diagram and descriptions, ISA host timing, configuration
+            register CF1, DC specifications, reset timing, and the VGA register
+            port map.
+          </li>
+          <li>
+            Cirrus Logic,
+            <a href="datasheets/CL-GD542X-TRM.pdf"
+              ><cite>CL-GD542X Technical Reference Manual</cite></a
+            >. Extension register definitions for <code>SR6</code>,
+            <code>SR7</code>, <code>SR8</code>, <code>SR1F</code>, and
+            <code>GRB</code>; appendix B1 for the ISA reference design and the
+            IREF circuit; appendix B7 for display-memory configurations;
+            appendix B8 and B19 for MCLK selection and DRAM timing; appendix B10
+            for layout; appendix B15 for the configuration EEPROM; and appendix
+            B17 for the N-WELL video clock filter.
+          </li>
+          <li>
+            Epson,
+            <a href="datasheets/SG-615_531_51_Series_DS.pdf"
+              ><cite>SG-615, SG-531, and SG-51 Series</cite></a
+            >. Reference oscillator frequency tolerance, symmetry, output
+            levels, and load conditions.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/tl431.pdf"
+              ><cite>TL431 Precision Programmable Reference</cite></a
+            >. Reference voltage and minimum cathode current for the DAC current
+            sink.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/cd74hc164.pdf"><cite>CD74HCT164</cite></a
+            >, <a href="datasheets/sn74hct74.pdf"><cite>SN74HCT74</cite></a
+            >, and the local FAST logic data sheets (<a
+              href="datasheets/sn74f00.pdf"
+              >F00</a
+            >, <a href="datasheets/sn74f02.pdf">F02</a>,
+            <a href="datasheets/sn74f04.pdf">F04</a>,
+            <a href="datasheets/sn74f08.pdf">F08</a>,
+            <a href="datasheets/sn74f32.pdf">F32</a>). Adapter pinouts,
+            thresholds, and propagation delays.
+          </li>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >. Byte-lane selection, read and write cycle timing, and
+            <code>/DTACK</code> negation requirements.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

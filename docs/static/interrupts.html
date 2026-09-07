@@ -1,0 +1,1755 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - Interrupts, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Interrupts</h1>
+      <p>
+        Interrupt priority, acknowledge, autovector and vector generation, and
+        spurious-interrupt termination for the MC68EC000.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; the MC68901 acknowledge latency and
+          the worked termination budgets remain board measurements
+        </dd>
+        <dt>Scope</dt>
+        <dd>
+          The CPU-facing interrupt hardware: priority encoding onto
+          <code>/IPL2../IPL0</code>, acknowledge-cycle decode, autovector and
+          MFP-vectored termination, spurious-interrupt handling, and the wiring
+          from each peripheral interrupt output to that hardware.
+        </dd>
+        <dt>CPU boundary</dt>
+        <dd>
+          Interrupt acknowledge is a CPU-space cycle. It bypasses normal
+          decoding and the motherboard bus timeout, so this logic terminates
+          every acknowledge itself. See
+          <a href="bus-and-decode.html">Bus and Decode</a>.
+        </dd>
+        <dt>Primary controller</dt>
+        <dd>
+          MC68901 MFP, vectored, at CPU level 6. Levels 3 and 7 are
+          autovectored; levels 1, 2, 4, and 5 are unwired and reach the spurious
+          path. See <a href="mfp.html">MFP</a>.
+        </dd>
+      </dl>
+    </header>
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#purpose-and-scope">Purpose and Scope</a></li>
+        <li><a href="#cpu-interrupt-model">MC68EC000 Interrupt Model</a></li>
+        <li><a href="#architecture">Architecture Overview</a></li>
+        <li><a href="#level-assignment">Interrupt Level Assignment</a></li>
+        <li>
+          <a href="#ipl-generation">Priority Encoding and /IPL Generation</a>
+        </li>
+        <li><a href="#iack-decode">Interrupt Acknowledge Decode</a></li>
+        <li><a href="#autovector">Autovector Generation</a></li>
+        <li><a href="#mfp-vectored">MFP Vectored Acknowledge</a></li>
+        <li><a href="#source-routing">Peripheral Source Routing</a></li>
+        <li>
+          <a href="#spurious">Spurious and Phantom Acknowledge Termination</a>
+        </li>
+        <li><a href="#nmi">NMI and Level 7</a></li>
+        <li><a href="#reset-behavior">Reset Behavior</a></li>
+        <li><a href="#acknowledge-timing">Acknowledge Timing</a></li>
+        <li><a href="#motherboard-integration">Motherboard Integration</a></li>
+        <li><a href="#package-pin-map">Package and Pin Map</a></li>
+        <li><a href="#electrical-fanout">Electrical and Fanout</a></li>
+        <li><a href="#design-notes">Design Notes</a></li>
+        <li>
+          <a href="#internal-signal-reference">Internal Signal Reference</a>
+        </li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+    <main>
+      <section id="purpose-and-scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          This document defines how the motherboard presents interrupt requests
+          to the MC68EC000 and how it terminates the processor's
+          interrupt-acknowledge cycle. It covers priority encoding onto
+          <code>/IPL2../IPL0</code>, acknowledge-cycle decode, autovector
+          generation, the MC68901 MFP vectored acknowledge, routing of
+          peripheral interrupt outputs, and spurious-interrupt handling.
+        </p>
+        <p>
+          Device register maps, internal interrupt-enable and mask registers,
+          and adapter timing stay in the individual device documents. This page
+          owns only the CPU-facing interrupt hardware and the wiring between the
+          devices' interrupt outputs and that hardware.
+        </p>
+        <p>
+          A signal ending in <code>_n</code>, or written with a leading slash,
+          is active low: 0 means asserted and 1 means inactive. Interrupt
+          <em>levels</em> are the processor priority levels 1 through 7.
+        </p>
+        <p>Inputs this page takes from other documents:</p>
+        <pre><code>CPU_SPACE      active-high CPU-space decode      Bus and Decode (U_AND)
+AS_n           processor address strobe          MC68EC000
+A1, A2, A3     acknowledged interrupt level      MC68EC000
+A16..A19       CPU-space type field (all high)   MC68EC000
+INT_CLK        buffered 10 MHz, spare U_DRAM_CLK_BUF channel   DRAM
+RESET_n        conditioned board reset           Clock and Reset
+PERIPH_RESET_n processor-honoring peripheral reset             Clock and Reset
+D7..D0         lower data byte, vector transfer  MC68EC000</code></pre>
+        <p>Outputs this page drives:</p>
+        <pre><code>/IPL2, /IPL1, /IPL0   encoded interrupt priority    MC68EC000 inputs
+/AVEC                 autovector request           MC68EC000 input
+INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code></pre>
+      </section>
+
+      <section id="cpu-interrupt-model">
+        <h2>2. MC68EC000 Interrupt Model</h2>
+        <p>
+          The processor samples three encoded priority inputs and compares the
+          requested level against the interrupt mask in the status register. A
+          request at a level above the mask starts exception processing at an
+          instruction boundary. Level 7 is compared as an edge and cannot be
+          masked.
+        </p>
+
+        <h3>Priority Encoding</h3>
+        <p>
+          <code>/IPL2../IPL0</code> carry the requested level as the one's
+          complement of the binary level number, with <code>/IPL2</code> most
+          significant. All three high means no request.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            /IPL encoding
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">/IPL2</th>
+              <th scope="col">/IPL1</th>
+              <th scope="col">/IPL0</th>
+              <th scope="col">Requested level</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>1</td>
+              <td>1</td>
+              <td>0 (no request)</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>1</td>
+              <td>0</td>
+              <td>1</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>0</td>
+              <td>1</td>
+              <td>2</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>0</td>
+              <td>0</td>
+              <td>3</td>
+            </tr>
+            <tr>
+              <td>0</td>
+              <td>1</td>
+              <td>1</td>
+              <td>4</td>
+            </tr>
+            <tr>
+              <td>0</td>
+              <td>1</td>
+              <td>0</td>
+              <td>5</td>
+            </tr>
+            <tr>
+              <td>0</td>
+              <td>0</td>
+              <td>1</td>
+              <td>6</td>
+            </tr>
+            <tr>
+              <td>0</td>
+              <td>0</td>
+              <td>0</td>
+              <td>7 (non-maskable)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          A request must stay asserted until the processor acknowledges it. The
+          interrupt sources used here are level-held until their controller is
+          serviced, which satisfies this rule.
+        </p>
+
+        <h3>Acknowledge Cycle</h3>
+        <p>
+          When the processor grants an interrupt it runs a CPU-space read cycle:
+          <code>FC2..FC0 = 111</code>, <code>A19..A16 = 1111</code>, all other
+          address lines high, and <code>A3..A1</code> holding the level being
+          acknowledged. The cycle ends one of three ways.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Acknowledge-cycle terminations
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Termination</th>
+              <th scope="col">Responder action</th>
+              <th scope="col">Vector used</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Vectored</td>
+              <td>
+                Device drives the vector number on <code>D7..D0</code> and
+                asserts <code>/DTACK</code>
+              </td>
+              <td>The byte the device supplied</td>
+            </tr>
+            <tr>
+              <td>Autovectored</td>
+              <td>
+                Motherboard asserts <code>/AVEC</code>; no device drives the
+                data bus
+              </td>
+              <td>
+                <code>$18 + level</code> (25 through 31), generated inside the
+                CPU
+              </td>
+            </tr>
+            <tr>
+              <td>Spurious</td>
+              <td>No responder; motherboard asserts <code>/BERR</code></td>
+              <td>24 (<code>$18</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>/DTACK</code> and <code>/AVEC</code> must never be asserted in
+          the same acknowledge cycle.
+        </p>
+
+        <h3>Vector Address Table</h3>
+        <p>
+          A vector number is multiplied by four to form the exception-vector
+          address. After the boot overlay is disabled the vector table lives in
+          DRAM bank 0; see <a href="memory-map.html">Memory Map</a> and
+          <a href="firmware-rom.html#boot-vector-verification">Firmware ROM</a>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Interrupt-related exception vectors
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Vector number</th>
+              <th scope="col">Address</th>
+              <th scope="col">Assignment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>24 (<code>$18</code>)</td>
+              <td><code>$000060</code></td>
+              <td>Spurious interrupt</td>
+            </tr>
+            <tr>
+              <td>25 (<code>$19</code>)</td>
+              <td><code>$000064</code></td>
+              <td>Level 1 autovector</td>
+            </tr>
+            <tr>
+              <td>26 (<code>$1A</code>)</td>
+              <td><code>$000068</code></td>
+              <td>Level 2 autovector</td>
+            </tr>
+            <tr>
+              <td>27 (<code>$1B</code>)</td>
+              <td><code>$00006C</code></td>
+              <td>Level 3 autovector</td>
+            </tr>
+            <tr>
+              <td>28 (<code>$1C</code>)</td>
+              <td><code>$000070</code></td>
+              <td>Level 4 autovector</td>
+            </tr>
+            <tr>
+              <td>29 (<code>$1D</code>)</td>
+              <td><code>$000074</code></td>
+              <td>Level 5 autovector</td>
+            </tr>
+            <tr>
+              <td>30 (<code>$1E</code>)</td>
+              <td><code>$000078</code></td>
+              <td>Level 6 autovector (unused; MFP is vectored)</td>
+            </tr>
+            <tr>
+              <td>31 (<code>$1F</code>)</td>
+              <td><code>$00007C</code></td>
+              <td>Level 7 autovector</td>
+            </tr>
+            <tr>
+              <td>64-255</td>
+              <td><code>$000100</code>-<code>$0003FF</code></td>
+              <td>User interrupt vectors, including the MFP block</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Source:
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, sections 5.1.4, 6.2, and 6.3.4</a
+          >.
+        </p>
+      </section>
+
+      <section id="architecture">
+        <h2>3. Architecture Overview</h2>
+        <p>
+          One device, the MC68901 MFP, acts as the system interrupt controller.
+          It has sixteen internal channels with their own priority, enable,
+          mask, pending, and in-service registers, and it produces a full vector
+          number during its acknowledge cycle. Slow or infrequent peripheral
+          interrupts feed the MFP's general-purpose I/O interrupt inputs rather
+          than consuming a processor level.
+        </p>
+        <p>
+          Only two other processor levels are used: level 3 for the
+          expansion-bus request and level 7 for the manual non-maskable
+          interrupt. Both are autovectored and served by reading device status
+          in software. Levels 1, 2, 4, and 5 carry no source.
+        </p>
+        <pre><code>            MFP /IRQ ---------------------+
+ EXP_IRQ_n --------------------------+     |
+ NMI_n -----------------------+      |     |
+                              |      |     |
+              level 7 --------+      |     |
+              level 3 ---------------+     |
+              level 6 ---------------------+
+                              |      |     |
+                              v      v     v
+                        +--------------------------+
+                        |  U_IPL_ENC   74LS148     |   I1..I7 = levels
+                        +------------+-------------+
+                                     | A2..A0
+                                     v
+                        +--------------------------+
+                        |  U_IPL_SYNC  74LS174 x2  |   two stages on INT_CLK
+                        +------------+-------------+
+                                     v
+                        /IPL2  /IPL1  /IPL0  ->  MC68EC000
+
+ CPU_SPACE, AS_n, A16..A19 --> IACK qualifier --> U_IACK_DEC 74HCT138
+                                                   |  IACK_L1_n .. IACK_L7_n
+                    +------------------------------+------------------+
+                    v                              v                  v
+           autovector OR (U_AVEC_OR)      IACK_L6_n -> MFP /IACK   watchdog
+                    |                              |  MFP D7..D0 + /DTACK   (U_INT_WDOG)
+                    v                              v                  v
+                  /AVEC -> CPU               MFP_DTACK_n         INT_BERR_n
+                                             -> completion tree  -> CPU /BERR
+
+ INT_CLK = spare U_DRAM_CLK_BUF channel off DRAM_CLK_10 (see dram.html)</code></pre>
+      </section>
+
+      <section id="level-assignment">
+        <h2>4. Interrupt Level Assignment</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Processor interrupt levels
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Level</th>
+              <th scope="col">Source</th>
+              <th scope="col">Acknowledge</th>
+              <th scope="col">Vector</th>
+              <th scope="col">Encoder input</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>7</td>
+              <td>Manual NMI button <code>NMI_n</code></td>
+              <td>Autovector</td>
+              <td>31; address <code>$00007C</code></td>
+              <td><code>/I7</code></td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>MC68901 MFP <code>MFP_IRQ_n</code></td>
+              <td>Vectored by the MFP</td>
+              <td>Vector register base + channel</td>
+              <td><code>/I6</code></td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>None</td>
+              <td>Spurious</td>
+              <td>24; address <code>$000060</code></td>
+              <td><code>/I5</code> tied to +5 V</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>None</td>
+              <td>Spurious</td>
+              <td>24; address <code>$000060</code></td>
+              <td><code>/I4</code> tied to +5 V</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Expansion connector <code>EXP_IRQ_n</code></td>
+              <td>Autovector</td>
+              <td>27; address <code>$00006C</code></td>
+              <td><code>/I3</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>None</td>
+              <td>Spurious</td>
+              <td>24; address <code>$000060</code></td>
+              <td><code>/I2</code> tied to +5 V</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>None</td>
+              <td>Spurious</td>
+              <td>24; address <code>$000060</code></td>
+              <td><code>/I1</code> tied to +5 V</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Sources folded into the MFP instead of a processor level: the
+          <a href="floppy.html">82077AA-1</a> floppy <code>INT</code>, the
+          <a href="midi.html">MC6850</a> MIDI <code>/IRQ</code>, and the
+          <a href="rtc.html">DS1285</a> RTC <code>/IRQ</code>. They use GPIP5,
+          GPIP4, and GPIP3 respectively. See
+          <a href="mfp.html#interrupts">the MFP channel map</a> and
+          <a href="#source-routing">section 9</a>.
+        </p>
+        <p>
+          The video controller has no processor-level interrupt. MFP Timer C
+          generates the nominal 100 Hz system tick, and the CL-GD5428
+          <code>VSYNC</code> output connects to MFP GPIP2. Both inherit the
+          MFP's masking and vectoring.
+        </p>
+      </section>
+
+      <section id="ipl-generation">
+        <h2>5. Priority Encoding and /IPL Generation</h2>
+        <p>
+          <code>U_IPL_ENC</code>, a <code>SN74LS148</code> 8-line-to-3-line
+          priority encoder, converts up to seven level requests into the
+          <code>/IPL</code> code. Its active-low outputs already carry the one's
+          complement of the highest requested input, which matches the
+          <code>/IPL</code> encoding directly.
+        </p>
+        <p>
+          The <code>SN74LS148</code> is the practical choice: neither an
+          <code>HCT</code> nor a current <code>HC</code> version of the 148 is
+          available. The LS part is fast and widely stocked. It and the
+          <code>SN74LS174</code> synchronizer that follows are both LS-family,
+          so the encoder outputs drive the register inputs at TTL levels with no
+          translation. Encoder propagation delay does not matter because
+          <code>U_IPL_SYNC</code> reclocks the output.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Priority encoder connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">SN74LS148 signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/EI</code></td>
+              <td>GND</td>
+              <td>Encoder always enabled</td>
+            </tr>
+            <tr>
+              <td><code>/I0</code></td>
+              <td>+5 V</td>
+              <td>Level 0 is "no request"; unused</td>
+            </tr>
+            <tr>
+              <td><code>/I1</code></td>
+              <td>+5 V</td>
+              <td>Level 1 unwired</td>
+            </tr>
+            <tr>
+              <td><code>/I2</code></td>
+              <td>+5 V</td>
+              <td>Level 2 unwired</td>
+            </tr>
+            <tr>
+              <td><code>/I3</code></td>
+              <td><code>IL3_n</code></td>
+              <td>Level 3 request (expansion)</td>
+            </tr>
+            <tr>
+              <td><code>/I4</code></td>
+              <td>+5 V</td>
+              <td>Level 4 unwired</td>
+            </tr>
+            <tr>
+              <td><code>/I5</code></td>
+              <td>+5 V</td>
+              <td>Level 5 unwired</td>
+            </tr>
+            <tr>
+              <td><code>/I6</code></td>
+              <td><code>MFP_IRQ_n</code></td>
+              <td>Level 6 request (MFP)</td>
+            </tr>
+            <tr>
+              <td><code>/I7</code></td>
+              <td><code>NMI_n</code></td>
+              <td>Level 7 request (NMI)</td>
+            </tr>
+            <tr>
+              <td><code>/A2, /A1, /A0</code></td>
+              <td><code>IPL_ENC2..0_n</code></td>
+              <td>Encoded level to the synchronizer</td>
+            </tr>
+            <tr>
+              <td><code>/GS</code>, <code>/EO</code></td>
+              <td>No connection</td>
+              <td>Cascade outputs; a single encoder covers all seven levels</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          An unwired input is tied to +5 V so it never requests. Only
+          <code>/I3</code>, <code>/I6</code>, and <code>/I7</code> take a source
+          in this design; the other four inputs are held inactive.
+        </p>
+
+        <h3>Synchronizer</h3>
+        <p>
+          The encoded outputs are asynchronous to the processor clock because
+          <code>MFP_IRQ_n</code>, <code>EXP_IRQ_n</code>, and the MFP's own
+          wired-OR inputs change at arbitrary times. <code>U_IPL_SYNC</code> is
+          two register stages, one <code>SN74LS174</code> hex D flip-flop per
+          stage using three of six flip-flops, both clocked by
+          <code>INT_CLK</code>. It registers all three encoded bits together so
+          a change near a sampling edge cannot present an inconsistent code.
+        </p>
+        <pre><code>on each rising INT_CLK edge:
+  s1[2:0] &lt;- IPL_ENC2..0_n
+  s2[2:0] &lt;- s1[2:0]
+
+/IPL2../IPL0 = s2[2:0]</code></pre>
+        <p>
+          A held request reaches the processor after at most two
+          <code>INT_CLK</code> periods, far below any interrupt service
+          interval. The level-7 edge is delayed, not lost. The MC68EC000 also
+          samples <code>/IPL</code> over consecutive cycles internally, so a
+          single external stage would deglitch the code; the second stage is
+          margin against metastability propagation and can be dropped after
+          review.
+        </p>
+        <p>
+          <code>INT_CLK</code> is a buffered copy of the 10 MHz processor clock.
+          Any buffered copy works; a direct tap on the processor clock net is a
+          poor choice because that net is usually already near its capacitive
+          budget. This design takes <code>INT_CLK</code> from a spare channel of
+          the DRAM clock buffer; see
+          <a href="dram.html#clock-distribution">dram.html</a> and
+          <a href="#electrical-fanout">section 16</a>. The
+          <code>SN74LS174</code> common clear is tied inactive: clearing would
+          force the encoded code to 000, which is level 7. Instead, two
+          <code>INT_CLK</code> edges after reset release load the true
+          no-request code, which is harmless because the processor mask is 7
+          during that interval.
+        </p>
+      </section>
+
+      <section id="iack-decode">
+        <h2>6. Interrupt Acknowledge Decode</h2>
+        <p>
+          On the MC68EC000 the only CPU-space cycle is an interrupt acknowledge,
+          so <code>CPU_SPACE</code> asserted with <code>AS_n</code>
+          low already identifies an acknowledge. The address type field
+          <code>A19..A16</code> is decoded as well so a future non-acknowledge
+          CPU-space cycle cannot be mistaken for one.
+        </p>
+        <pre><code>IACK_TYPE   = A16 AND A17 AND A18 AND A19        4-input AND
+IACK_ACTIVE = CPU_SPACE AND (NOT AS_n) AND IACK_TYPE
+IACK_n      = NOT IACK_ACTIVE</code></pre>
+        <p>
+          <code>IACK_TYPE</code> uses one gate of a <code>CD74HCT21</code>
+          4-input AND (<code>U_IACK_QUAL</code>); its second gate is spare.
+          <code>IACK_ACTIVE</code> and <code>IACK_n</code> use a
+          <code>SN74HCT08</code> gate and an inverter in
+          <code>U_INT_GATE</code>. Pin-level gate packing is fixed at schematic
+          capture.
+        </p>
+
+        <h3>Level Demultiplex</h3>
+        <p>
+          <code>U_IACK_DEC</code>, a <code>SN74HCT138</code> 3-line-to-8-line
+          decoder, splits the acknowledge into one active-low strobe per level
+          using the level on <code>A3..A1</code>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Acknowledge decoder connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">SN74HCT138 signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>A</code></td>
+              <td>CPU <code>A1</code></td>
+              <td>Level bit 0</td>
+            </tr>
+            <tr>
+              <td><code>B</code></td>
+              <td>CPU <code>A2</code></td>
+              <td>Level bit 1</td>
+            </tr>
+            <tr>
+              <td><code>C</code></td>
+              <td>CPU <code>A3</code></td>
+              <td>Level bit 2</td>
+            </tr>
+            <tr>
+              <td><code>G1</code></td>
+              <td>+5 V</td>
+              <td>Active-high enable</td>
+            </tr>
+            <tr>
+              <td><code>/G2A</code></td>
+              <td><code>IACK_n</code></td>
+              <td>Enable only during an acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/G2B</code></td>
+              <td>GND</td>
+              <td>Second enable held active</td>
+            </tr>
+            <tr>
+              <td><code>/Y1</code></td>
+              <td><code>IACK_L1_n</code></td>
+              <td>Level 1 acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/Y2</code></td>
+              <td><code>IACK_L2_n</code></td>
+              <td>Level 2 acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/Y3</code></td>
+              <td><code>IACK_L3_n</code></td>
+              <td>Level 3 acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/Y4</code></td>
+              <td><code>IACK_L4_n</code></td>
+              <td>Level 4 acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/Y5</code></td>
+              <td><code>IACK_L5_n</code></td>
+              <td>Level 5 acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/Y6</code></td>
+              <td><code>IACK_L6_n</code></td>
+              <td>Level 6 acknowledge to the MFP</td>
+            </tr>
+            <tr>
+              <td><code>/Y7</code></td>
+              <td><code>IACK_L7_n</code></td>
+              <td>Level 7 acknowledge</td>
+            </tr>
+            <tr>
+              <td><code>/Y0</code></td>
+              <td>No connection</td>
+              <td>Level 0 is never acknowledged</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>A0</code> is high during the acknowledge and is not decoded. The
+          decoder mirrors nowhere because it is enabled only by
+          <code>IACK_n</code>.
+        </p>
+      </section>
+
+      <section id="autovector">
+        <h2>7. Autovector Generation</h2>
+        <p>
+          For every level served by autovector, the corresponding
+          <code>IACK_Lx_n</code> strobe drives <code>/AVEC</code> low.
+          <code>U_AVEC_OR</code> combines the active autovector strobes.
+        </p>
+        <pre><code>AVEC_n = IACK_L3_n AND IACK_L7_n
+/AVEC  = AVEC_n</code></pre>
+        <p>
+          The equation is an AND of active-low strobes: either the level-3 or
+          the level-7 acknowledge pulls <code>/AVEC</code> low. Levels 1, 2, 4,
+          and 5 are not included; an acknowledge to any of them falls through to
+          the spurious path in <a href="#spurious">section 10</a>, which treats
+          an unwired level as a hardware fault. <code>U_AVEC_OR</code> is one
+          gate of a <code>SN74HCT08</code> AND package.
+        </p>
+        <p>
+          <code>/AVEC</code> is combinational from the decoder, so it is valid
+          well before the processor samples it at the falling edge of S4. It is
+          released when <code>AS_n</code> negates and the decoder outputs go
+          inactive.
+        </p>
+      </section>
+
+      <section id="mfp-vectored">
+        <h2>8. MFP Vectored Acknowledge</h2>
+        <p>
+          Level 6 belongs to the MC68901 MFP. The MFP holds sixteen prioritized
+          interrupt channels and, during its acknowledge cycle, drives an 8-bit
+          vector number onto <code>D7..D0</code> and asserts its own
+          <code>/DTACK</code>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MFP interrupt-acknowledge connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">MFP signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/IRQ</code></td>
+              <td>
+                <code>MFP_IRQ_n</code> to <code>U_IPL_ENC</code>
+                <code>/I6</code>
+              </td>
+              <td>Open-drain; motherboard pull-up. Active low.</td>
+            </tr>
+            <tr>
+              <td><code>/IACK</code></td>
+              <td><code>IACK_L6_n</code> from <code>U_IACK_DEC</code></td>
+              <td>Asserted only for a level-6 acknowledge.</td>
+            </tr>
+            <tr>
+              <td><code>IEI</code></td>
+              <td>GND</td>
+              <td>
+                The MFP is the only device in the daisy chain, so its
+                priority-in is always enabled.
+              </td>
+            </tr>
+            <tr>
+              <td><code>IEO</code></td>
+              <td>No connection</td>
+              <td>No downstream device.</td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>CPU <code>D7..D0</code></td>
+              <td>
+                Vector number during acknowledge; register data otherwise.
+              </td>
+            </tr>
+            <tr>
+              <td><code>/DTACK</code></td>
+              <td><code>MFP_DTACK_n</code> into the completion tree</td>
+              <td>
+                Asserted for register cycles and for the vectored acknowledge.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The MFP asserts <code>/DTACK</code> both for ordinary register
+          accesses and for the vectored acknowledge. Its physical output is
+          <code>MFP_DTACK_n</code>, one of the normal completion-tree inputs.
+          The tree remains active during CPU space, so the same net terminates a
+          level-6 acknowledge. <code>IO0_n</code> is inactive during CPU space,
+          which keeps <code>/CS</code> high while <code>/IACK</code> is low.
+        </p>
+        <pre><code>MFP /DTACK pin = MFP_DTACK_n -> U_DTACK_A gate 1 -> completion tree
+
+normal register cycle: /CS low, /IACK high
+level-6 acknowledge:   /CS high, /IACK low</code></pre>
+
+        <h3>Vector Register</h3>
+        <p>
+          The MFP vector register holds the upper nibble of the vector; the MFP
+          fills the lower nibble with the channel number during acknowledge, and
+          bit 3 of the register selects software or automatic end-of-interrupt
+          mode. Firmware programs the base to <code>$40</code>, placing the
+          sixteen MFP vectors at numbers <code>$40</code>-<code>$4F</code>
+          (addresses <code>$000100</code>-<code>$00013C</code>), clear of the
+          autovector and processor-defined ranges.
+        </p>
+        <pre><code>MFP vector number = $40 | channel[3:0]</code></pre>
+        <p>
+          The complete channel-to-vector map is in
+          <a href="mfp.html#interrupts">the MFP document</a>.
+        </p>
+      </section>
+
+      <section id="source-routing">
+        <h2>9. Peripheral Source Routing</h2>
+        <p>
+          Peripheral interrupt outputs that do not have their own processor
+          level connect to the MFP's general-purpose interrupt inputs. The MFP
+          gives each one a channel priority, an enable bit, a mask bit, and a
+          vector.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Peripheral interrupt routing
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Source</th>
+              <th scope="col">Output type</th>
+              <th scope="col">Destination</th>
+              <th scope="col">Active edge</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="floppy.html">82077AA-1</a> <code>INT</code></td>
+              <td>Push-pull, active high</td>
+              <td>MFP GPIP5, vector <code>$47</code></td>
+              <td>Rising, set in the MFP active-edge register</td>
+            </tr>
+            <tr>
+              <td><a href="midi.html">MC6850</a> <code>/IRQ</code></td>
+              <td>Open drain, active low</td>
+              <td>MFP GPIP4, vector <code>$46</code>, with pull-up</td>
+              <td>Falling</td>
+            </tr>
+            <tr>
+              <td><a href="rtc.html">DS1285</a> <code>/IRQ</code></td>
+              <td>Open drain, active low</td>
+              <td>MFP GPIP3, vector <code>$43</code>, with pull-up</td>
+              <td>Falling</td>
+            </tr>
+            <tr>
+              <td>CL-GD5428 <code>VSYNC</code></td>
+              <td>Driven output, programmable polarity</td>
+              <td>MFP GPIP2, vector <code>$42</code></td>
+              <td>Either edge, selected in the MFP active-edge register</td>
+            </tr>
+            <tr>
+              <td>
+                <a href="expansion.html">Expansion</a> <code>EXP_IRQ_n</code>
+              </td>
+              <td>Open drain, wired-OR across the two expansion cards</td>
+              <td>Priority encoder <code>/I3</code>, autovectored level 3</td>
+              <td>Level</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Each open-drain interrupt output gets a 4.7 kohm pull-up to +5 V at
+          its receiver. That sinks about 1 mA, within an open-drain output's
+          rating alongside the <code>SN74LS148</code> input current on the
+          encoder lines, and releases quickly given the small wired-OR count.
+          Size the pull-up down toward 3.3 kohm if a line gathers more loads or
+          needs a faster release; confirm the final value against trace
+          capacitance and load count on the assembled board.
+        </p>
+        <p>
+          The MFP general-purpose interrupt inputs sense a programmed edge set
+          in the active-edge register, so a push-pull active-high source and an
+          open-drain active-low source both connect directly with no inverter;
+          firmware sets the matching edge. This is a device-configuration
+          detail; see <a href="mfp.html">mfp.html</a>.
+        </p>
+        <p>
+          The <a href="mfp.html#gpip">MFP GPIP map</a> also assigns GPIP7 and
+          GPIP1 to the PS/2 keyboard, GPIP6 and GPIP0 to RS-232 flow control,
+          and GPIP2 to VGA vertical sync. All eight pins have fixed board
+          connections.
+        </p>
+        <p>
+          The <a href="opl3.html#firmware">YMF262 OPL3</a> does not consume an
+          interrupt input. Firmware reads its timer flags through OPL3 port 0,
+          and the YMF262 <code>/IRQ</code> pin has no board connection.
+        </p>
+      </section>
+
+      <section id="spurious">
+        <h2>10. Spurious and Phantom Acknowledge Termination</h2>
+        <p>
+          The motherboard bus timeout is disabled during CPU space, so an
+          acknowledge cycle that no source terminates would stall the processor
+          forever. This logic terminates every acknowledge that is not answered
+          by <code>/AVEC</code> or <code>MFP_DTACK_n</code>.
+        </p>
+
+        <h3>Unwired Levels</h3>
+        <p>
+          An acknowledge to a level with no source and no autovector wiring
+          (levels 1, 2, 4, and 5) is terminated immediately.
+        </p>
+        <pre><code>UNWIRED_IACK_n = IACK_L1_n AND IACK_L2_n AND IACK_L4_n AND IACK_L5_n</code></pre>
+        <p>
+          <code>UNWIRED_IACK_n</code> is one gate of a <code>CD74HCT21</code>
+          4-input AND. When any of those strobes is low it goes low and drives
+          <code>INT_BERR_n</code> low without waiting.
+        </p>
+
+        <h3>Phantom Acknowledge Watchdog</h3>
+        <p>
+          A wired level can still fail to respond: an interrupt withdrawn after
+          the processor has latched the level, or an MFP caught between states.
+          <code>U_INT_WDOG</code>, a <code>CD74HCT4040E</code> ripple counter,
+          counts <code>INT_CLK</code> edges while an acknowledge is unanswered
+          and asserts <code>INT_BERR_n</code> when the count is reached.
+        </p>
+        <pre><code>ANSWERED       = (NOT AVEC_n) OR (NOT MFP_DTACK_n)   any legitimate termination
+WDOG_COUNT_EN  = IACK_ACTIVE AND AVEC_n AND MFP_DTACK_n
+WDOG_MR        = NOT WDOG_COUNT_EN                   active-high counter reset
+WDOG_TIMEOUT_n = NOT Q5                              Q5 = 32 counted INT_CLK edges
+INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
+        <p>
+          The count is <code>Q5</code>, 32 <code>INT_CLK</code> periods, about
+          3.2 us. That is comfortably past the longest MC68901 acknowledge
+          latency, still about sixteen times shorter than the 51.1 us normal bus
+          timeout, and far below any software concern. If a measured MFP
+          acknowledge is unexpectedly slow, <code>Q6</code> (6.4 us) is the next
+          tap; <code>Q4</code> (1.6 us) is the tighter one.
+        </p>
+        <p>
+          <code>WDOG_COUNT_EN</code> is a three-input AND,
+          <code>WDOG_MR</code> its inversion, and <code>WDOG_TIMEOUT_n</code> an
+          inverter on <code>Q5</code>, all in <code>U_INT_GATE</code>.
+        </p>
+
+        <h3>Motherboard Bus Error</h3>
+        <p>
+          <code>INT_BERR_n</code> is combined with the motherboard
+          <code>TIMEOUT_BERR_n</code> in
+          <a href="bus-and-decode.html#bus-error-and-timeout">Bus and Decode</a
+          >, in a spare gate of the CPU-space AND package:
+        </p>
+        <pre><code>BERR_n = TIMEOUT_BERR_n AND INT_BERR_n</code></pre>
+        <p>
+          Either source pulls the processor <code>/BERR</code> input low. The
+          two are mutually exclusive in time because the bus timeout does not
+          run during CPU space.
+        </p>
+        <p>
+          A spurious termination leaves <code>/HALT</code> inactive, so the
+          processor takes the spurious-interrupt exception (vector 24) rather
+          than a double bus fault.
+        </p>
+      </section>
+
+      <section id="nmi">
+        <h2>11. NMI and Level 7</h2>
+        <p>
+          Level 7 cannot be masked. The processor takes a level-7 interrupt on
+          every transition of the request level from below 7 up to 7, so a held
+          request produces exactly one interrupt.
+        </p>
+        <p>
+          The source is one momentary pushbutton to ground near the debug
+          display, with a pull-up and an <code>SN74LS14</code> Schmitt-trigger
+          conditioner, the same pattern the
+          <a href="clock-and-reset.html#manual-reset">manual-reset input</a>
+          uses. The conditioned output is <code>NMI_n</code>, wired to
+          <code>U_IPL_ENC</code> <code>/I7</code>.
+        </p>
+        <pre><code>button --- RC --- SN74LS14 stage --- gate with RESET_n --- NMI_n --- U_IPL_ENC /I7</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Level 7 parameters
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Acknowledge</td>
+              <td>Autovector, vector 31; address <code>$00007C</code></td>
+            </tr>
+            <tr>
+              <td>Debounce RC</td>
+              <td>
+                About 10 ms, so one press is one clean edge. Final value at
+                layout.
+              </td>
+            </tr>
+            <tr>
+              <td>Masked during <code>RESET_n</code></td>
+              <td>
+                Yes. <code>NMI_n</code> is gated inactive while
+                <code>RESET_n</code> is low, one gate of
+                <code>U_INT_GATE</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Drives <code>/HALT</code></td>
+              <td>No. <code>/IPL</code> only.</td>
+            </tr>
+            <tr>
+              <td>Repeat on hold</td>
+              <td>
+                None. The processor re-triggers only on a fresh transition to
+                level 7.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="reset-behavior">
+        <h2>12. Reset Behavior</h2>
+        <p>After <code>RESET_n</code>:</p>
+        <ul>
+          <li>
+            The MFP is reset through <code>PERIPH_RESET_n</code> (<a
+              href="clock-and-reset.html#reset-distribution"
+              >Clock and Reset</a
+            >). All MFP channels are disabled and <code>/IRQ</code> is negated,
+            so <code>U_IPL_ENC</code> <code>/I6</code> is inactive.
+          </li>
+          <li>
+            <code>NMI_n</code> is held inactive while <code>RESET_n</code> is
+            low, so a button press during reset is ignored.
+          </li>
+          <li>
+            With every encoder input inactive, <code>/IPL2../IPL0</code>
+            reads 111 (no request).
+          </li>
+          <li>
+            <code>U_INT_WDOG</code> is held reset by
+            <code>WDOG_MR</code> because no acknowledge is active. No separate
+            <code>RESET_n</code>
+            term is needed.
+          </li>
+          <li>
+            <code>U_IPL_SYNC</code> is not cleared on reset, since clearing it
+            would encode level 7. Its two <code>INT_CLK</code> edges after reset
+            release load the true no-request code. During that interval the
+            processor mask is 7 and no interrupt is taken, so the transient is
+            harmless.
+          </li>
+          <li>
+            The processor sets its interrupt mask to 7 on reset, so no
+            autovectored or vectored interrupt is taken until firmware lowers
+            the mask. Firmware initializes the exception vectors in low RAM
+            first; see
+            <a href="firmware-rom.html#boot-vector-verification">Firmware ROM</a
+            >.
+          </li>
+        </ul>
+      </section>
+
+      <section id="acknowledge-timing">
+        <h2>13. Acknowledge Timing</h2>
+        <p>
+          The acknowledge cycle is a normal-length MC68EC000 read cycle, four
+          clock periods plus wait states, terminated by <code>/AVEC</code>, by
+          the MFP vector and <code>MFP_DTACK_n</code>, or by
+          <code>INT_BERR_n</code>. Use the 10 MHz column of
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, section 10.14</a
+          >, together with the interrupt-acknowledge timing in the manual's
+          section 5.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Acknowledge-cycle timing constraints
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Constraint</th>
+              <th scope="col">Requirement</th>
+              <th scope="col">Design consequence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>#47 asynchronous input setup</td>
+              <td>
+                <code>/AVEC</code>, <code>/DTACK</code>,
+                <code>/BERR</code> stable 5 ns before the sampling clock edge
+              </td>
+              <td>
+                <code>/AVEC</code> is combinational and early; the MFP vector
+                path and the watchdog need their own margin checks.
+              </td>
+            </tr>
+            <tr>
+              <td>#27 read-data setup</td>
+              <td>Vector byte valid 5 ns before the sampling edge</td>
+              <td>
+                The MFP drives <code>D7..D0</code> during acknowledge; margin
+                measured on the assembled board against the MFP output timing.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                #28 <code>/AS</code> negation to <code>/DTACK</code> negation
+              </td>
+              <td>110 ns maximum</td>
+              <td>
+                MFP <code>/DTACK</code> release followed by the FAST completion
+                tree. The component total is 77.2 ns, leaving 32.8 ns for the
+                routed board under the 110 ns limit.
+              </td>
+            </tr>
+            <tr>
+              <td>Level hold</td>
+              <td><code>/IPL</code> stable until acknowledge</td>
+              <td>
+                Sources are level-held; the synchronizer adds up to two clock
+                periods of delay.
+              </td>
+            </tr>
+            <tr>
+              <td>Spurious watchdog</td>
+              <td>
+                Fire after the longest legitimate response, before any software
+                timeout
+              </td>
+              <td>
+                32 <code>INT_CLK</code> periods, 3.2 us. Confirm against the
+                measured MFP acknowledge latency; move to <code>Q6</code> if
+                needed.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          A worked assertion and release budget for each termination path, in
+          the style of the
+          <a href="firmware-rom.html#read-timing-verification"
+            >Firmware ROM read timing</a
+          >
+          tables, is added once package pins and gate packing are set at
+          schematic capture. The dominant unknown is the MC68901 acknowledge
+          latency, which is a measurement.
+        </p>
+        <p>
+          There is no motherboard bus timeout on this cycle. The only backstop
+          is <code>INT_BERR_n</code> from this logic.
+        </p>
+      </section>
+
+      <section id="motherboard-integration">
+        <h2>14. Motherboard Integration</h2>
+        <p>
+          Four signals connect the interrupt controller to the bus and clock
+          circuits. The <a href="bus-and-decode.html">Bus and Decode</a> and
+          <a href="dram.html#clock-distribution">DRAM</a> documents carry the
+          matching connections.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Connections into the bus and clock circuits
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Destination</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>/AVEC</code></td>
+              <td>MC68EC000 <code>/AVEC</code> pin</td>
+              <td>
+                Direct net from <code>U_AVEC_OR</code>, with a 10 kohm pull-up.
+                On the MC68EC000 this pin replaced the M6800
+                <code>/VPA</code> function, so with no bus arbitration in the
+                system it is used for autovector only and has no other driver.
+              </td>
+            </tr>
+            <tr>
+              <td><code>MFP_DTACK_n</code></td>
+              <td>Completion tree</td>
+              <td>
+                Directly into <code>U_DTACK_A</code> gate 1. The tree is active
+                during CPU space, so this path also terminates a vectored
+                level-6 acknowledge.
+              </td>
+            </tr>
+            <tr>
+              <td><code>INT_BERR_n</code></td>
+              <td>Bus-error path</td>
+              <td>
+                ANDed with the bus-timeout error term:
+                <code>BERR_n = TIMEOUT_BERR_n AND INT_BERR_n</code>. One gate;
+                the two sources never overlap in time.
+              </td>
+            </tr>
+            <tr>
+              <td><code>INT_CLK</code></td>
+              <td>Clock buffer</td>
+              <td>
+                A buffered 10 MHz clock. This design routes it through a spare
+                channel of the DRAM clock buffer so the processor clock net
+                gains no load.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          This logic also adds one input load to <code>CPU_SPACE</code> and
+          <code>AS_n</code>, and one to each of CPU address lines
+          <code>A1..A3</code> and <code>A16..A19</code>. These belong in the bus
+          fanout budget.
+        </p>
+      </section>
+
+      <section id="package-pin-map">
+        <h2>15. Package and Pin Map</h2>
+        <p>
+          Reference designators and parts. Package pin numbers and the gate
+          assignment within the multi-gate packages follow from the schematic;
+          the equations in the sections above define the logic.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Interrupt logic packages
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_IPL_ENC</code></td>
+              <td><code>SN74LS148N</code></td>
+              <td>
+                8-to-3 priority encoder; level requests to the
+                <code>/IPL</code> code
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_IPL_SYNC_A</code>, <code>U_IPL_SYNC_B</code></td>
+              <td>2 x <code>SN74LS174</code></td>
+              <td>
+                Two-stage <code>INT_CLK</code> synchronizer, three of six
+                flip-flops per package; common clear tied inactive
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_IACK_DEC</code></td>
+              <td><code>SN74HCT138N</code></td>
+              <td>
+                Acknowledge level demultiplex to <code>IACK_L1_n..L7_n</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_IACK_QUAL</code></td>
+              <td><code>CD74HCT21E</code></td>
+              <td>
+                <code>IACK_TYPE</code> (gate 1);
+                <code>UNWIRED_IACK_n</code> (gate 2)
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_AVEC_OR</code></td>
+              <td><code>SN74HCT08N</code></td>
+              <td>
+                Autovector strobe combine to <code>/AVEC</code> (AND of
+                active-low strobes)
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_INT_WDOG</code></td>
+              <td><code>CD74HCT4040E</code></td>
+              <td>Phantom-acknowledge watchdog counter; <code>Q5</code> tap</td>
+            </tr>
+            <tr>
+              <td><code>U_INT_GATE</code></td>
+              <td><code>SN74HCT08N</code>, <code>SN74HCT04N</code></td>
+              <td>
+                <code>IACK_ACTIVE</code>/<code>IACK_n</code>,
+                <code>WDOG_COUNT_EN</code>/<code>WDOG_MR</code>,
+                <code>WDOG_TIMEOUT_n</code>, <code>INT_BERR_n</code>,
+                <code>NMI_n</code> reset gate
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_NMI_COND</code></td>
+              <td><code>SN74LS14N</code></td>
+              <td>
+                NMI button debounce; a spare gate of the reset conditioner or
+                its own package
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every package gets a 100 nF bypass capacitor at its supply pins, and
+          <code>U_INT_WDOG</code> and the two synchronizer packages also get a 1
+          uF capacitor in parallel, per the motherboard convention.
+        </p>
+      </section>
+
+      <section id="electrical-fanout">
+        <h2>16. Electrical and Fanout</h2>
+        <p>
+          All parts run from the regulated 5 V +/-5% rail and use TTL-compatible
+          thresholds.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Loading summary
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Added load</th>
+              <th scope="col">Note</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>INT_CLK</code></td>
+              <td>
+                Two <code>SN74LS174</code> clock inputs, one
+                <code>CD74HCT4040E</code> clock input, one
+                <code>SN74HCT74N</code> MFP-divider clock input, and one
+                <code>SN74F04N</code> input in the
+                <a href="rtc.html#pins">RTC local clock buffer</a>
+              </td>
+              <td>
+                About 40 pF for the four specified inputs, within the
+                <code>U_DRAM_CLK_BUF</code> spare-channel output's 50 pF timing
+                load. The SN74F04 sheet gives no input capacitance, so the
+                routed branch is measured on the assembled board.
+                <code>CPU_CLK_10</code> is untouched.
+              </td>
+            </tr>
+            <tr>
+              <td><code>CPU_SPACE</code>, <code>AS_n</code></td>
+              <td>One HCT input each</td>
+              <td>Recorded in the Bus and Decode fanout tables.</td>
+            </tr>
+            <tr>
+              <td><code>A1..A3</code></td>
+              <td>One <code>SN74HCT138N</code> input each</td>
+              <td>Add to the CPU address-line budget in Bus and Decode.</td>
+            </tr>
+            <tr>
+              <td><code>A16..A19</code></td>
+              <td>One <code>CD74HCT21E</code> input each</td>
+              <td>
+                New receivers on these CPU lines; add to the address-line
+                budget.
+              </td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>MFP output during a level-6 acknowledge only</td>
+              <td>
+                Already part of the MFP data-bus connection; check against the
+                shared bus budget.
+              </td>
+            </tr>
+            <tr>
+              <td><code>/IPL2../IPL0</code></td>
+              <td>One MC68EC000 input each</td>
+              <td>
+                Short traces from <code>U_IPL_SYNC_B</code>; provide a
+                series-termination footprint.
+              </td>
+            </tr>
+            <tr>
+              <td><code>/AVEC</code></td>
+              <td>One MC68EC000 input, 10 kohm pull-up</td>
+              <td>
+                Push-pull drive from <code>U_AVEC_OR</code>; the pull-up covers
+                power-up before the gate is valid.
+              </td>
+            </tr>
+            <tr>
+              <td>Open-drain <code>/IRQ</code> nets</td>
+              <td>4.7 kohm pull-up each</td>
+              <td>
+                <code>MFP_IRQ_n</code>, <code>EXP_IRQ_n</code>, and each
+                peripheral <code>/IRQ</code> at its MFP input. Final value
+                against card count and trace capacitance on the assembled board.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="design-notes">
+        <h2>17. Design Notes</h2>
+        <p>Why the design is shaped this way, for anyone adapting it.</p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Rationale for the main choices
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Choice</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                One interrupt controller (the MFP), most sources folded into it
+              </td>
+              <td>
+                The MC68901 already prioritizes, masks, tracks in-service, and
+                vectors sixteen channels. Folding the slow peripherals into it
+                keeps the CPU-side hardware to a handful of small packages and
+                puts source priority under software control.
+              </td>
+            </tr>
+            <tr>
+              <td>MFP vectored, other used levels autovectored</td>
+              <td>
+                The MFP supplies real per-channel vectors, so its handlers
+                dispatch directly. The one or two remaining sources are rare
+                enough that a status poll in an autovector handler costs
+                nothing.
+              </td>
+            </tr>
+            <tr>
+              <td>Expansion on its own processor level, not an MFP input</td>
+              <td>
+                An expansion card then works with no MFP interrupt setup, and
+                its latency does not depend on MFP configuration.
+              </td>
+            </tr>
+            <tr>
+              <td>Unwired levels fall through to spurious</td>
+              <td>
+                An acknowledge to a level with no source is a wiring or software
+                fault. Vector 24 lets the handler log it rather than hang.
+              </td>
+            </tr>
+            <tr>
+              <td><code>A19..A16</code> decoded on the acknowledge</td>
+              <td>
+                On the MC68EC000 every CPU-space cycle is an acknowledge, but
+                decoding the type field costs one gate and keeps the design
+                correct if it is ported to a part that also runs breakpoint or
+                coprocessor cycles.
+              </td>
+            </tr>
+            <tr>
+              <td><code>SN74LS148</code> encoder</td>
+              <td>
+                No <code>HCT</code> 148 is made and the <code>HC</code> one is
+                obsolete. The <code>LS</code> part is stocked, fast, and its TTL
+                output drives a TTL-input register directly.
+              </td>
+            </tr>
+            <tr>
+              <td>Two-stage <code>/IPL</code> synchronizer</td>
+              <td>
+                The interrupt sources are wired-OR and asynchronous. Registering
+                the encoded code twice on the processor clock stops a
+                mid-transition code from reaching the processor. One stage plus
+                the processor's own internal sampling is often enough; the
+                second stage is cheap margin.
+              </td>
+            </tr>
+            <tr>
+              <td>Local acknowledge watchdog</td>
+              <td>
+                The motherboard bus timeout is gated off during CPU space, so
+                without this a withdrawn or glitched interrupt would stall the
+                processor with no <code>/BERR</code>. The watchdog is the only
+                backstop on the acknowledge cycle.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Interrupt clock from a buffered copy, not the processor clock
+                net
+              </td>
+              <td>
+                The synchronizer and watchdog add several clock loads. A
+                dedicated processor-clock net is usually near its capacitive
+                budget already, so a buffered copy is safer.
+              </td>
+            </tr>
+            <tr>
+              <td>MFP vector base <code>$40</code></td>
+              <td>
+                Places the sixteen MFP vectors clear of the processor-defined
+                vectors and the autovector block. Any base whose low nibble is
+                zero works.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The <a href="mfp.html">MFP design</a> fixes the GPIP assignments, a
+          2.5 MHz MFP clock, 4.7 kohm open-drain pull-ups, and the direct
+          <code>MFP_DTACK_n</code> completion path. The MC68901's worst-phase
+          acknowledge response fits inside the 3.2 us Q5 watchdog interval.
+          Board layout must preserve the acknowledgement timing limits in
+          section 13.
+        </p>
+      </section>
+
+      <section id="internal-signal-reference">
+        <h2>18. Internal Signal Reference</h2>
+        <p>
+          Names ending in <code>_n</code> are active low. Others are active high
+          unless the description says otherwise.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Interrupt signals and ownership
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source / definition</th>
+              <th scope="col">Destination / meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>CPU_SPACE</code></td>
+              <td><code>FC2 AND FC1 AND FC0</code> in Bus and Decode</td>
+              <td>High during an interrupt-acknowledge cycle</td>
+            </tr>
+            <tr>
+              <td><code>IACK_TYPE</code></td>
+              <td><code>A16 AND A17 AND A18 AND A19</code></td>
+              <td>High for the acknowledge CPU-space type field</td>
+            </tr>
+            <tr>
+              <td><code>IACK_ACTIVE</code> / <code>IACK_n</code></td>
+              <td><code>CPU_SPACE AND (NOT AS_n) AND IACK_TYPE</code></td>
+              <td>An interrupt acknowledge is in progress</td>
+            </tr>
+            <tr>
+              <td><code>IACK_L1_n</code> .. <code>IACK_L7_n</code></td>
+              <td>
+                <code>U_IACK_DEC</code> outputs, selected by <code>A3..A1</code>
+              </td>
+              <td>Per-level acknowledge strobe</td>
+            </tr>
+            <tr>
+              <td><code>IL3_n</code></td>
+              <td>Expansion <code>EXP_IRQ_n</code>, level-sensitive</td>
+              <td><code>U_IPL_ENC</code> input <code>/I3</code></td>
+            </tr>
+            <tr>
+              <td><code>MFP_IRQ_n</code></td>
+              <td>MC68901 <code>/IRQ</code>, open drain, 4.7 kohm pull-up</td>
+              <td><code>U_IPL_ENC</code> input <code>/I6</code></td>
+            </tr>
+            <tr>
+              <td><code>NMI_n</code></td>
+              <td>
+                Conditioned NMI button, gated inactive while
+                <code>RESET_n</code> is low
+              </td>
+              <td><code>U_IPL_ENC</code> input <code>/I7</code></td>
+            </tr>
+            <tr>
+              <td><code>INT_CLK</code></td>
+              <td>
+                Spare <code>U_DRAM_CLK_BUF</code> channel off
+                <code>DRAM_CLK_10</code>
+              </td>
+              <td><code>U_IPL_SYNC</code> and <code>U_INT_WDOG</code> clock</td>
+            </tr>
+            <tr>
+              <td><code>IPL_ENC2..0_n</code></td>
+              <td><code>U_IPL_ENC</code> <code>/A2../A0</code></td>
+              <td>Encoded level into <code>U_IPL_SYNC_A</code></td>
+            </tr>
+            <tr>
+              <td>
+                <code>/IPL2</code>, <code>/IPL1</code>, <code>/IPL0</code>
+              </td>
+              <td><code>U_IPL_SYNC_B</code>, the second stage</td>
+              <td>MC68EC000 interrupt priority inputs</td>
+            </tr>
+            <tr>
+              <td><code>AVEC_n</code> / <code>/AVEC</code></td>
+              <td>
+                <code>IACK_L3_n AND IACK_L7_n</code> in <code>U_AVEC_OR</code>
+              </td>
+              <td>MC68EC000 autovector input</td>
+            </tr>
+            <tr>
+              <td><code>MFP_DTACK_n</code></td>
+              <td>MC68901 <code>/DTACK</code> pin</td>
+              <td><code>U_DTACK_A</code> gate 1 in Bus and Decode</td>
+            </tr>
+            <tr>
+              <td><code>UNWIRED_IACK_n</code></td>
+              <td>
+                <code>IACK_L1_n AND IACK_L2_n AND IACK_L4_n AND IACK_L5_n</code>
+              </td>
+              <td>Immediate spurious termination for an unwired level</td>
+            </tr>
+            <tr>
+              <td><code>WDOG_MR</code></td>
+              <td><code>NOT (IACK_ACTIVE AND AVEC_n AND MFP_DTACK_n)</code></td>
+              <td>
+                <code>U_INT_WDOG</code> active-high reset; low only while
+                counting
+              </td>
+            </tr>
+            <tr>
+              <td><code>WDOG_TIMEOUT_n</code></td>
+              <td><code>NOT Q5</code> of <code>U_INT_WDOG</code></td>
+              <td>
+                Phantom-acknowledge termination after 32
+                <code>INT_CLK</code> edges
+              </td>
+            </tr>
+            <tr>
+              <td><code>INT_BERR_n</code></td>
+              <td><code>UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></td>
+              <td>
+                <code>U_AND</code> gate 4 in Bus and Decode (spurious interrupt)
+              </td>
+            </tr>
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Clock and Reset</td>
+              <td>Resets the MFP; negates <code>MFP_IRQ_n</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources">
+        <h2>19. Sources</h2>
+        <p>
+          <a href="datasheets/M68000UM.pdf">M68000 User's Manual</a>: section
+          3.5 (interrupt control inputs), section 5.1.4 (CPU space cycle),
+          section 5 interrupt-acknowledge timing (Figure 5-11), section 6.2
+          (exception vectors), section 6.3.3 to 6.3.5 (uninitialized, spurious,
+          and instruction traps), and the section 10.14 MC68EC000 10 MHz
+          switching table.
+        </p>
+        <p>
+          <a href="datasheets/MC68901.pdf">MC68901 MFP</a>: interrupt controller
+          registers, the <code>/IACK</code> / <code>IEI</code> /
+          <code>IEO</code> daisy chain, the vector register, general-purpose
+          interrupt inputs and the active-edge register, and
+          <code>/DTACK</code> generation.
+        </p>
+        <h3>Devices</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Logic used by the interrupt subsystem
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Part</th>
+              <th scope="col">Role</th>
+              <th scope="col">Datasheet</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>MC68901</td>
+              <td>Interrupt controller, vectored on level 6</td>
+              <td><a href="datasheets/MC68901.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>SN74LS148</td>
+              <td>8-to-3 priority encoder for <code>/IPL</code></td>
+              <td><a href="datasheets/sn74ls148.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>SN74LS174</td>
+              <td>Hex D flip-flop, <code>/IPL</code> synchronizer</td>
+              <td><a href="datasheets/sn74ls174.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>SN74HCT138</td>
+              <td>3-to-8 decoder, acknowledge level demultiplex</td>
+              <td><a href="datasheets/sn74hct138.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>CD74HCT4040</td>
+              <td>Ripple counter, phantom-acknowledge watchdog</td>
+              <td><a href="datasheets/cd74hct4040.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>CD74HCT21</td>
+              <td>Dual 4-input AND, type-field and unwired-level decode</td>
+              <td><a href="datasheets/cd74hct21.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>SN74HCT08 / HCT32 / HCT04</td>
+              <td>AND, OR, and inverter glue</td>
+              <td>
+                <a href="datasheets/sn74hct08.pdf">08</a>,
+                <a href="datasheets/sn74hct32.pdf">32</a>,
+                <a href="datasheets/sn54hct04.pdf">04</a>
+              </td>
+            </tr>
+            <tr>
+              <td>SN74LS14</td>
+              <td>Schmitt-trigger inverter, NMI button conditioning</td>
+              <td><a href="datasheets/sn74ls14.pdf">PDF</a></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Related project documents:
+          <a href="bus-and-decode.html">Bus and Decode</a> (CPU-space decode,
+          completion tree, bus error), <a href="mfp.html">MFP</a> (channel map,
+          GPI assignments, vector base),
+          <a href="dram.html#clock-distribution">DRAM</a>
+          (<code>INT_CLK</code> spare clock-buffer channel),
+          <a href="clock-and-reset.html">Clock and Reset</a>
+          (<code>RESET_n</code>, <code>PERIPH_RESET_n</code>, Schmitt
+          conditioning), <a href="memory-map.html">Memory Map</a> and
+          <a href="firmware-rom.html">Firmware ROM</a> (vector table location
+          and initialization),
+          <a href="expansion.html">Expansion Bus</a> (<code>EXP_IRQ_n</code>),
+          and <a href="floppy.html">Floppy</a>, <a href="midi.html">MIDI</a>,
+          <a href="rtc.html">RTC</a>, and <a href="vga.html">VGA</a> for their
+          interrupt outputs.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

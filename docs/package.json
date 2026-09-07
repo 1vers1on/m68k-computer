@@ -1,0 +1,13 @@
+{
+  "name": "m68k-computer-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "68EC000 computer documentation",
+  "scripts": {
+    "format": "prettier --write \"static/**/*.html\"",
+    "format:check": "prettier --check \"static/**/*.html\""
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}

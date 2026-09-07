@@ -1,0 +1,1570 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - MC68901 MFP, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>MC68901 MFP</h1>
+
+      <p>
+        This document defines the MC68901 bus interface, clocks, interrupt
+        assignments, timers, GPIO, bidirectional PS/2 keyboard port, and
+        MAX232-based RS-232 port.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+
+      <dl>
+        <dt>Document status</dt>
+        <dd>Revision 1.0 pre-layout design</dd>
+        <dt>MFP</dt>
+        <dd>Motorola MC68901P, 48-pin plastic DIP, 4 MHz grade</dd>
+        <dt>Bus connection</dt>
+        <dd>
+          I/O slot 0, <code>$E00000-$E1FFFF</code>, on
+          <code>D7..D0</code>
+        </dd>
+        <dt>Interrupt connection</dt>
+        <dd>Vectored CPU level 6, vectors <code>$40-$4F</code></dd>
+        <dt>MFP clock</dt>
+        <dd>2.5 MHz, divided from the buffered 10 MHz interrupt clock</dd>
+        <dt>Timer clock</dt>
+        <dd>2.4576 MHz crystal</dd>
+        <dt>Serial port</dt>
+        <dd>
+          DE-9 male DTE RS-232 port with RXD, TXD, RTS, CTS, and signal ground
+        </dd>
+        <dt>Keyboard port</dt>
+        <dd>Bidirectional PS/2 on a 6-pin mini-DIN connector</dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#bus-interface">Bus Interface</a></li>
+        <li><a href="#register-map">Register Map</a></li>
+        <li><a href="#clock-reset">Clock and Reset</a></li>
+        <li><a href="#interrupts">Interrupts</a></li>
+        <li><a href="#timers">Timers</a></li>
+        <li><a href="#rs232">RS-232 Port</a></li>
+        <li><a href="#ps2">PS/2 Keyboard Port</a></li>
+        <li><a href="#gpip">GPIP Assignment</a></li>
+        <li><a href="#pins">Package and Pin Map</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#signals">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The MC68901 combines the system interrupt controller, four timers, an
+          eight-bit general-purpose port, and one full-duplex USART. This page
+          fixes every motherboard connection to the device and its two external
+          ports. Software policy and firmware initialization are outside its
+          scope.
+        </p>
+        <p>
+          Signal names ending in <code>_n</code>, and signal names written with
+          a leading slash, are active low. The board uses +5 V logic and
+          through-hole packages. Every IC family selected here existed before
+          1994.
+        </p>
+      </section>
+
+      <section id="architecture">
+        <h2>2. Architecture</h2>
+        <pre><code>MC68EC000 lower byte                     external ports and interrupt sources
+
+D7..D0 &lt;------------------&gt; MC68901P
+A5..A1 -------------------&gt; RS5..RS1       SO ----&gt; MAX232 ----&gt; DE-9 TXD
+IO0_n --------------------&gt; /CS            SI &lt;---- MAX232 &lt;---- DE-9 RXD
+LDS_n --------------------&gt; /DS            I0 ----&gt; MAX232 ----&gt; DE-9 RTS
+R/W ----------------------&gt; R/W            I6 &lt;---- MAX232 &lt;---- DE-9 CTS
+PERIPH_RESET_n -----------&gt; /RESET
+MFP_CLK_2P5 --------------&gt; CLK            I7 &lt;---&gt; PS/2 clock
+IACK_L6_n ----------------&gt; /IACK          I1 &lt;---&gt; PS/2 data
+MFP_IRQ_n ----------------&gt; CPU level 6    I5 &lt;---- floppy INT
+MFP_DTACK_n --------------&gt; /DTACK tree    I4 &lt;---- MIDI /IRQ
+                                           I3 &lt;---- RTC /IRQ
+2.4576 MHz crystal -------&gt; XTAL1/XTAL2    I2 &lt;---- VGA VSYNC
+TDO ----------------------&gt; RC and TC
+Timer C ------------------&gt; 100 Hz system tick</code></pre>
+        <p>
+          The USART remains a TTL-level circuit inside the MFP. The MAX232
+          supplies the voltage conversion and inversion required at the RS-232
+          connector. The PS/2 lines connect to GPIP pins through series
+          resistors and use direction switching to reproduce open-collector
+          signaling.
+        </p>
+      </section>
+
+      <section id="bus-interface">
+        <h2>3. Bus Interface</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC68901 processor-bus connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">MC68901 signal</th>
+              <th scope="col">Motherboard connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>CPU <code>D7..D0</code></td>
+              <td>Register data and interrupt vectors.</td>
+            </tr>
+            <tr>
+              <td><code>RS1..RS5</code></td>
+              <td>CPU <code>A1..A5</code>, in order</td>
+              <td>Selects one of 32 internal register positions.</td>
+            </tr>
+            <tr>
+              <td><code>/CS</code></td>
+              <td><code>IO0_n</code></td>
+              <td>Selects the MFP only in slot 0 during a normal bus cycle.</td>
+            </tr>
+            <tr>
+              <td><code>/DS</code></td>
+              <td><code>LDS_n</code></td>
+              <td>Selects the lower data byte.</td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>CPU <code>R/W</code></td>
+              <td>High for reads and low for writes.</td>
+            </tr>
+            <tr>
+              <td><code>/DTACK</code></td>
+              <td><code>MFP_DTACK_n</code></td>
+              <td>
+                Terminates register and level-6 interrupt-acknowledge cycles.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The motherboard slot decoder already excludes CPU-space cycles, so
+          <code>IO0_n</code> and <code>/IACK</code> cannot be asserted together.
+          During interrupt acknowledge the MC68EC000 asserts both data strobes;
+          <code>LDS_n</code> therefore supplies the MFP's required
+          <code>/DS</code> strobe while <code>IACK_L6_n</code> selects the
+          acknowledge operation.
+        </p>
+        <p>
+          The MFP's <code>/DTACK</code> output drives high before entering its
+          high-impedance state. A 4.7 kohm pull-up on
+          <code>MFP_DTACK_n</code> keeps the completion-tree input inactive
+          while the MFP is not driving it. The same physical net serves normal
+          register cycles and vectored acknowledge cycles.
+        </p>
+        <h3>Addressing Rules</h3>
+        <p>
+          Software accesses the MFP as bytes at odd addresses. A lower-byte
+          access asserts <code>LDS_n</code>; an upper-byte-only access leaves
+          the MFP unselected and reaches the motherboard bus timeout. A word
+          read also asserts <code>LDS_n</code> and completes, but only
+          <code>D7..D0</code> contain MFP data, so word accesses are not part of
+          the interface contract.
+        </p>
+        <p>
+          Address lines <code>A16..A6</code> do not enter the local decode. The
+          register block repeats every 64 bytes throughout slot 0. The table
+          below names the canonical copy beginning at <code>$E00000</code>.
+        </p>
+      </section>
+
+      <section id="register-map">
+        <h2>4. Register Map</h2>
+        <p>
+          The MC68901 contains 24 directly addressed eight-bit registers. The
+          register functions and addresses come from the MC68901 register map;
+          this table does not prescribe their firmware values.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Canonical MC68901 register addresses
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">Offset</th>
+              <th scope="col">Register</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$E00001</code></td>
+              <td><code>$01</code></td>
+              <td>GPDR</td>
+              <td>General-purpose I/O data.</td>
+            </tr>
+            <tr>
+              <td><code>$E00003</code></td>
+              <td><code>$03</code></td>
+              <td>AER</td>
+              <td>Active edge for GPIP inputs and timer A/B control inputs.</td>
+            </tr>
+            <tr>
+              <td><code>$E00005</code></td>
+              <td><code>$05</code></td>
+              <td>DDR</td>
+              <td>
+                GPIP direction; one selects output and zero selects input.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$E00007</code></td>
+              <td><code>$07</code></td>
+              <td>IERA</td>
+              <td>Interrupt enable for channels 15 through 8.</td>
+            </tr>
+            <tr>
+              <td><code>$E00009</code></td>
+              <td><code>$09</code></td>
+              <td>IERB</td>
+              <td>Interrupt enable for channels 7 through 0.</td>
+            </tr>
+            <tr>
+              <td><code>$E0000B</code></td>
+              <td><code>$0B</code></td>
+              <td>IPRA</td>
+              <td>Interrupt pending state for channels 15 through 8.</td>
+            </tr>
+            <tr>
+              <td><code>$E0000D</code></td>
+              <td><code>$0D</code></td>
+              <td>IPRB</td>
+              <td>Interrupt pending state for channels 7 through 0.</td>
+            </tr>
+            <tr>
+              <td><code>$E0000F</code></td>
+              <td><code>$0F</code></td>
+              <td>ISRA</td>
+              <td>Interrupt in-service state for channels 15 through 8.</td>
+            </tr>
+            <tr>
+              <td><code>$E00011</code></td>
+              <td><code>$11</code></td>
+              <td>ISRB</td>
+              <td>Interrupt in-service state for channels 7 through 0.</td>
+            </tr>
+            <tr>
+              <td><code>$E00013</code></td>
+              <td><code>$13</code></td>
+              <td>IMRA</td>
+              <td>Interrupt mask for channels 15 through 8.</td>
+            </tr>
+            <tr>
+              <td><code>$E00015</code></td>
+              <td><code>$15</code></td>
+              <td>IMRB</td>
+              <td>Interrupt mask for channels 7 through 0.</td>
+            </tr>
+            <tr>
+              <td><code>$E00017</code></td>
+              <td><code>$17</code></td>
+              <td>VR</td>
+              <td>Vector base and end-of-interrupt mode.</td>
+            </tr>
+            <tr>
+              <td><code>$E00019</code></td>
+              <td><code>$19</code></td>
+              <td>TACR</td>
+              <td>Timer A mode, prescaler, and output reset.</td>
+            </tr>
+            <tr>
+              <td><code>$E0001B</code></td>
+              <td><code>$1B</code></td>
+              <td>TBCR</td>
+              <td>Timer B mode, prescaler, and output reset.</td>
+            </tr>
+            <tr>
+              <td><code>$E0001D</code></td>
+              <td><code>$1D</code></td>
+              <td>TCDCR</td>
+              <td>Timer C and Timer D mode and prescaler.</td>
+            </tr>
+            <tr>
+              <td><code>$E0001F</code></td>
+              <td><code>$1F</code></td>
+              <td>TADR</td>
+              <td>Timer A data and current count.</td>
+            </tr>
+            <tr>
+              <td><code>$E00021</code></td>
+              <td><code>$21</code></td>
+              <td>TBDR</td>
+              <td>Timer B data and current count.</td>
+            </tr>
+            <tr>
+              <td><code>$E00023</code></td>
+              <td><code>$23</code></td>
+              <td>TCDR</td>
+              <td>Timer C data and current count.</td>
+            </tr>
+            <tr>
+              <td><code>$E00025</code></td>
+              <td><code>$25</code></td>
+              <td>TDDR</td>
+              <td>Timer D data and current count.</td>
+            </tr>
+            <tr>
+              <td><code>$E00027</code></td>
+              <td><code>$27</code></td>
+              <td>SCR</td>
+              <td>Synchronous USART character.</td>
+            </tr>
+            <tr>
+              <td><code>$E00029</code></td>
+              <td><code>$29</code></td>
+              <td>UCR</td>
+              <td>USART clock mode and character format.</td>
+            </tr>
+            <tr>
+              <td><code>$E0002B</code></td>
+              <td><code>$2B</code></td>
+              <td>RSR</td>
+              <td>Receiver enable and receive status.</td>
+            </tr>
+            <tr>
+              <td><code>$E0002D</code></td>
+              <td><code>$2D</code></td>
+              <td>TSR</td>
+              <td>Transmitter enable, control, and transmit status.</td>
+            </tr>
+            <tr>
+              <td><code>$E0002F</code></td>
+              <td><code>$2F</code></td>
+              <td>UDR</td>
+              <td>Receive and transmit data.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Offsets <code>$31-$3F</code> select no defined MC68901 register. They
+          are not motherboard registers even though the MFP still owns the slot.
+        </p>
+      </section>
+
+      <section id="clock-reset">
+        <h2>5. Clock and Reset</h2>
+        <h3>MFP Bus Clock</h3>
+        <p>
+          The original MC68901P accepts a 1 to 4 MHz <code>CLK</code>. A
+          <code>SN74HCT74N</code>, <code>U_MFP_CLK</code>, divides the existing
+          10 MHz <code>INT_CLK</code> by four and produces
+          <code>MFP_CLK_2P5</code>. Each half is a toggle stage with its
+          complementary output connected to its D input. All asynchronous preset
+          and clear inputs connect to +5 V.
+        </p>
+        <pre><code>INT_CLK -- divide by 2 --&gt; MFP_CLK_5 -- divide by 2 --&gt; MFP_CLK_2P5
+
+MFP_CLK_2P5 frequency = 10 MHz / 4 = 2.5 MHz
+MFP clock period       = 400 ns
+MFP high and low time  = 200 ns nominal</code></pre>
+        <p>
+          <code>MFP_CLK_5</code> also drives one SN74F04 input in the
+          <a href="midi.html#clock-reset">MIDI local clock buffer</a> and one
+          CD74HCT164 clock input in the
+          <a href="floppy.html#bus-interface">floppy bus adapter</a>. The MIDI
+          buffer isolates its divider and bus-adapter clocks from this net.
+        </p>
+        <p>
+          The 400 ns period lies between the MC68901's 250 ns minimum and 1000
+          ns maximum. Its nominal 200 ns high and low times exceed the 110 ns
+          minimum.
+        </p>
+        <h3>Timer Crystal</h3>
+        <p>
+          <code>Y_MFP_TIMER</code> is a CTS MP024S: a 2.4576 MHz
+          parallel-resonant, fundamental-mode AT-cut crystal between
+          <code>XTAL1</code> and <code>XTAL2</code>, specified for a 32 pF load
+          and no more than 300 ohms series resistance. One 56 pF capacitor
+          connects from each crystal pin to ground, which with a few picofarads
+          of stray capacitance presents the specified load.
+        </p>
+        <h3>Reset</h3>
+        <p>
+          <code>PERIPH_RESET_n</code> connects directly to the MC68901
+          <code>/RESET</code> pin. The MFP requires at least 2 us low. The
+          motherboard reset circuit supplies the long power-on and manual-reset
+          pulse and at least 12.4 us when the processor executes RESET.
+        </p>
+        <p>
+          Reset stops all timers, disables both USART directions and every
+          interrupt channel, clears pending interrupts, places all GPIP pins in
+          high-impedance input mode, drives the timer outputs low, and negates
+          the external handshake signals. The vector register resets to
+          <code>$00</code>, so an unprogrammed MFP answers an acknowledge cycle
+          with vector number <code>$0F</code>, the processor's
+          uninitialized-interrupt vector. Firmware writes the vector register
+          before it enables any channel. TADR, TBDR, TCDR, TDDR, UDR, and most
+          TSR state do not receive a defined data value from reset.
+        </p>
+      </section>
+
+      <section id="interrupts">
+        <h2>6. Interrupts</h2>
+        <p>
+          The MFP presents all sixteen internal channels at CPU level 6. Its
+          open-drain <code>/IRQ</code> output is <code>MFP_IRQ_n</code> and has
+          a 4.7 kohm pull-up to +5 V. <code>IACK_L6_n</code> connects to
+          <code>/IACK</code>, <code>IEI</code> connects to ground, and
+          <code>IEO</code> is open because no second vectored device follows the
+          MFP.
+        </p>
+        <p>
+          The system reserves vector base <code>$40</code>. The MFP supplies the
+          channel number in the low nibble, producing vectors
+          <code>$40-$4F</code>. Channel 15 has the highest priority and channel
+          0 the lowest. The programmable enable, pending, mask, and in-service
+          state remains visible through IERA/B, IPRA/B, IMRA/B, and ISRA/B.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MFP interrupt channels and allocated vectors
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Priority</th>
+              <th scope="col">Channel</th>
+              <th scope="col">Vector</th>
+              <th scope="col">Source</th>
+              <th scope="col">Hardware use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Highest</td>
+              <td>15</td>
+              <td><code>$4F</code></td>
+              <td>GPIP7</td>
+              <td>PS/2 clock, falling edge.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>14</td>
+              <td><code>$4E</code></td>
+              <td>GPIP6</td>
+              <td>RS-232 CTS, falling edge when enabled.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>13</td>
+              <td><code>$4D</code></td>
+              <td>Timer A</td>
+              <td>Available internal timer.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>12</td>
+              <td><code>$4C</code></td>
+              <td>Receiver buffer full</td>
+              <td>RS-232 character received.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>11</td>
+              <td><code>$4B</code></td>
+              <td>Receive error</td>
+              <td>RS-232 overrun, parity, or framing error.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>10</td>
+              <td><code>$4A</code></td>
+              <td>Transmit buffer empty</td>
+              <td>RS-232 transmitter service.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>9</td>
+              <td><code>$49</code></td>
+              <td>Transmit error</td>
+              <td>RS-232 underrun or end condition.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>8</td>
+              <td><code>$48</code></td>
+              <td>Timer B</td>
+              <td>Available internal timer.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>7</td>
+              <td><code>$47</code></td>
+              <td>GPIP5</td>
+              <td>82077AA-1 floppy <code>INT</code>, rising edge.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>6</td>
+              <td><code>$46</code></td>
+              <td>GPIP4</td>
+              <td>MC6850 MIDI <code>/IRQ</code>, falling edge.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>5</td>
+              <td><code>$45</code></td>
+              <td>Timer C</td>
+              <td>Nominal 100 Hz system tick.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>4</td>
+              <td><code>$44</code></td>
+              <td>Timer D</td>
+              <td>
+                USART baud generator; interrupt not needed by the circuit.
+              </td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>3</td>
+              <td><code>$43</code></td>
+              <td>GPIP3</td>
+              <td>DS1285 RTC <code>/IRQ</code>, falling edge.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>2</td>
+              <td><code>$42</code></td>
+              <td>GPIP2</td>
+              <td>CL-GD5428 <code>VSYNC</code>; either edge selectable.</td>
+            </tr>
+            <tr>
+              <td></td>
+              <td>1</td>
+              <td><code>$41</code></td>
+              <td>GPIP1</td>
+              <td>PS/2 data; sampled with GPIP7.</td>
+            </tr>
+            <tr>
+              <td>Lowest</td>
+              <td>0</td>
+              <td><code>$40</code></td>
+              <td>GPIP0</td>
+              <td>RS-232 RTS output.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <a href="interrupts.html">Interrupts</a> owns the CPU-side priority
+          encoder, level-6 acknowledge decode, autovectors, and spurious-cycle
+          termination. This page owns the MFP's channel and pin assignments.
+        </p>
+      </section>
+
+      <section id="timers">
+        <h2>7. Timers</h2>
+        <p>
+          All four timers count the 2.4576 MHz crystal through a programmable
+          prescaler. Timers A and B remain available as internal delay timers.
+          Their unused <code>TAI</code> and <code>TBI</code> inputs connect to
+          ground, and <code>TAO</code> and <code>TBO</code> go to labeled test
+          pads.
+        </p>
+        <h3>Timer C System Tick</h3>
+        <p>
+          Timer C uses the divide-by-100 prescaler and a data value of 246
+          (<code>$F6</code>). A timeout occurs at 99.9024 Hz, a period of
+          10.0098 ms. This is the board's nominal 100 Hz system tick. The
+          <code>TCO</code> pin toggles on each timeout and goes to a labeled
+          test pad; the interrupt channel supplies the tick to the processor.
+        </p>
+        <pre><code>Timer C timeout = 2,457,600 / (100 * 246)
+                = 99.9024 Hz</code></pre>
+        <h3>Timer D Baud Clock</h3>
+        <p>
+          <code>TDO</code> connects to both <code>RC</code> and <code>TC</code>,
+          giving the receiver and transmitter the same clock. Timer D uses the
+          divide-by-four prescaler. In the USART's divide-by-16 asynchronous
+          mode, the timer data values below produce the standard rates.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Timer D baud-rate values at 2.4576 MHz
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Baud</th>
+              <th scope="col">TDDR value</th>
+              <th scope="col">TDO frequency</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>19,200</td>
+              <td><code>$01</code></td>
+              <td>307.2 kHz</td>
+            </tr>
+            <tr>
+              <td>9,600</td>
+              <td><code>$02</code></td>
+              <td>153.6 kHz</td>
+            </tr>
+            <tr>
+              <td>4,800</td>
+              <td><code>$04</code></td>
+              <td>76.8 kHz</td>
+            </tr>
+            <tr>
+              <td>2,400</td>
+              <td><code>$08</code></td>
+              <td>38.4 kHz</td>
+            </tr>
+            <tr>
+              <td>1,200</td>
+              <td><code>$10</code></td>
+              <td>19.2 kHz</td>
+            </tr>
+            <tr>
+              <td>600</td>
+              <td><code>$20</code></td>
+              <td>9.6 kHz</td>
+            </tr>
+            <tr>
+              <td>300</td>
+              <td><code>$40</code></td>
+              <td>4.8 kHz</td>
+            </tr>
+            <tr>
+              <td>150</td>
+              <td><code>$80</code></td>
+              <td>2.4 kHz</td>
+            </tr>
+            <tr>
+              <td>75</td>
+              <td><code>$00</code>, interpreted as 256</td>
+              <td>1.2 kHz</td>
+            </tr>
+          </tbody>
+        </table>
+        <pre><code>baud = 2,457,600 / (2 * 4 * TDDR * 16)
+     = 19,200 / TDDR
+
+TDDR = 0 represents a count of 256.</code></pre>
+      </section>
+
+      <section id="rs232">
+        <h2>8. RS-232 Port</h2>
+        <p>
+          <code>U_RS232</code> is an original-family <code>MAX232CPE</code> in a
+          16-pin plastic DIP. It provides two drivers, two receivers, and the
+          charge pumps needed to run the port from +5 V. Its two channels carry
+          TXD/RXD and RTS/CTS. The selected timer clocking limits the port to
+          19,200 baud, below the MAX232's 120 kbit/s rating.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MAX232 signal connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Function</th>
+              <th scope="col">TTL side</th>
+              <th scope="col">MAX232 path</th>
+              <th scope="col">RS-232 side</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Transmit data</td>
+              <td>MFP <code>SO</code></td>
+              <td><code>T1IN</code> pin 11 to <code>T1OUT</code> pin 14</td>
+              <td>DE-9 pin 3, TXD</td>
+            </tr>
+            <tr>
+              <td>Receive data</td>
+              <td>MFP <code>SI</code></td>
+              <td><code>R1OUT</code> pin 12 from <code>R1IN</code> pin 13</td>
+              <td>DE-9 pin 2, RXD</td>
+            </tr>
+            <tr>
+              <td>Request to send</td>
+              <td>MFP GPIP0</td>
+              <td><code>T2IN</code> pin 10 to <code>T2OUT</code> pin 7</td>
+              <td>DE-9 pin 7, RTS</td>
+            </tr>
+            <tr>
+              <td>Clear to send</td>
+              <td>MFP GPIP6</td>
+              <td><code>R2OUT</code> pin 9 from <code>R2IN</code> pin 8</td>
+              <td>DE-9 pin 8, CTS</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          A 10 kohm pull-up on <code>T1IN</code> holds TXD in the RS-232 mark
+          state while the MFP's <code>SO</code> output is high impedance after
+          reset. A second 10 kohm pull-up on <code>T2IN</code> holds RTS
+          deasserted while GPIP0 is an input. Because the MAX232 inverts control
+          signals, driving GPIP0 low asserts RTS at the connector and driving it
+          high deasserts RTS.
+        </p>
+        <p>
+          RTS and CTS have fixed electrical paths but no automatic connection to
+          the USART state machine. GPIP0 controls RTS, and GPIP6 reports CTS and
+          can raise an interrupt. CTS does not gate <code>SO</code> in hardware.
+        </p>
+        <h3>Charge-Pump Connections</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MAX232 power and charge-pump wiring
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">MAX232 pins</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>C1+</code> pin 1 to <code>C1-</code> pin 3</td>
+              <td>1 uF, 16 V capacitor</td>
+            </tr>
+            <tr>
+              <td><code>C2+</code> pin 4 to <code>C2-</code> pin 5</td>
+              <td>1 uF, 16 V capacitor</td>
+            </tr>
+            <tr>
+              <td><code>V+</code> pin 2 to ground</td>
+              <td>1 uF, 16 V; positive terminal at <code>V+</code></td>
+            </tr>
+            <tr>
+              <td><code>V-</code> pin 6 to ground</td>
+              <td>1 uF, 16 V; positive terminal at ground</td>
+            </tr>
+            <tr>
+              <td><code>VCC</code> pin 16</td>
+              <td>+5 V with 100 nF ceramic and 1 uF bulk bypass to ground</td>
+            </tr>
+            <tr>
+              <td><code>GND</code> pin 15</td>
+              <td>Motherboard ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>DE-9 DTE Connector</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Male DE-9 serial connector
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Direction at computer</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>DCD</td>
+              <td>Input</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>RXD</td>
+              <td>Input</td>
+              <td>MAX232 <code>R1IN</code></td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>TXD</td>
+              <td>Output</td>
+              <td>MAX232 <code>T1OUT</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>DTR</td>
+              <td>Output</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>Signal ground</td>
+              <td></td>
+              <td>Motherboard ground</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>DSR</td>
+              <td>Input</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>RTS</td>
+              <td>Output</td>
+              <td>MAX232 <code>T2OUT</code></td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>CTS</td>
+              <td>Input</td>
+              <td>MAX232 <code>R2IN</code></td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td>RI</td>
+              <td>Input</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>Shell</td>
+              <td>Shield</td>
+              <td></td>
+              <td>Ground at the connector entry</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="ps2">
+        <h2>9. PS/2 Keyboard Port</h2>
+        <p>
+          GPIP7 carries keyboard clock and GPIP1 carries keyboard data. Each
+          motherboard node has a 4.7 kohm pull-up to +5 V and reaches the
+          mini-DIN connector through a 220 ohm series resistor. The resistors
+          limit contention current if either endpoint drives at the wrong time.
+        </p>
+        <p>
+          An MFP GPIP pin releases a PS/2 line when its DDR bit is zero. It
+          pulls the line low when its GPDR bit is zero and its DDR bit is one.
+          The circuit never requires a driven high level, so it preserves the
+          PS/2 wired-AND behavior. Reset sets the DDR to input and releases both
+          lines. GPIP7 detects falling clock edges while the keyboard is
+          sending; GPIP1 supplies the data level.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PS/2 mini-DIN-6 connector
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>Data</td>
+              <td>220 ohms to GPIP1 node; 4.7 kohm pull-up at MFP side</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Reserved</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>Ground</td>
+              <td>Motherboard ground</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>+5 V</td>
+              <td>+5 V through a 500 mA resettable fuse</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>Clock</td>
+              <td>220 ohms to GPIP7 node; 4.7 kohm pull-up at MFP side</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>Reserved</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>Shell</td>
+              <td>Shield</td>
+              <td>Ground at the connector entry</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          A 100 nF ceramic capacitor and a 10 uF electrolytic capacitor connect
+          from the fused +5 V keyboard supply to ground beside the connector.
+        </p>
+      </section>
+
+      <section id="gpip">
+        <h2>10. GPIP Assignment</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC68901 general-purpose port wiring
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Direction</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Active edge or level</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>GPIP7</td>
+              <td>Bidirectional</td>
+              <td>PS/2 clock</td>
+              <td>Falling edge while receiving</td>
+            </tr>
+            <tr>
+              <td>GPIP6</td>
+              <td>Input</td>
+              <td>MAX232 <code>R2OUT</code>, RS-232 CTS</td>
+              <td>Low means CTS asserted; falling edge available</td>
+            </tr>
+            <tr>
+              <td>GPIP5</td>
+              <td>Input</td>
+              <td>82077AA-1 floppy <code>INT</code></td>
+              <td>Active high, rising edge</td>
+            </tr>
+            <tr>
+              <td>GPIP4</td>
+              <td>Input</td>
+              <td>MC6850 MIDI <code>/IRQ</code>, 4.7 kohm pull-up</td>
+              <td>Active low, falling edge</td>
+            </tr>
+            <tr>
+              <td>GPIP3</td>
+              <td>Input</td>
+              <td>DS1285 RTC <code>/IRQ</code>, 4.7 kohm pull-up</td>
+              <td>Active low, falling edge</td>
+            </tr>
+            <tr>
+              <td>GPIP2</td>
+              <td>Input</td>
+              <td>CL-GD5428 <code>VSYNC</code></td>
+              <td>Programmable sync polarity; AER selects either edge</td>
+            </tr>
+            <tr>
+              <td>GPIP1</td>
+              <td>Bidirectional</td>
+              <td>PS/2 data</td>
+              <td>Sampled at GPIP7 clock edges</td>
+            </tr>
+            <tr>
+              <td>GPIP0</td>
+              <td>Output</td>
+              <td>MAX232 <code>T2IN</code>, RS-232 RTS</td>
+              <td>Low asserts RTS at the connector</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          GPIP4 and GPIP3 each have their own pull-up because their source
+          outputs are open drain. The floppy and VGA outputs are push-pull and
+          need no pull-up. The PS/2 pull-ups belong to the keyboard interface,
+          and the RTS pull-up belongs to the MAX232 input.
+        </p>
+        <p>
+          The <a href="opl3.html#firmware">YMF262 timers</a> use status polling.
+          The OPL3 circuit does not share a GPIP input with any source in this
+          table.
+        </p>
+      </section>
+
+      <section id="pins">
+        <h2>11. Package and Pin Map</h2>
+        <h3>MC68901P</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_MFP 48-pin plastic DIP connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>R/W</code></td>
+              <td>CPU <code>R/W</code></td>
+            </tr>
+            <tr>
+              <td>2-6</td>
+              <td><code>RS1..RS5</code></td>
+              <td>CPU <code>A1..A5</code></td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td><code>TC</code></td>
+              <td><code>TDO</code></td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td><code>SO</code></td>
+              <td>MAX232 <code>T1IN</code></td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td><code>SI</code></td>
+              <td>MAX232 <code>R1OUT</code></td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td><code>RC</code></td>
+              <td><code>TDO</code></td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td>NC</td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td><code>TAO</code></td>
+              <td>Test pad</td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td><code>TBO</code></td>
+              <td>Test pad</td>
+            </tr>
+            <tr>
+              <td>15</td>
+              <td><code>TCO</code></td>
+              <td>System-tick test pad</td>
+            </tr>
+            <tr>
+              <td>16</td>
+              <td><code>TDO</code></td>
+              <td><code>RC</code> and <code>TC</code></td>
+            </tr>
+            <tr>
+              <td>17-18</td>
+              <td><code>XTAL1</code>, <code>XTAL2</code></td>
+              <td>2.4576 MHz crystal and two 56 pF capacitors</td>
+            </tr>
+            <tr>
+              <td>19-20</td>
+              <td><code>TAI</code>, <code>TBI</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>21</td>
+              <td><code>/RESET</code></td>
+              <td><code>PERIPH_RESET_n</code></td>
+            </tr>
+            <tr>
+              <td>22-29</td>
+              <td><code>GPIP0..GPIP7</code></td>
+              <td>Assignments in section 10</td>
+            </tr>
+            <tr>
+              <td>30</td>
+              <td><code>/TR</code></td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>31</td>
+              <td><code>/RR</code></td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>32</td>
+              <td><code>/IRQ</code></td>
+              <td><code>MFP_IRQ_n</code>, 4.7 kohm pull-up</td>
+            </tr>
+            <tr>
+              <td>33</td>
+              <td><code>IEO</code></td>
+              <td>No connection</td>
+            </tr>
+            <tr>
+              <td>34</td>
+              <td><code>IEI</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>35</td>
+              <td><code>CLK</code></td>
+              <td><code>MFP_CLK_2P5</code></td>
+            </tr>
+            <tr>
+              <td>36</td>
+              <td><code>GND</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>37-44</td>
+              <td><code>D0..D7</code></td>
+              <td>CPU <code>D0..D7</code></td>
+            </tr>
+            <tr>
+              <td>45</td>
+              <td><code>/IACK</code></td>
+              <td><code>IACK_L6_n</code></td>
+            </tr>
+            <tr>
+              <td>46</td>
+              <td><code>/DTACK</code></td>
+              <td><code>MFP_DTACK_n</code>, 4.7 kohm pull-up</td>
+            </tr>
+            <tr>
+              <td>47</td>
+              <td><code>/DS</code></td>
+              <td><code>LDS_n</code></td>
+            </tr>
+            <tr>
+              <td>48</td>
+              <td><code>/CS</code></td>
+              <td><code>IO0_n</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <h3>MFP Clock Divider</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_MFP_CLK SN74HCT74N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1, 4, 10, 13</td>
+              <td>+5 V</td>
+              <td>Keep both asynchronous preset and clear inputs inactive.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>Pin 6, <code>/1Q</code></td>
+              <td>First-stage toggle feedback.</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>INT_CLK</code></td>
+              <td>10 MHz input.</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td><code>MFP_CLK_5</code></td>
+              <td>
+                First divide-by-two output, second-stage clock, MIDI local
+                clock-buffer source, and floppy-response clock.
+              </td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>Pin 2</td>
+              <td>First-stage complementary feedback.</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>Ground</td>
+              <td>Supply ground.</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>Pin 12, <code>2D</code></td>
+              <td>Second-stage complementary feedback.</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td><code>MFP_CLK_2P5</code></td>
+              <td>MC68901 clock.</td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td><code>MFP_CLK_5</code></td>
+              <td>Second-stage clock.</td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td>Pin 8, <code>/2Q</code></td>
+              <td>Second-stage toggle feedback.</td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td>+5 V</td>
+              <td>Supply.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="timing">
+        <h2>12. Timing and Electrical Checks</h2>
+        <h3>Bus Response</h3>
+        <p>
+          The asynchronous MC68901 samples <code>/CS</code> or
+          <code>/IACK</code> against its local clock. If a request misses one
+          falling edge, the next falling edge arrives 400 ns later. The MFP then
+          asserts <code>/DTACK</code> within 220 ns. A worst-phase request
+          therefore reaches the raw MFP acknowledgement within about 620 ns, far
+          inside the motherboard's 51.1 us normal-cycle timeout.
+        </p>
+        <p>
+          On release, the MC68901 drives <code>/DTACK</code> high within 60 ns
+          after <code>/CS</code> or <code>/DS</code> rises. The completion tree
+          adds 5.3 ns through the group SN74F21, 5.3 ns through the final
+          SN74F21, and 6.6 ns through the SN74F32 timeout mask. The 77.2 ns
+          total leaves 32.8 ns for routed delay and loading under the
+          MC68EC000's 110 ns acknowledgement-release limit.
+        </p>
+        <pre><code>MFP /DTACK release          60.0 ns maximum
+group SN74F21               5.3 ns maximum
+final SN74F21               5.3 ns maximum
+SN74F32 timeout mask        6.6 ns maximum
+------------------------------------------------
+component total            77.2 ns
+MC68EC000 limit           110.0 ns
+board allowance            32.8 ns</code></pre>
+        <h3>Logic Levels and Fanout</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MFP interface loading
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Added load</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>INT_CLK</code></td>
+              <td>One SN74HCT74N clock input, 10 pF maximum</td>
+              <td>
+                Interrupt-clock branch rises from about 30 pF to 40 pF, below
+                its 50 pF timing load.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>One MC68901 input, 10 uA and 10 pF maximum</td>
+              <td>TTL thresholds match the +5 V reset domain.</td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>One bidirectional MC68901 pin per line, 10 pF maximum</td>
+              <td>
+                Within the MC68EC000 bus capacitance budget after layout
+                accounting.
+              </td>
+            </tr>
+            <tr>
+              <td><code>A1..A5</code></td>
+              <td>One MC68901 register-select input per line, 10 pF maximum</td>
+              <td>
+                Within the MC68EC000 address-bus capacitance limit after layout
+                accounting.
+              </td>
+            </tr>
+            <tr>
+              <td><code>MFP_IRQ_n</code></td>
+              <td>4.7 kohm pull-up</td>
+              <td>
+                About 1.12 mA at 5.25 V, below the MC68901 open-drain test
+                current.
+              </td>
+            </tr>
+            <tr>
+              <td><code>MFP_DTACK_n</code></td>
+              <td>One FAST input and 4.7 kohm pull-up</td>
+              <td>
+                The MC68901's 5.3 mA low-state rating covers the pull-up and TTL
+                input load.
+              </td>
+            </tr>
+            <tr>
+              <td>MAX232 TTL inputs</td>
+              <td>MFP SO and GPIP0</td>
+              <td>
+                The MC68901 2.4 V minimum high output exceeds the MAX232 2.0 V
+                TTL threshold.
+              </td>
+            </tr>
+            <tr>
+              <td>MFP serial and GPIP inputs</td>
+              <td>MAX232 R1OUT and R2OUT</td>
+              <td>Both devices use +5 V TTL-compatible levels.</td>
+            </tr>
+            <tr>
+              <td><code>PS2_CLK</code>, <code>PS2_DATA</code></td>
+              <td>One 4.7 kohm pull-up and one keyboard input per line</td>
+              <td>
+                About 1.12 mA maximum pull-up current, below the MC68901's 2 mA
+                low-output test current.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The MAX232 supply range is 4.5 to 5.5 V, which contains the
+          motherboard's 4.75 to 5.25 V rail. Its RS-232 receivers tolerate
+          inputs up to +/-30 V. The selected 1 uF charge-pump capacitors are the
+          value specified for the original MAX232.
+        </p>
+      </section>
+
+      <section id="parts">
+        <h2>13. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MFP subsystem parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_MFP</code></td>
+              <td>MC68901P</td>
+              <td>MFP, 48-pin plastic DIP, 4 MHz grade.</td>
+            </tr>
+            <tr>
+              <td><code>U_MFP_CLK</code></td>
+              <td>SN74HCT74N</td>
+              <td>10 MHz to 2.5 MHz clock divider.</td>
+            </tr>
+            <tr>
+              <td><code>U_RS232</code></td>
+              <td>MAX232CPE</td>
+              <td>Dual RS-232 driver and receiver, 16-pin plastic DIP.</td>
+            </tr>
+            <tr>
+              <td><code>Y_MFP_TIMER</code></td>
+              <td>2.4576 MHz crystal</td>
+              <td>Parallel resonance, 32 pF load, 300 ohms maximum ESR.</td>
+            </tr>
+            <tr>
+              <td><code>J_RS232</code></td>
+              <td>DE-9 male, right-angle through-hole</td>
+              <td>DTE serial connector.</td>
+            </tr>
+            <tr>
+              <td><code>J_PS2</code></td>
+              <td>Mini-DIN-6 female, through-hole</td>
+              <td>PS/2 keyboard connector.</td>
+            </tr>
+            <tr>
+              <td><code>F_PS2</code></td>
+              <td>500 mA hold resettable fuse</td>
+              <td>Keyboard +5 V protection.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          U_MFP, U_MFP_CLK, and U_RS232 belong to device families documented
+          before 1994. Each IC has a 100 nF ceramic bypass capacitor at its
+          supply pins. U_MFP and U_MFP_CLK also have a 1 uF capacitor beside the
+          package, following the motherboard convention.
+        </p>
+      </section>
+
+      <section id="layout">
+        <h2>14. Board Layout</h2>
+        <ul>
+          <li>
+            Place the two 56 pF crystal capacitors beside MC68901 pins 17 and
+            18. Keep the crystal loop short and away from clock, bus, and
+            charge-pump routes.
+          </li>
+          <li>
+            Place all four 1 uF MAX232 charge-pump capacitors beside their pin
+            pairs. Keep <code>V+</code> and <code>V-</code> away from the
+            crystal and PS/2 inputs.
+          </li>
+          <li>
+            Put the RS-232 and PS/2 connectors at the board edge. Route their
+            shell and ground returns to the ground plane at the entry point.
+          </li>
+          <li>
+            Keep <code>MFP_CLK_2P5</code>, <code>TDO</code>, PS/2 clock, and the
+            three open-drain interrupt routes short. Route
+            <code>MFP_CLK_5</code> directly from U_MFP_CLK to the MIDI local
+            clock buffer and floppy response sequencer without long stubs.
+          </li>
+          <li>
+            After routing, keep the <code>INT_CLK</code> branch at or below 50
+            pF and the added address and data pin load inside the limits in
+            <a href="bus-and-decode.html">Bus and Decode</a>.
+          </li>
+          <li>
+            Measure <code>MFP_CLK_2P5</code> at MC68901 pin 35 after layout. Its
+            period must stay between 250 ns and 1000 ns, each high and low pulse
+            must be at least 110 ns, and each edge must be no longer than 15 ns.
+          </li>
+          <li>
+            Measure the routed <code>/DTACK</code> release path after layout and
+            keep its board contribution below the 32.8 ns allowance.
+          </li>
+        </ul>
+      </section>
+
+      <section id="signals">
+        <h2>15. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MFP subsystem signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>MFP_CLK_5</code></td>
+              <td>U_MFP_CLK first stage</td>
+              <td>
+                U_MFP_CLK second-stage clock,
+                <a href="midi.html#clock-reset">U_MIDI_INV</a>, and
+                <a href="floppy.html#bus-interface">U_FDC_SEQ</a>
+              </td>
+            </tr>
+            <tr>
+              <td><code>MFP_CLK_2P5</code></td>
+              <td>U_MFP_CLK second stage</td>
+              <td>MC68901 <code>CLK</code></td>
+            </tr>
+            <tr>
+              <td><code>MFP_IRQ_n</code></td>
+              <td>MC68901 <code>/IRQ</code></td>
+              <td>Interrupt priority encoder level 6 input</td>
+            </tr>
+            <tr>
+              <td><code>MFP_DTACK_n</code></td>
+              <td>MC68901 <code>/DTACK</code></td>
+              <td>Motherboard completion tree</td>
+            </tr>
+            <tr>
+              <td><code>IACK_L6_n</code></td>
+              <td>Interrupt acknowledge decoder</td>
+              <td>MC68901 <code>/IACK</code></td>
+            </tr>
+            <tr>
+              <td><code>PS2_CLK</code></td>
+              <td>MC68901 GPIP7 and keyboard</td>
+              <td>PS/2 connector pin 5</td>
+            </tr>
+            <tr>
+              <td><code>PS2_DATA</code></td>
+              <td>MC68901 GPIP1 and keyboard</td>
+              <td>PS/2 connector pin 1</td>
+            </tr>
+            <tr>
+              <td><code>RS232_TXD</code></td>
+              <td>MAX232 T1OUT</td>
+              <td>DE-9 pin 3</td>
+            </tr>
+            <tr>
+              <td><code>RS232_RXD</code></td>
+              <td>DE-9 pin 2</td>
+              <td>MAX232 R1IN</td>
+            </tr>
+            <tr>
+              <td><code>RS232_RTS</code></td>
+              <td>MAX232 T2OUT</td>
+              <td>DE-9 pin 7</td>
+            </tr>
+            <tr>
+              <td><code>RS232_CTS</code></td>
+              <td>DE-9 pin 8</td>
+              <td>MAX232 R2IN</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources">
+        <h2>16. Sources</h2>
+        <ul>
+          <li>
+            Motorola,
+            <a href="datasheets/MC68901.pdf"
+              ><cite>MC68HC901 Multi-Function Peripheral User's Manual</cite></a
+            >. The manual identifies the MC68HC901 as the HCMOS version of the
+            MC68901 and carries the common register, pin, timer, USART, and
+            interrupt definitions.
+          </li>
+          <li>
+            Motorola,
+            <a
+              href="https://www.bitsavers.org/components/motorola/68000/MC68901_Multi-Function_Peripheral_Jan84.pdf"
+              ><cite>MC68901 Multi-Function Peripheral</cite>, January 1984</a
+            >. This is the source for the original NMOS part's 1 to 4 MHz clock
+            limits, reset timing, electrical limits, bus timing, crystal
+            circuit, and MC68901P ordering code.
+          </li>
+          <li>
+            Maxim Integrated,
+            <a
+              href="https://www.analog.com/media/en/technical-documentation/data-sheets/max220-max249.pdf"
+              ><cite
+                >MAX220-MAX249 +5 V-Powered, Multichannel RS-232
+                Drivers/Receivers</cite
+              ></a
+            >. This is the source for the MAX232CPE ordering code, pinout, and
+            charge-pump circuit.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="https://www.ti.com/lit/ds/symlink/max232.pdf"
+              ><cite>MAX232 Dual EIA-232 Drivers and Receivers</cite></a
+            >. This is the source for the +5 V supply range, input limits, 1 uF
+            original-MAX232 circuit, and 120 kbit/s rating.
+          </li>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >, sections 3.1 through 3.3 and 5.1.4.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74hct74.pdf"
+              ><cite>SN74HCT74 Dual D-Type Flip-Flops</cite></a
+            >.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>
