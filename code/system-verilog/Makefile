@@ -1,29 +1,40 @@
 IVERILOG := iverilog
 VVP := vvp
-OUT_DIR := .build
+BUILD_DIR := .build
+RTL_DIR := rtl
+TEST_DIR := test
 
-TB_FILES := $(shell find . -type f -name 'tb_*.sv' -not -path './$(OUT_DIR)/*')
-SRC_FILES := $(shell find . -type f -name '*.sv' -not -name 'tb_*.sv' -not -path './$(OUT_DIR)/*')
+RTL_FILES := $(shell find $(RTL_DIR) -type f -name '*.sv' | sort)
+TB_FILES := $(shell find $(TEST_DIR) -type f -name 'tb_*.sv' | sort)
 TESTS := $(foreach f,$(TB_FILES),$(patsubst tb_%.sv,%,$(notdir $(f))))
-RESULTS := $(addprefix $(OUT_DIR)/,$(TESTS))
 
 $(foreach f,$(TB_FILES),$(eval TB_$(patsubst tb_%.sv,%,$(notdir $(f))) := $(f)))
 
-.PHONY: all test clean
+.DEFAULT_GOAL := all
+.PHONY: help all test list clean $(TESTS)
 
-all: $(RESULTS)
+help:
+	@echo "SystemVerilog simulation commands:"
+	@echo "  make test              Run every testbench"
+	@echo "  make test NAME=decoder Run one testbench"
+	@echo "  make list              List available test names"
+	@echo "  make clean             Remove generated simulation output"
 
-test:
-	@$(MAKE) -s $(if $(NAME),-B $(OUT_DIR)/$(NAME),all)
+all: test
 
-$(OUT_DIR):
-	mkdir -p $(OUT_DIR)
+test: $(if $(NAME),$(NAME),$(TESTS))
 
-$(OUT_DIR)/%: $(SRC_FILES) | $(OUT_DIR)
-	@rm -f $@.out; \
-	$(IVERILOG) -g2012 -gspecify -o $@.out -s tb_$* $(TB_$*) $(SRC_FILES) > $@.log 2>&1; \
-	$(VVP) $@.out >> $@.log 2>&1; \
-	if grep -q "PASS " $@.log; then echo "PASS  $*"; touch $@; else echo "FAIL  $*"; cat $@.log; exit 1; fi
+list:
+	@$(foreach test,$(TESTS),echo $(test);)
+
+$(TESTS): %: | $(BUILD_DIR)
+	@rm -f $(BUILD_DIR)/$*.out $(BUILD_DIR)/$*.log
+	@$(IVERILOG) -g2012 -gspecify -o $(BUILD_DIR)/$*.out -s tb_$* $(TB_$*) $(RTL_FILES) > $(BUILD_DIR)/$*.log 2>&1; \
+	$(VVP) $(BUILD_DIR)/$*.out >> $(BUILD_DIR)/$*.log 2>&1; \
+	if grep -q "PASS " $(BUILD_DIR)/$*.log; then echo "PASS  $*"; else echo "FAIL  $*"; cat $(BUILD_DIR)/$*.log; exit 1; fi
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 clean:
-	rm -rf $(OUT_DIR)
+	rm -rf $(BUILD_DIR)
