@@ -2,14 +2,20 @@
 
 This directory holds the project’s static design documentation. Open [static/index.html](static/index.html) in a browser to start at the document index.
 
-The pages cover the memory map, bus and address decode, clock and reset, power control, interrupts, system control, debug display, DRAM, firmware ROM, MFP, floppy controller, VGA, OPL3, MIDI, RTC, and expansion slots. Each is revision 1.0 and records the pre-layout design where applicable.
+The pages cover the memory map, bus and address decode, clock and reset, power control, interrupts, system control, debug display, DRAM, firmware ROM, MFP, floppy controller, VGA, OPL3, MIDI, RTC, and expansion slots. Each page records its own revision and design status.
 
 `static/defaults.css` provides the shared page styling. `package.json` supplies Prettier commands for the HTML files:
 
 ```sh
+npm ci
 npm run format
 npm run format:check
 ```
+
+The local Makefile exposes the same commands as `make install`, `make format`,
+and `make check`. `make test` also checks formatting. From the repository root,
+use `make docs-install` for setup and `make check PROJECT=docs` for validation.
+The site is served from source, so `make clean` has no generated output to remove.
 
 ## Run the website with Docker
 

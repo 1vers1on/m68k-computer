@@ -25,7 +25,6 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *.swn
-*~
 .*.sw[a-p]
 Session.vim
 .netrwhist
@@ -37,7 +36,7 @@ Session.vim
 .emacs.desktop.lock
 auto-save-list/
 
-.vscode/
+.vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
@@ -54,7 +53,6 @@ cmake-build-*/
 *.sublime-workspace
 *.sublime-project
 
-.\#*
 *.bak
 *.tmp
 *.orig

@@ -1,6 +1,6 @@
 # 68EC000 Computer
 
-Monorepo for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
+A 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 
 ## At a glance
 
@@ -22,3 +22,36 @@ Monorepo for a 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 ## Documentation
 
 Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, peripherals, video, audio, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
+
+## Repository layout
+
+| Path                               | Contents                                                      |
+| ---------------------------------- | ------------------------------------------------------------- |
+| [code/](code/)                     | Source code and project-specific build and test instructions. |
+| [docs/](docs/)                     | Design documentation and reference material.                  |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution guidelines and interface-change rules.           |
+
+## Working with the repository
+
+Each project manages its own tools and dependencies. Read its README before
+running its commands.
+
+```sh
+make list                 # List available projects
+make test                 # Run tests across projects
+make check                # Run all project checks
+make check PROJECT=docs   # Check one project
+make clean                # Remove generated output
+```
+
+The root Makefile discovers project Makefiles one or two directory levels below
+the repository root. New projects join these commands by providing `test`,
+`check`, and `clean` targets. Build commands and other project-specific tasks
+stay in each project's Makefile.
+
+Run `make help` for the available root commands. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the project conventions and [docs/README.md](docs/README.md) for documentation
+setup.
+
+Code uses [GPL v3.0](code/LICENSE); project-authored documentation uses
+[CC BY-NC-SA 4.0](docs/LICENSE). Manufacturer datasheets retain their own terms.
