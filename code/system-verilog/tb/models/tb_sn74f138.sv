@@ -1,12 +1,12 @@
 `timescale 1ns / 1ps
 
-module tb_sn54f138;
+module tb_sn74f138;
     reg G1, G2A_n, G2B_n;
     reg [2:0] A;
     wire [7:0] Y;
     integer errors = 0;
 
-    sn54f138 dut(.G1(G1), .G2A_n(G2A_n), .G2B_n(G2B_n), .A(A), .Y(Y));
+    sn74f138 dut(.G1(G1), .G2A_n(G2A_n), .G2B_n(G2B_n), .A(A), .Y(Y));
 
     integer i;
     reg [5:0] stim;
@@ -23,7 +23,7 @@ module tb_sn54f138;
                 errors = errors + 1;
             end
         end
-        if (errors == 0) $display("PASS tb_sn54f138");
-        else $fatal(1, "FAIL tb_sn54f138: %0d errors", errors);
+        if (errors == 0) $display("PASS tb_sn74f138");
+        else $fatal(1, "FAIL tb_sn74f138: %0d errors", errors);
     end
 endmodule

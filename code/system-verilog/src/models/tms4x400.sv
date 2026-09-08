@@ -11,7 +11,7 @@
 //  driven by a memory controller testbench and to complain loudly when that
 //  controller violates the datasheet.  It models:
 //
-//    * 1M x 4 sparse storage (uninitialised cells read as X)
+//    * 1M x 4 storage, fully allocated (uninitialised cells read as X)
 //    * Multiplexed 10-bit row / 10-bit column addressing (1024 x 1024)
 //    * Read, early-write, late-write (read-modify-write) cycles
 //    * Enhanced page mode - column address buffers are transparent while
@@ -21,8 +21,11 @@
 //    * WCBR test mode: 512K x 8 with 2-bit parallel compare per DQ
 //    * The full switching-characteristics access-time model
 //      (tRAC / tCAC / tAA / tCPA / tOEA / tCLZ / tOFF / tOEZ)
-//    * Every min/max entry in the "timing requirements" tables, checked
-//      at runtime with a datasheet-named violation message
+//    * 49 of the 54 "timing requirements" parameters, checked at runtime
+//      with a datasheet-named violation message.  The five not checked are
+//      tRASS (used as the self-refresh entry threshold rather than as a
+//      violation), tTAA/tTCPA/tTRAC (test-mode access times, applied as
+//      delays), and tT (zero-time edges here, so nothing to measure)
 //    * Refresh interval tracking per row (tREF), with optional data decay
 //
 //  Speed grade is selected with the SPEED parameter (60, 70 or 80).
@@ -145,8 +148,12 @@ module tms4x400 #(
 
   // ---- refresh ------------------------------------------------------------
   localparam real tREF     = LOW_POWER ? 128000000.0 : 16000000.0;      // 128 ms / 16 ms
+  // Transition time is carried for reference only - digital edges here are
+  // instantaneous, so there is nothing to measure against it.
+  /* verilator lint_off UNUSEDPARAM */
   localparam real tT_MIN   =   2.0;
   localparam real tT_MAX   =  30.0;
+  /* verilator lint_on UNUSEDPARAM */
 
   localparam int  N_ROWS   = 1024;
   localparam int  N_COLS   = 1024;
@@ -157,8 +164,12 @@ module tms4x400 #(
   localparam real TOL      =  0.0005;
 
   //==========================================================================
-  // Storage.  Associative so that a 1M-cell part costs only what the
-  // testbench actually touches, and so that never-written cells read X.
+  // Storage.  A flat, fully allocated 1M x 4 array: every cell exists from
+  // time zero and the array costs ~14 MB under Icarus whether the testbench
+  // touches one word or all of them.  An associative array would allocate
+  // only the cells actually written, but Icarus 12 does not support them.
+  // The flat array does get the X-until-written behaviour for free, since
+  // that is the simulator's default initialisation for a 4-state variable.
   //==========================================================================
   logic [3:0] mem [0:(N_ROWS*N_COLS)-1];  // X until written, like a real cell
   realtime    row_last_ref [0:N_ROWS-1];  // per-row refresh timestamp
@@ -183,8 +194,8 @@ module tms4x400 #(
   logic [9:0] cbr_cnt;             // internal CBR refresh counter
   bit         test_mode;           // WCBR test mode active
   bit         cas_seen_this_ras;   // a CAS fall occurred during this RAS-low period
+  bit         col_moved;           // a real column-address transition was accepted
   bit         page_access;         // at least one CAS precharge since RAS fall
-  bit         early_write;         // W was low at the CAS falling edge
   bit         wrote_this_cas;      // a write already happened for this column
   bit         read_this_cas;       // this column started as a read
   bit         rmw_cycle;           // read-modify-write (late write after a read)
@@ -194,7 +205,16 @@ module tms4x400 #(
   bit          pwr_ready;          // 200 us elapsed and >=8 init cycles w/ refresh
   bit          init_refresh_seen;
 
-  int unsigned n_viol, n_warn;     // violation / warning counters
+  int unsigned n_viol;             // UNEXPECTED timing failures
+  int unsigned n_viol_expected;    // failures raised while viol_quiet was set
+  int unsigned n_warn;             // warnings
+  // A testbench that is deliberately provoking a violation sets viol_quiet so
+  // the failure is still counted and still sets watch_hit, but is not printed.
+  // That keeps a passing run's log free of alarming strings for CI greps.
+  bit          viol_quiet;
+  /* verilator lint_off UNUSEDSIGNAL */
+  string       last_viol;          // read hierarchically by testbenches
+  /* verilator lint_on UNUSEDSIGNAL */
   int unsigned n_rd, n_wr, n_ref;  // activity counters
 
   //==========================================================================
@@ -208,7 +228,6 @@ module tms4x400 #(
   realtime t_col_chg;              // column address change while transparent
   realtime t_dq_chg;               // DQ input change
   realtime t_wr_strobe;            // instant a write latched data
-  realtime t_ras_low_start_self;   // for self-refresh entry detection
 
   //==========================================================================
   // Read-access engine state (see the "read data path" section below)
@@ -231,15 +250,31 @@ module tms4x400 #(
                      LOW_POWER ? "P" : "", SPEED);
   endfunction
 
-  task automatic viol(input string msg);
-    n_viol++;
-    $display("%0t ps | %m | TIMING VIOLATION: %s", $time, msg);
-    if (STOP_ON_VIOLATION) $stop;
+  // Verification hook: a testbench may set watch_param to a parameter name
+  // and clear watch_hit; the model sets watch_hit when that parameter is the
+  // one that failed.  Used by tb_tms4x400_checkers to prove every checker
+  // can actually fire.
+  /* verilator lint_off UNUSEDSIGNAL */
+  string watch_param;
+  bit    watch_hit;
+  /* verilator lint_on UNUSEDSIGNAL */
+
+  task automatic viol(input string pname, input string msg);
+    last_viol = pname;
+    if (pname == watch_param) watch_hit = 1'b1;
+    if (viol_quiet) begin
+      n_viol_expected++;
+      if (VERBOSE) $display("%0t ps | %m | (expected) %s", $time, msg);
+    end else begin
+      n_viol++;
+      $display("%0t ps | %m | TIMING VIOLATION: %s", $time, msg);
+      if (STOP_ON_VIOLATION) $stop;
+    end
   endtask
 
   task automatic warn(input string msg);
     n_warn++;
-    $display("%0t ps | %m | WARNING: %s", $time, msg);
+    if (!viol_quiet) $display("%0t ps | %m | WARNING: %s", $time, msg);
   endtask
 
   task automatic note(input string msg);
@@ -247,9 +282,27 @@ module tms4x400 #(
   endtask
 
   // Minimum-time check: `nm` must have elapsed since `t0`.
+  // "nm must have elapsed since t0", evaluated now.
   task automatic chk_min(input string nm, input realtime t0, input real lim);
     if (TIMING_CHECKS && (t0 > NEVER) && ((($realtime - t0) + TOL) < lim))
-      viol($sformatf("%s = %0.3f ns, minimum %0.3f ns", nm, $realtime - t0, lim));
+      viol(nm, $sformatf("%s = %0.3f ns, minimum %0.3f ns", nm, $realtime - t0, lim));
+  endtask
+
+  // Same, but between two recorded edges rather than between an edge and now.
+  // tRAD needs this: it is RAS falling -> column address valid, and neither
+  // end of it is the event that triggers the check.
+  task automatic chk_span_min(input string nm, input realtime t0,
+                              input realtime t1, input real lim);
+    if (TIMING_CHECKS && (t0 > NEVER) && (t1 > NEVER) && (((t1 - t0) + TOL) < lim))
+      viol(nm, $sformatf("%s = %0.3f ns, minimum %0.3f ns", nm, t1 - t0, lim));
+  endtask
+
+  task automatic chk_span_max_acc(input string nm, input realtime t0,
+                                  input realtime t1, input real lim);
+    if (TIMING_CHECKS && CHECK_ACCESS_MAX && (t0 > NEVER) && (t1 > NEVER) &&
+        ((t1 - t0) > (lim + TOL)))
+      warn($sformatf("%s = %0.3f ns exceeds the %0.3f ns maximum; access is no longer tRAC-limited",
+                     nm, t1 - t0, lim));
   endtask
 
   // Maximum-time check for the "specified only to ensure access time" params.
@@ -263,7 +316,7 @@ module tms4x400 #(
   // Hard maximum (a real functional limit, e.g. tRAS max).
   task automatic chk_max(input string nm, input realtime t0, input real lim);
     if (TIMING_CHECKS && (t0 > NEVER) && (($realtime - t0) > (lim + TOL)))
-      viol($sformatf("%s = %0.3f ns, maximum %0.3f ns", nm, $realtime - t0, lim));
+      viol(nm, $sformatf("%s = %0.3f ns, maximum %0.3f ns", nm, $realtime - t0, lim));
   endtask
 
   //==========================================================================
@@ -282,12 +335,14 @@ module tms4x400 #(
   endtask
 
   // Test mode pairs two columns (differing in A0) behind one 512K x 8 address.
+  /* verilator lint_off UNUSEDSIGNAL */   // c[0] is deliberately discarded
   function automatic logic [9:0] col_even(input logic [9:0] c);
     return {c[9:1], 1'b0};
   endfunction
   function automatic logic [9:0] col_odd(input logic [9:0] c);
     return {c[9:1], 1'b1};
   endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // Read as the part presents it: normal, or test-mode 2-bit compare.
   function automatic logic [3:0] read_word(input logic [9:0] r, input logic [9:0] c);
@@ -338,7 +393,7 @@ module tms4x400 #(
   task automatic check_row_age(input logic [9:0] r);
     if (REFRESH_CHECKS && (cyc != C_SELF) && !row_decayed[r] &&
         (($realtime - row_last_ref[r]) > (tREF + TOL))) begin
-      viol($sformatf("row %0d not refreshed for %0.3f us (tREF max %0.3f us)",
+      viol("tREF", $sformatf("row %0d not refreshed for %0.3f us (tREF max %0.3f us)",
                      r, ($realtime - row_last_ref[r])/1000.0, tREF/1000.0));
       decay_row(r);
     end
@@ -420,8 +475,13 @@ module tms4x400 #(
     else                         buf_off_delay = tOFF;
   endfunction
 
-  // tCLZ (min 0) - the buffers may leave high-Z as soon as they are claimed.
-  always @(posedge buf_req) dq_oe = 1'b1;
+  // tCLZ - earliest the buffers may leave high-Z (0 ns on this part, but the
+  // parameter is honoured so a retimed variant behaves correctly).
+  always begin : buf_on_proc
+    wait (buf_req && !dq_oe);
+    if (tCLZ > 0.0) #(tCLZ);
+    if (buf_req) dq_oe = 1'b1;
+  end
 
   // Turn-off is level-driven and re-checked after the delay, so a buffer
   // that is re-enabled inside the disable window never glitches off.
@@ -440,6 +500,10 @@ module tms4x400 #(
   // The write strobe is the LATER of CAS falling and W falling (Note 12).
   task automatic do_write(input string kind);
     chk_min("tDS", t_dq_chg, tDS);
+    // tOED - "bring OE high prior to applying data".  Measured from OE rising
+    // to the instant the write data was placed on the bus; a negative span
+    // means data was driven while the outputs were still enabled.
+    chk_span_min("tOED", t_oe_rise, t_dq_chg, tOED);
     if (^DQ === 1'bx)
       warn($sformatf("%s write of X data to row %0d col %0d", kind, row_q, col_q));
     write_word(row_q, col_q, DQ);
@@ -455,16 +519,18 @@ module tms4x400 #(
   //==========================================================================
   always @(negedge RAS_N) begin
     // ---- precharge / cycle-time checks
-    chk_min("tRP",  t_ras_rise,      self_ref_exited ? tRPS : tRP);
-    chk_min("tRC",  t_ras_fall, rmw_cycle ? tRWC : tRC);
+    chk_min(self_ref_exited ? "tRPS" : "tRP", t_ras_rise,
+            self_ref_exited ? tRPS  :  tRP);
+    chk_min(rmw_cycle ? "tRWC" : "tRC", t_ras_fall,
+            rmw_cycle ?  tRWC  :  tRC);
     chk_min("tCRP", t_cas_rise,      tCRP);
     chk_min("tASR", t_addr_chg,      tASR);
 
     t_ras_fall        = $realtime;
     t_cas_rise_in_ras = NEVER;
     cas_seen_this_ras = 1'b0;
+    col_moved         = 1'b0;
     page_access       = 1'b0;
-    early_write       = 1'b0;
     wrote_this_cas    = 1'b0;
     read_this_cas     = 1'b0;
     rmw_cycle         = 1'b0;
@@ -477,7 +543,6 @@ module tms4x400 #(
       // self refresh, or WCBR test-mode entry).
       //---------------------------------------------------------------------
       chk_min("tCSR", t_cas_fall, tCSR);
-      t_ras_low_start_self = $realtime;
 
       if (!W_N) begin
         // WCBR - test mode entry
@@ -529,8 +594,8 @@ module tms4x400 #(
         // CAS still low: fine.
       end else if (TIMING_CHECKS && (t_cas_rise > NEVER) &&
                    (($realtime - t_cas_rise) > -tCHS + TOL))
-        viol($sformatf("tCHS = %0.3f ns, minimum %0.3f ns",
-                       t_cas_rise - $realtime, tCHS));
+        viol("tCHS", $sformatf("tCHS = %0.3f ns, minimum %0.3f ns",
+                               t_cas_rise - $realtime, tCHS));
       // The on-chip oscillator kept everything alive.
       for (int r = 0; r < N_ROWS; r++) begin
         row_last_ref[r] = $realtime;
@@ -539,8 +604,10 @@ module tms4x400 #(
       self_ref_exited = 1'b1;
       $display("%0t ps | %m | NOTE: exiting SELF REFRESH; a burst refresh of all 1024 rows is required before normal operation", $time);
     end else begin
-      chk_min("tRAS", t_ras_fall, page_access ? tRASP_MIN : tRAS_MIN);
-      chk_max("tRAS", t_ras_fall, page_access ? tRASP_MAX : tRAS_MAX);
+      chk_min(page_access ? "tRASP" : "tRAS", t_ras_fall,
+              page_access ?  tRASP_MIN : tRAS_MIN);
+      chk_max(page_access ? "tRASP" : "tRAS", t_ras_fall,
+              page_access ?  tRASP_MAX : tRAS_MAX);
       if (cas_seen_this_ras) begin
         chk_min("tRSH", t_cas_fall, tRSH);
         chk_min("tRAL", t_col_chg,  tRAL);
@@ -554,8 +621,10 @@ module tms4x400 #(
       end
       if (wrote_this_cas)
         chk_min("tRWL", t_w_fall, tRWL);
-      if (read_this_cas && !wrote_this_cas)
+      if (read_this_cas && !wrote_this_cas) begin
         chk_min("tROH", t_oe_fall, tROH);
+        chk_min("tRRH", t_w_rise,  tRRH);   // Note 14: tRRH or tRCH
+      end
     end
 
     t_ras_rise = $realtime;
@@ -596,12 +665,19 @@ module tms4x400 #(
       if (!cas_seen_this_ras) begin
         chk_min("tRCD", t_ras_fall, tRCD_MIN);
         chk_max_acc("tRCD", t_ras_fall, tRCD_MAX);
-        chk_min("tRAD", t_ras_fall, tRAD_MIN);
-        chk_max_acc("tRAD", t_ras_fall, tRAD_MAX);
+        // tRAD ends at the column address, NOT at the CAS edge (that is tRCD).
+        // It only means anything if the address actually moved: a controller
+        // that drives the same value for row and column presents no
+        // transition to constrain, and that is entirely legal.
+        if (col_moved) begin
+          chk_span_min("tRAD", t_ras_fall, t_col_chg, tRAD_MIN);
+          chk_span_max_acc("tRAD", t_ras_fall, t_col_chg, tRAD_MAX);
+        end
       end
 
       if (cas_seen_this_ras)
-        chk_min("tPC", t_cas_fall, rmw_cycle ? tPRWC : tPC);
+        chk_min(rmw_cycle ? "tPRWC" : "tPC", t_cas_fall,
+                rmw_cycle ?  tPRWC  :  tPC);
 
       t_cas_fall      = $realtime;
       cyc             = C_ACTIVE;
@@ -617,7 +693,6 @@ module tms4x400 #(
       if (!W_N) begin
         //------------------- EARLY WRITE -------------------
         chk_min("tWCS", t_w_fall, tWCS);
-        early_write = 1'b1;
         out_armed   = 1'b0;            // outputs stay high-Z for the whole cycle
         dq_oe       = 1'b0;
         disarm_read();
@@ -625,7 +700,6 @@ module tms4x400 #(
       end else begin
         //------------------- READ (may become read-modify-write) ------------
         chk_min("tRCS", t_w_rise, tRCS);
-        early_write   = 1'b0;
         read_this_cas = 1'b1;
         out_armed     = 1'b1;          // claim the output buffers (tCLZ min 0)
         arm_read();
@@ -662,11 +736,11 @@ module tms4x400 #(
       // but tAA/tRAL/tCAL still run from the last genuine address change.
       if (A !== col_t) begin
         col_t     = A;
+        col_moved = 1'b1;
         t_col_chg = $realtime;
       end
     end
     disarm_read();
-    early_write = 1'b0;
     out_armed   = 1'b0;              // tOFF disable is handled by buf_off_proc
   end
 
@@ -740,6 +814,7 @@ module tms4x400 #(
     if (!RAS_N && CAS_N && (cyc == C_ROR || cyc == C_ACTIVE)) begin
       if (($realtime - t_ras_fall) >= tRAH) begin
         col_t     = A;
+        col_moved = 1'b1;
         t_col_chg = $realtime;
         if (page_access && out_armed) arm_read();
       end
@@ -753,12 +828,12 @@ module tms4x400 #(
     if (TIMING_CHECKS && !dq_oe && wrote_this_cas && (t_wr_strobe > NEVER)) begin
       // tDH - data hold after the write strobe (later of CAS low / W low)
       if ((($realtime - t_wr_strobe) + TOL) < tDH)
-        viol($sformatf("tDH = %0.3f ns, minimum %0.3f ns",
-                       $realtime - t_wr_strobe, tDH));
+        viol("tDH", $sformatf("tDH = %0.3f ns, minimum %0.3f ns",
+                              $realtime - t_wr_strobe, tDH));
       // tDHR - data hold referenced to RAS low
       if (!RAS_N && (t_ras_fall > NEVER) && ((($realtime - t_ras_fall) + TOL) < tDHR))
-        viol($sformatf("tDHR = %0.3f ns, minimum %0.3f ns",
-                       $realtime - t_ras_fall, tDHR));
+        viol("tDHR", $sformatf("tDHR = %0.3f ns, minimum %0.3f ns",
+                               $realtime - t_ras_fall, tDHR));
     end
     t_dq_chg = $realtime;
   end
@@ -773,7 +848,7 @@ module tms4x400 #(
         if (cyc != C_SELF)
           for (int r = 0; r < N_ROWS; r++)
             if (!row_decayed[r] && (($realtime - row_last_ref[r]) > tREF + TOL)) begin
-              viol($sformatf("row %0d has not been refreshed for %0.3f ms (tREF %0.3f ms)",
+              viol("tREF", $sformatf("row %0d has not been refreshed for %0.3f ms (tREF %0.3f ms)",
                              r, ($realtime - row_last_ref[r])/1.0e6, tREF/1.0e6));
               decay_row(r[9:0]);
             end
@@ -803,15 +878,17 @@ module tms4x400 #(
     cbr_cnt           = '0;
     test_mode         = 1'b0;
     cas_seen_this_ras = 1'b0;
+    col_moved         = 1'b0;
     page_access       = 1'b0;
-    early_write       = 1'b0;
     wrote_this_cas    = 1'b0;
     read_this_cas     = 1'b0;
     rmw_cycle         = 1'b0;
     self_ref_exited   = 1'b0;
     init_cycles       = 0;
     init_refresh_seen = 1'b0;
-    n_viol = 0; n_warn = 0; n_rd = 0; n_wr = 0; n_ref = 0;
+    n_viol = 0; n_viol_expected = 0; n_warn = 0;
+    n_rd = 0; n_wr = 0; n_ref = 0; viol_quiet = 1'b0;
+    last_viol = ""; watch_param = ""; watch_hit = 1'b0;
 
     rd_armed  = 1'b0;
     rd_done   = 1'b1;
@@ -826,7 +903,7 @@ module tms4x400 #(
     t_w_fall = NEVER; t_w_rise = NEVER;
     t_oe_fall = NEVER; t_oe_rise = NEVER;
     t_addr_chg = NEVER; t_col_chg = NEVER; t_dq_chg = NEVER;
-    t_wr_strobe = NEVER; t_ras_low_start_self = NEVER;
+    t_wr_strobe = NEVER;
 
     for (int r = 0; r < N_ROWS; r++) begin
       row_last_ref[r] = 0.0;
@@ -841,8 +918,8 @@ module tms4x400 #(
   // End-of-simulation summary
   //==========================================================================
   final begin
-    $display("---- %s: %0d reads, %0d writes, %0d refreshes, %0d violations, %0d warnings",
-             dev_name(), n_rd, n_wr, n_ref, n_viol, n_warn);
+    $display("---- %s: %0d reads, %0d writes, %0d refreshes | timing: %0d unexpected, %0d expected, %0d advisory",
+             dev_name(), n_rd, n_wr, n_ref, n_viol, n_viol_expected, n_warn);
   end
 
 endmodule

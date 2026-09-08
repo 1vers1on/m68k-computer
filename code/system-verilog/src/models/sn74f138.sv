@@ -1,14 +1,14 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-module sn54f138 #(
+module sn74f138 #(
     // max propagation delay times in ns
-    parameter real TPLH_A  = 7.5,
-    parameter real TPHL_A  = 8.0,
-    parameter real TPLH_G2 = 7.0,
-    parameter real TPHL_G2 = 7.0,
-    parameter real TPLH_G1 = 8.0,
-    parameter real TPHL_G1 = 7.5
+    parameter real TPLH_A  = 8.5,
+    parameter real TPHL_A  = 9.0,
+    parameter real TPLH_G2 = 8.0,
+    parameter real TPHL_G2 = 7.5,
+    parameter real TPLH_G1 = 9.0,
+    parameter real TPHL_G1 = 8.5
 ) (
     input  wire       G1,
     input  wire       G2A_n,
@@ -31,9 +31,10 @@ module sn54f138 #(
 
         if (enable) (A *> Y) = (tplh_a, tphl_a);
         ifnone      (A *> Y) = (tplh_a, tphl_a);
-        
+
         (G2A_n *> Y) = (tplh_g2, tphl_g2);
         (G2B_n *> Y) = (tplh_g2, tphl_g2);
+        (G1    *> Y) = (tplh_g1, tphl_g1);
     endspecify
 
 endmodule
