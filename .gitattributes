@@ -26,6 +26,7 @@
 Makefile text
 
 *.sh     text eol=lf
+*.bat    text eol=crlf
 
 *.pdf    binary
 *.png    binary
