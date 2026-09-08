@@ -23,7 +23,6 @@ help:
 list:
 	@$(foreach project,$(PROJECTS),echo $(project);)
 
-# Each project owns its toolchain and implements these targets locally.
 define project_targets
 .PHONY: $(1) $(addprefix $(1)/,$(SELECTED_PROJECTS))
 $(1): $(addprefix $(1)/,$(SELECTED_PROJECTS))
