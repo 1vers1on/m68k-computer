@@ -1,0 +1,38 @@
+# Altium-only rules; shared OS/editor/backup rules live at the repository root.
+# Patterns apply to projects and libraries at every depth in this directory.
+# Keep design documents, project/variant settings, OutJobs, templates, scripts,
+# SchLib/PcbLib/IntLib/CmpLib, DbLib/SVNDbLib/DbLink, and their database sources.
+# Keep XLS/XLSX/XLSM/XLSB/ODS/CSV workbooks and Access/SQLite databases.
+
+# Local history, recovery, previews, and per-user desktop state.
+[Hh][Ii][Ss][Tt][Oo][Rr][Yy]/
+__[Pp][Rr][Ee][Vv][Ii][Ee][Ww][Ss]/
+*.[Dd][Ee][Ss][Kk][Tt][Oo][Pp]
+*.[Ss][Cc][Hh][Dd][Oo][Cc][Pp][Rr][Ee][Vv][Ii][Ee][Ww]
+*.[Pp][Cc][Bb][Dd][Oo][Cc][Pp][Rr][Ee][Vv][Ii][Ee][Ww]
+*.[Pp][Rr][Jj][Pp][Cc][Bb][Ss][Tt][Rr][Uu][Cc][Tt][Uu][Rr][Ee]
+*.[Ss][Cc][Hh][Dd][Oo][Cc]~*
+*.[Pp][Cc][Bb][Dd][Oo][Cc]~*
+*.[Ss][Cc][Hh][Ll][Ii][Bb]~*
+*.[Pp][Cc][Bb][Ll][Ii][Bb]~*
+*.[Pp][Rr][Jj][Pp][Cc][Bb]~*
+
+# Default generated logs and output directories (including library compilation).
+# Store curated fabrication/release files outside these folders to track them.
+# Do not ignore Gerber, drill, BOM, STEP, PDF, or IntLib extensions globally.
+[Pp][Rr][Oo][Jj][Ee][Cc][Tt] [Ll][Oo][Gg][Ss]*/
+[Pp][Rr][Oo][Jj][Ee][Cc][Tt] [Oo][Uu][Tt][Pp][Uu][Tt][Ss]*/
+[Ll][Ii][Bb][Rr][Aa][Rr][Yy] [Pp][Aa][Cc][Kk][Aa][Gg][Ee][Ss]/
+[Dd][Ee][Bb][Uu][Gg].[Ll][Oo][Gg]
+[Ss][Tt][Aa][Tt][Uu][Ss] [Rr][Ee][Pp][Oo][Rr][Tt].[Tt][Xx][Tt]
+*.[Pp][Cc][Bb][Dd][Oo][Cc].[Hh][Tt][Mm]
+
+# Altium/LibreOffice locks and Microsoft Office owner files.
+.~lock.*
+~$*
+
+# Access lock files; keep the corresponding MDB/ACCDB database itself.
+*.[Ll][Dd][Bb]
+*.[Ll][Aa][Cc][Cc][Dd][Bb]
+# SQLite journals/WAL files are deliberately not ignored: they can hold data
+# needed by the database. Close/checkpoint the database before committing it.

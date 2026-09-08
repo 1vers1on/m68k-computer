@@ -1,0 +1,76 @@
+# Altium-specific overrides; common formats inherit the repository-root rules.
+# Extension matching is explicitly case-insensitive, including on Linux.
+# "binary" disables line-ending conversion, text diffs, and automatic merges.
+# No Git LFS or custom diff drivers are required.
+
+# Native design documents, libraries, templates, and saved variant data.
+*.[Ss][Cc][Hh][Dd][Oo][Cc] binary
+*.[Pp][Cc][Bb][Dd][Oo][Cc] binary
+*.[Ss][Cc][Hh][Ll][Ii][Bb] binary
+*.[Pp][Cc][Bb][Ll][Ii][Bb] binary
+*.[Ii][Nn][Tt][Ll][Ii][Bb] binary
+*.[Ss][Cc][Hh][Dd][Oo][Tt] binary
+*.[Pp][Cc][Bb][Dd][Oo][Tt] binary
+*.[Pp][Rr][Jj][Pp][Cc][Bb][Vv][Aa][Rr][Ii][Aa][Nn][Tt][Ss] binary
+*.[Bb][Oo][Mm][Dd][Oo][Cc] binary
+*.[Bb][Oo][Mm][Dd][Oo][Tt] binary
+*.[Dd][Ww][Ff][Dd][Oo][Cc] binary
+*.[Dd][Ww][Ff][Dd][Oo][Tt] binary
+*.[Dd][Ww][Ss][Dd][Oo][Tt] binary
+*.[Mm][Bb][Ss][Dd][Oo][Cc] binary
+*.[Mm][Bb][Aa][Dd][Oo][Cc] binary
+*.[Ww][Ii][Rr][Dd][Oo][Cc] binary
+*.[Ll][Dd][Rr][Dd][Oo][Cc] binary
+*.[Hh][Aa][Rr][Dd][Oo][Cc] binary
+*.[Cc][Aa][Mm] binary
+
+# Project/library configuration and output jobs normally use Windows text.
+# auto leaves binary/UTF-16 variants untouched; recognized text uses CRLF.
+*.[Pp][Rr][Jj][Pp][Cc][Bb] text=auto eol=crlf
+*.[Pp][Rr][Jj][Ll][Ii][Bb] text=auto eol=crlf
+*.[Pp][Rr][Jj][Mm][Bb][Dd] text=auto eol=crlf
+*.[Pp][Rr][Jj][Hh][Aa][Rr] text=auto eol=crlf
+*.[Pp][Rr][Jj][Ss][Cc][Rr] text=auto eol=crlf
+*.[Pp][Rr][Jj][Ff][Pp][Gg][Aa] text=auto eol=crlf
+*.[Pp][Rr][Jj][Ee][Mm][Bb] text=auto eol=crlf
+*.[Dd][Ww][Rr][Kk] text=auto eol=crlf
+*.[Oo][Uu][Tt][Jj][Oo][Bb] text=auto eol=crlf
+*.[Dd][Bb][Ll][Ii][Bb] text=auto eol=crlf
+*.[Ss][Vv][Nn][Dd][Bb][Ll][Ii][Bb] text=auto eol=crlf
+*.[Dd][Bb][Ll][Ii][Nn][Kk] text=auto eol=crlf
+*.[Cc][Mm][Pp][Ll][Ii][Bb] text=auto eol=crlf
+*.[Hh][Aa][Rr][Nn][Ee][Ss][Ss] text=auto eol=crlf
+*.[Rr][Uu][Ll] text=auto eol=crlf
+*.[Pp][Cc][Bb][Rr][Uu][Ll] text=auto eol=crlf
+*.[Ll][Aa][Yy][Ee][Rr][Ss][Tt][Aa][Cc][Kk] text=auto eol=crlf
+
+# Spreadsheet-backed component databases, BOMs, and spreadsheet templates.
+*.[Xx][Ll][Ss] binary
+*.[Xx][Ll][Ss][Xx] binary
+*.[Xx][Ll][Ss][Mm] binary
+*.[Xx][Ll][Ss][Bb] binary
+*.[Xx][Ll][Tt] binary
+*.[Xx][Ll][Tt][Xx] binary
+*.[Xx][Ll][Tt][Mm] binary
+*.[Oo][Dd][Ss] binary
+*.[Oo][Tt][Ss] binary
+
+# Database library backing stores (not the text connection definitions above).
+*.[Mm][Dd][Bb] binary
+*.[Aa][Cc][Cc][Dd][Bb] binary
+*.[Dd][Bb] binary
+*.[Ss][Qq][Ll][Ii][Tt][Ee] binary
+*.[Ss][Qq][Ll][Ii][Tt][Ee]3 binary
+*-journal binary
+*-wal binary
+*-shm binary
+
+# Mechanical models: preserve exchange-file bytes, including mixed encodings.
+*.[Ss][Tt][Ee][Pp] -text
+*.[Ss][Tt][Pp] -text
+*.[Ii][Gg][Ee][Ss] -text
+*.[Ii][Gg][Ss] -text
+*.[Ss][Tt][Ll] binary
+*.[Pp][Aa][Rr][Aa][Ss][Oo][Ll][Ii][Dd] binary
+*.[Xx]_[Bb] binary
+*.[Xx]_[Tt] -text
