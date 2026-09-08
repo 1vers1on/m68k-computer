@@ -1,13 +1,13 @@
 IVERILOG := iverilog
 VVP := vvp
-TB_DIR := tb
-SRC_DIR := src/models
 OUT_DIR := .build
 
-TB_FILES := $(wildcard $(TB_DIR)/tb_*.sv)
-SRC_FILES := $(wildcard $(SRC_DIR)/*.sv)
-TESTS := $(patsubst $(TB_DIR)/tb_%.sv,%,$(TB_FILES))
+TB_FILES := $(shell find . -type f -name 'tb_*.sv' -not -path './$(OUT_DIR)/*')
+SRC_FILES := $(shell find . -type f -name '*.sv' -not -name 'tb_*.sv' -not -path './$(OUT_DIR)/*')
+TESTS := $(foreach f,$(TB_FILES),$(patsubst tb_%.sv,%,$(notdir $(f))))
 RESULTS := $(addprefix $(OUT_DIR)/,$(TESTS))
+
+$(foreach f,$(TB_FILES),$(eval TB_$(patsubst tb_%.sv,%,$(notdir $(f))) := $(f)))
 
 .PHONY: all test clean
 
@@ -19,9 +19,9 @@ test:
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
-$(OUT_DIR)/%: $(TB_DIR)/tb_%.sv $(SRC_FILES) | $(OUT_DIR)
+$(OUT_DIR)/%: $(SRC_FILES) | $(OUT_DIR)
 	@rm -f $@.out; \
-	$(IVERILOG) -g2012 -gspecify -o $@.out -s tb_$* $(TB_DIR)/tb_$*.sv $(SRC_FILES) > $@.log 2>&1; \
+	$(IVERILOG) -g2012 -gspecify -o $@.out -s tb_$* $(TB_$*) $(SRC_FILES) > $@.log 2>&1; \
 	$(VVP) $@.out >> $@.log 2>&1; \
 	if grep -q "PASS " $@.log; then echo "PASS  $*"; touch $@; else echo "FAIL  $*"; cat $@.log; exit 1; fi
 
