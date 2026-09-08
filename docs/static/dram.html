@@ -37,7 +37,16 @@
 
     <nav aria-label="On this page">
       <ol>
-        <li><a href="#scope">Scope</a></li>
+        <li>
+          <a href="#scope">Scope</a>
+          <ul>
+            <li>
+              <a href="#logic-connections"
+                >74-Series Logic and System Connections</a
+              >
+            </li>
+          </ul>
+        </li>
         <li><a href="#parts-and-capacity">Parts and Capacity</a></li>
         <li><a href="#data-bus-organization">Data-Bus Organization</a></li>
         <li>
@@ -111,6 +120,287 @@
           then generates every DRAM strobe itself. Neither line reaches a
           <code>RAS</code>, <code>CAS</code>, <code>W</code>, or <code>OE</code>
           input on any part.
+        </p>
+        <p>
+          The structural SystemVerilog controller and eight-chip testbench are
+          in the repository at
+          <code>code/system-verilog/rtl/dram_controller.sv</code> and
+          <code>code/system-verilog/test/tb_dram_controller.sv</code>. Run
+          <code>make test NAME=dram_controller</code> from
+          <code>code/system-verilog</code>. The simulation uses the existing
+          device models and includes the request-end correction in sections 10,
+          11, and 14. It expands count-7 decode with equivalent F08/F04 gates
+          because an F20 model is absent; it is not a package-exact schematic or
+          a board timing-closure result.
+        </p>
+      </section>
+
+      <section id="logic-connections">
+        <h2>1.1. 74-Series Logic and System Connections</h2>
+
+        <p>
+          The 74-series chips form a hardware controller between the MC68EC000
+          bus and the eight DRAMs. They choose the address presented to memory,
+          remember the requested bank and byte lanes, generate strobes in order,
+          and acknowledge the transfer. A second path schedules refresh through
+          the same sequencer. This overview follows the connections defined in
+          <a href="#controller-implementation">section 10</a> and the
+          manufacturer references in <a href="#sources">Sources</a>. Signal
+          names ending in <code>_n</code> are active low.
+        </p>
+
+        <h3>What each group of chips does</h3>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            74-series functions and connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parts</th>
+              <th scope="col">Purpose and connections</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Three <code>CD74ACT157E</code> address multiplexers</td>
+              <td>
+                Each selects between two inputs per channel. CPU
+                <code>A1..A10</code> supply the row and
+                <code>A11..A20</code> supply the column.
+                <code>DRAM_ADDR_COL</code> selects which set reaches
+                <code>A0..A9</code> on all eight DRAMs.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>SN74F74N</code> request synchronizer and
+                <code>N74F194N</code> transaction register
+              </td>
+              <td>
+                <code>U_DRAM_REQ_SYNC</code> passes the qualified request
+                through two clocked stages. On <code>CPU_START</code>,
+                <code>U_DRAM_TX</code> parallel-loads and holds
+                <code>TX_BANK1</code>, <code>TX_UPPER</code>,
+                <code>TX_LOWER</code>, and <code>TX_WRITE</code> for the control
+                logic. Its shift capability is unused.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>SN74F161AN</code> phase counter and two
+                <code>SN74F138N</code> decoders
+              </td>
+              <td>
+                <code>U_DRAM_PHASE</code> counts sequencer steps. Its four
+                output bits feed <code>U_DRAM_PHASE_LO/HI</code>, which identify
+                phases 0 through 15 with active-low outputs. Those outputs feed
+                the timing-window and next-state gates.
+              </td>
+            </tr>
+            <tr>
+              <td>Three <code>SN74F175N</code> mode/control registers</td>
+              <td>
+                <code>U_DRAM_MODE</code> holds <code>CPU_BUSY</code>,
+                <code>REFRESH_BUSY</code>, and the remembered request-end bit.
+                <code>U_DRAM_CTL_A/B</code>
+                capture the control equations and supply RAS/CAS pre-drivers,
+                write and output-enable control, address select, and
+                <code>ACK_ARM</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>SN74F04/08/32/86/02/00/20/30</code> glue gates</td>
+              <td>
+                F04 supplies NOT, F08 AND, F32 OR, F86 XOR, F02 NOR, and
+                F00/F20/F30 NAND functions. F30 gates combine selected
+                active-low phase outputs into active-high timing windows. The
+                other gates implement request validation, arbitration, control
+                equations, refresh accounting, and initialization decode as
+                assigned in section 10.
+              </td>
+            </tr>
+            <tr>
+              <td><code>CD74ACT244E</code> buffers</td>
+              <td>
+                These distribute signals without changing their polarity.
+                <code>U_DRAM_CLK_BUF</code> distributes clocks and
+                <code>U_DRAM_RESET_BUF</code> distributes reset.
+                <code>U_DRAM_STROBE</code> drives the DRAM control inputs and
+                the three address-mux select inputs.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>SN74F08N</code>, <code>SN74F74N</code>, and
+                <code>SN74F10N</code> acknowledgement logic
+              </td>
+              <td>
+                <code>U_DRAM_ACK_D</code> qualifies completion for
+                <code>U_DRAM_ACK</code> to register. Its
+                <code>ACK_ACTIVE</code> output feeds
+                <code>U_DRAM_DTACK_GATE</code>, whose three-input NAND gates
+                also use the live CPU strobes. The result goes to the
+                motherboard DTACK combining tree.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                Two <code>CD74HCT4040E</code> timers and
+                <code>SN74F74N</code>/<code>SN74F175N</code> synchronizers
+              </td>
+              <td>
+                <code>U_STARTUP_DIV</code> Q12 feeds <code>U_INIT_SYNC</code> to
+                release the startup delay. <code>U_REFRESH_DIV</code> Q7 feeds
+                <code>U_REFRESH_SYNC</code> to synchronize periodic refresh
+                events and detect each rising edge.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>74F191PC</code> refresh-credit counter and
+                <code>SN74F161AN</code> initialization counter
+              </td>
+              <td>
+                <code>U_REFRESH_CREDIT</code> counts pending refresh work and
+                requests service from the arbiter.
+                <code>U_DRAM_INIT_CNT</code> counts the eight startup CBR cycles
+                before CPU memory service is enabled.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The family letters matter as well as the function number. This design
+          uses FAST TTL (<code>F</code>) for sequencing and glue, TTL-compatible
+          ACT for address muxes and drivers, and HCT for the timer counters. The
+          selected parts and their loads are covered in
+          <a href="#electrical-compatibility-fanout"
+            >Electrical Compatibility and Fanout</a
+          >.
+        </p>
+
+        <h3>Following a CPU transfer through the logic</h3>
+
+        <ol>
+          <li>
+            The <a href="bus-and-decode.html">motherboard decoder</a> produces
+            <code>RAM0_REQ_n</code> or <code>RAM1_REQ_n</code>. It handles the
+            address region, CPU-space exclusion, and
+            <a href="firmware-rom.html">boot-ROM overlay</a>. The controller
+            combines the bank request with <code>UDS_n</code> and
+            <code>LDS_n</code> to form <code>DRAM_CPU_REQ</code>, then passes
+            that level through the two F74 synchronizer stages.
+          </li>
+          <li>
+            Arbitration waits for initialization, an idle controller, and no
+            pending refresh. Exactly one bank must be requested.
+            <code>CPU_START</code> loads the F194 transaction register and
+            starts CPU mode. The CPU continues holding address and write data;
+            the F194 stores only bank, byte-lane, and direction qualifiers.
+          </li>
+          <li>
+            The F161 advances the sequence. Its F138 decoders feed the F30
+            timing-window gates, and glue combines those windows with the saved
+            qualifiers. The F175 control registers capture the results on the
+            controller clock before the strobe buffer drives memory. A
+            phase-decoder output therefore does not directly drive RAS or CAS.
+          </li>
+          <li>
+            The ACT157 muxes initially present the row. The ACT244 strobe buffer
+            drives the selected bank's RAS low to capture that row. Registered
+            address select then switches the muxes to the column. After the
+            settling interval, the buffer drives the selected byte-lane CAS
+            lines low. The <a href="#read-cycle">read</a> and
+            <a href="#write-cycle">write</a> timelines give the exact steps.
+          </li>
+          <li>
+            CPU <code>D15..D0</code> connect directly to the corresponding DRAM
+            DQ pins in both banks, following the
+            <a href="#data-bus-organization">nibble wiring table</a>. Data does
+            not pass through the address muxes or control registers. On reads,
+            <code>OE_n</code> permits the selected memory to drive the bus. On
+            writes, the CPU drives data, <code>OE_n</code> stays high, and the
+            controller establishes <code>W_n</code> low before CAS.
+          </li>
+          <li>
+            <code>ACK_ARM</code> passes through the F08 qualification gates to
+            the F74 acknowledgement register. F10 gates combine its output with
+            live <code>AS_n</code>, <code>UDS_n</code>, and
+            <code>LDS_n</code> to produce <code>DRAM_DTACK_n</code>. This feeds
+            <code>U_DTACK_A</code> in the motherboard combining tree, which
+            delivers <code>DTACK_n</code> to the CPU. The local push-pull output
+            must not be joined directly to other acknowledgement outputs.
+          </li>
+          <li>
+            When the CPU negates AS or both byte strobes, the F10 path removes
+            acknowledgement promptly. The synchronized request-end path lets the
+            controller finish closing the cycle and precharging memory. It waits
+            for request clear before accepting another transfer, preventing a
+            held request from executing twice.
+          </li>
+        </ol>
+
+        <p>
+          At the DRAMs, <code>RAS0_n</code> reaches all four bank 0 parts and
+          <code>RAS1_n</code> reaches all four bank 1 parts.
+          <code>CAS_U_n</code> reaches the two upper-byte parts in each bank;
+          <code>CAS_L_n</code> reaches the two lower-byte parts in each bank.
+          All eight share <code>W_n</code>, <code>OE_n</code>, and the ten
+          multiplexed address lines. RAS chooses the bank and CAS chooses the
+          byte lane during CPU access. CPU <code>A21</code> contributes to bank
+          decoding, not the multiplexed address. Byte selection uses UDS/LDS
+          rather than a CPU A0 wire.
+        </p>
+
+        <h3>Refresh, clocks, reset, and the rest of the motherboard</h3>
+
+        <p>
+          The
+          <a href="clock-and-reset.html">clock and reset circuit</a> supplies
+          <code>CPU_CLK_DIV2</code> at 20 MHz, <code>CPU_CLK_10</code> at 10
+          MHz, and <code>RESET_n</code>. The ACT244 clock buffer distributes 20
+          MHz to the controller and buffered 10 MHz to both HCT4040 timers. Its
+          other branches supply <code>ROM_CLK</code> to the firmware-ROM
+          read-delay logic and <code>INT_CLK</code> to the interrupt
+          synchronizer and watchdog.
+          <a href="#clock-distribution">Clock distribution</a> lists the
+          receivers on each branch. The separate reset buffer fans motherboard
+          reset out to the controller; timer reset gates provide the counters'
+          active-high reset signals.
+        </p>
+
+        <p>
+          After reset, the startup timer and its F74 synchronizer release
+          initialization. The initialization F161 counts eight CBR cycles before
+          <code>DRAM_INIT_DONE</code> enables CPU service and releases the
+          periodic timer. During normal operation, synchronized Q7 events add
+          credits to the F191. A refresh grant consumes a credit; simultaneous
+          arrival and service leave the count unchanged. Pending credits take
+          priority over a new CPU request at a legal start boundary.
+        </p>
+
+        <p>
+          Refresh uses the same phase counter, control registers, and strobe
+          buffer as CPU transfers. Refresh mode asserts both CAS lines before
+          both RAS lines, with W and OE inactive. Each TMS44400 uses its
+          internal CBR address counter, so no external refresh-row address mux
+          is needed. Refresh does not drive CPU data or generate a CPU
+          acknowledgement. An arriving CPU DRAM request waits for refresh and
+          precharge to finish.
+          <a href="#refresh-architecture">Refresh Architecture</a> and
+          <a href="#reset-behavior">Reset Behavior</a> detail these paths.
+        </p>
+
+        <p>
+          ROM, VGA, and the other memory-mapped peripherals use their own
+          selects and acknowledgement paths on the shared CPU bus; their
+          register accesses do not pass through this DRAM sequencer. The decoder
+          separates device selections and the motherboard DTACK tree combines
+          completion signals. All controller and DRAM packages connect to
+          motherboard +5 V and ground, with local bypass and bank capacitors as
+          specified in <a href="#pcb-decoupling">PCB and Decoupling Notes</a>.
         </p>
       </section>
 
@@ -1208,7 +1498,10 @@ assert selected CAS</code></pre>
             <tr>
               <td><code>U_DRAM_MODE</code></td>
               <td><code>SN74F175N</code></td>
-              <td><code>CPU_BUSY</code> and <code>REFRESH_BUSY</code></td>
+              <td>
+                <code>CPU_BUSY</code>, <code>REFRESH_BUSY</code>, and
+                <code>CPU_REQUEST_ENDED</code>
+              </td>
             </tr>
             <tr>
               <td><code>U_DRAM_CTL_A</code>, <code>U_DRAM_CTL_B</code></td>
@@ -1425,10 +1718,12 @@ CBR_RAS_WINDOW = phase 1 through 2</code></pre>
         <h3>Mode and output equations</h3>
 
         <p>
-          <code>U_DRAM_MODE</code> stores <code>CPU_BUSY</code> and
-          <code>REFRESH_BUSY</code> in flip-flops 1 and 2. Their D inputs are
-          pins 4 and 5 and their Q outputs are pins 2 and 7. Tie unused D inputs
-          pins 12 and 13 low and leave their outputs open. Pin 1 is
+          <code>U_DRAM_MODE</code> stores <code>CPU_BUSY</code>,
+          <code>REFRESH_BUSY</code>, and <code>CPU_REQUEST_ENDED</code> in
+          flip-flops 1 through 3. Their D inputs are pins 4, 5, and 12; their Q
+          outputs are pins 2, 7, and 10. Pin 11 supplies
+          <code>CPU_REQUEST_ENDED_n</code> for acknowledgement qualification.
+          Tie unused D input pin 13 low and leave its outputs open. Pin 1 is
           <code>RESET_n</code>, pin 9 is <code>DRAM_CLK_A</code>, and pins 8 and
           16 are ground and +5 V.
         </p>
@@ -1442,8 +1737,10 @@ CPU_START = IDLE AND DRAM_INIT_DONE AND NOT REFRESH_PENDING
             AND VALID_CPU_REQUEST
 START_REFRESH = INIT_START OR REFRESH_SERVICE
 
+CPU_REQUEST_ENDED_D = CPU_BUSY AND (CPU_REQUEST_ENDED OR NOT REQ_SYNC2)
 CPU_BUSY_D = CPU_START
-             OR (CPU_BUSY AND (PHASE_9_n OR REQ_SYNC2))
+             OR (CPU_BUSY AND
+                 (PHASE_9_n OR (REQ_SYNC2 AND NOT CPU_REQUEST_ENDED)))
 
 INIT_LAST = INIT_COUNT_QA AND INIT_COUNT_QB AND INIT_COUNT_QC
             AND NOT INIT_COUNT_QD
@@ -1481,7 +1778,8 @@ CAS_L_ACTIVE_D = (CPU_BUSY AND CPU_CAS_WINDOW AND TX_LOWER)
 W_ACTIVE_D = CPU_BUSY AND CPU_RAS_WINDOW AND TX_WRITE
 OE_ACTIVE_D = CPU_BUSY AND CPU_CAS_WINDOW AND NOT TX_WRITE
 DRAM_ADDR_COL_D = CPU_BUSY AND CPU_COL_WINDOW
-ACK_ARM_D = (CPU_BUSY AND PHASE_3) OR (ACK_ARM AND REQ_SYNC2)
+ACK_ARM_D = CPU_BUSY AND NOT CPU_REQUEST_ENDED
+            AND REQ_SYNC2 AND (PHASE_3 OR ACK_ARM)
 OE_n_PRE = NOT (OE_ACTIVE AND DRAM_CPU_REQ)</code></pre>
 
         <p>
@@ -1847,11 +2145,14 @@ refresh arbiter grants the DRAM to the CPU</code></pre>
           After finishing a CPU transaction, enter
           <code>WAIT_REQUEST_CLEAR</code>. Return to
           <code>IDLE_ARMED</code> only after observing
-          <code>REQ_SYNC2</code> low. This prevents one extended bus cycle from
-          starting more than one DRAM transaction. The MC68EC000FN10 specifies
-          at least 105 ns with AS and the data strobes negated between bus
-          cycles. That exceeds two nominal 20 MHz periods, so the two-stage
-          synchronizer can pass a low level between valid back-to-back cycles.
+          <code>REQ_SYNC2</code> low, remembering that observation in
+          <code>CPU_REQUEST_ENDED</code> even if a new request arrives before
+          phase 9. The remembered end releases CPU ownership when precharge
+          finishes; it clears when that ownership ends. This prevents one
+          extended cycle from executing twice without losing the next cycle. The
+          105 ns minimum inter-cycle strobe gap is exercised by the controller
+          simulation. Merely waiting for a low synchronized request in phase 9
+          can miss that gap.
         </p>
       </section>
 
@@ -2074,7 +2375,8 @@ refresh arbiter grants the DRAM to the CPU</code></pre>
     -&gt; return OE, CAS, and RAS high at the phase-6 edge
     -&gt; return the address mux to row mode
     -&gt; keep RAS high for 2 ticks
-    -&gt; wait for REQ_SYNC2 low while ACK_ARM remains high
+    -&gt; remember REQ_SYNC2 low in CPU_REQUEST_ENDED; clear ACK_ARM
+    -&gt; leave CPU ownership at phase 9, even if the next request is already high
     -&gt; return to IDLE_ARMED</code></pre>
 
         <p>
@@ -2381,7 +2683,7 @@ OE_n remains high</code></pre>
     -&gt; return CAS, RAS, and W_n high at the phase-6 edge
     -&gt; select row-address mode
     -&gt; keep RAS high for 2 ticks
-    -&gt; wait for REQ_SYNC2 low in phase 9
+    -&gt; leave phase 9 after a remembered or current REQ_SYNC2 low
     -&gt; return to IDLE_ARMED</code></pre>
 
         <p>
@@ -2438,7 +2740,10 @@ OE_n remains high</code></pre>
               <td>2</td>
               <td><code>1D</code></td>
               <td>
-                <code>ACK_D = ACK_ARM AND AS_ACTIVE AND BYTE_ACTIVE</code>, from
+                <code
+                  >ACK_D = ACK_ARM AND AS_ACTIVE AND BYTE_ACTIVE AND
+                  ACK_REQUEST</code
+                >, from
                 <code>U_DRAM_ACK_D</code>
               </td>
             </tr>
@@ -2496,14 +2801,15 @@ OE_n remains high</code></pre>
         <pre><code>ACK_D = 0:  ACK_ACTIVE = low  after a clock edge
 ACK_D = 1:  ACK_ACTIVE = high after a clock edge
 
-ACK_D = ACK_ARM AND AS_ACTIVE AND BYTE_ACTIVE</code></pre>
+ACK_REQUEST = REQ_SYNC2 AND CPU_REQUEST_ENDED_n
+ACK_D = ACK_ARM AND AS_ACTIVE AND BYTE_ACTIVE AND ACK_REQUEST</code></pre>
 
         <p>
           <code>ACK_ARM</code> is a controller-state output. It may rise only
           after the read-data or write-cycle timing budget has closed, and it
-          remains high through <code>WAIT_REQUEST_CLEAR</code>. Registering it
-          prevents combinational state-decode glitches from reaching the
-          motherboard acknowledgement tree. Gating <code>1D</code> with
+          remains high until the accepted request ends. Registering it prevents
+          combinational state-decode glitches from reaching the motherboard
+          acknowledgement tree. Gating <code>1D</code> with
           <code>AS_ACTIVE</code> and <code>BYTE_ACTIVE</code> also makes the
           register fall on its own: when the CPU strobes negate,
           <code>ACK_D</code> goes low and the next <code>CPU_CLK_DIV2</code> (20
@@ -2799,33 +3105,32 @@ requirement: t_release &lt;= 110 ns</code></pre>
 
         <pre><code>AS_ACTIVE   = NOT AS_n                 (U_DRAM_DTACK_GATE gate 1)
 BYTE_ACTIVE = NOT (UDS_n AND LDS_n)    (U_DRAM_DTACK_GATE gate 2)
+ACK_REQUEST = REQ_SYNC2 AND CPU_REQUEST_ENDED_n
 
-ACK_D = ACK_ARM AND AS_ACTIVE AND BYTE_ACTIVE
-
-ACK_ARM -----\
-              AND --\
-AS_ACTIVE ---/       AND ---- ACK_D ---- U_DRAM_ACK pin 2 (1D)
-BYTE_ACTIVE --------/</code></pre>
+ACK_ARM_AS      = ACK_ARM AND AS_ACTIVE
+ACK_BYTE_REQUEST = BYTE_ACTIVE AND ACK_REQUEST
+ACK_D           = ACK_ARM_AS AND ACK_BYTE_REQUEST</code></pre>
 
         <p>
-          While the cycle is active, <code>AS_ACTIVE</code> and
-          <code>BYTE_ACTIVE</code> are high, so <code>ACK_D</code> follows
-          <code>ACK_ARM</code> and the register holds its acknowledged state.
-          When the CPU negates <code>AS_n</code> or both byte strobes,
-          <code>ACK_D</code> goes low and the next <code>CPU_CLK_DIV2</code> (20
-          MHz) rising edge clears <code>ACK_ACTIVE</code>. The external
+          While the accepted cycle is active, <code>AS_ACTIVE</code>,
+          <code>BYTE_ACTIVE</code>, and <code>ACK_REQUEST</code> are high, so
+          <code>ACK_D</code> follows <code>ACK_ARM</code> and the register holds
+          its acknowledged state. When the CPU negates <code>AS_n</code> or both
+          byte strobes, <code>ACK_D</code> goes low and the next
+          <code>CPU_CLK_DIV2</code> (20 MHz) rising edge clears
+          <code>ACK_ACTIVE</code>. The external
           <code>SN74F10</code> qualification has already forced
           <code>DRAM_DTACK_n</code> high by then, so this synchronous clear is
           off the 110 ns negation path.
         </p>
 
         <p>
-          <code>U_DRAM_ACK_D</code>, an <code>SN74F08N</code>, forms the
-          three-input AND from two cascaded gates (<code
-            >ACK_ARM AND AS_ACTIVE</code
-          >, then <code>AND BYTE_ACTIVE</code>). <code>AS_ACTIVE</code> and
-          <code>BYTE_ACTIVE</code> are the gate 1 and gate 2 outputs of
-          <code>U_DRAM_DTACK_GATE</code>; no separate inverter is needed.
+          <code>U_DRAM_ACK_D</code>, an <code>SN74F08N</code>, uses all four
+          gates: gate 1 combines ACK_ARM and AS_ACTIVE, gate 2 qualifies the
+          synchronized request with the complementary request-end output, gate 3
+          combines that result with BYTE_ACTIVE, and gate 4 drives ACK_D. The
+          ACK_ARM path still crosses two AND gates; the synchronized request and
+          request-end paths cross three.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -2852,19 +3157,27 @@ BYTE_ACTIVE --------/</code></pre>
               <td>4, 5, 6</td>
               <td>Gate 2 inputs and output</td>
               <td>
-                Pin 4: <code>ACK_ARM_AS</code>; pin 5: <code>BYTE_ACTIVE</code>;
-                pin 6: <code>ACK_D</code> to <code>U_DRAM_ACK</code> pin 2
+                Pin 4: <code>REQ_SYNC2</code>; pin 5:
+                <code>CPU_REQUEST_ENDED_n</code>; pin 6:
+                <code>ACK_REQUEST</code>
               </td>
             </tr>
             <tr>
-              <td>9, 10, 12, 13</td>
-              <td>Unused inputs</td>
-              <td>Ground</td>
+              <td>9, 10, 8</td>
+              <td>Gate 3 inputs and output</td>
+              <td>
+                Pin 9: <code>BYTE_ACTIVE</code>; pin 10:
+                <code>ACK_REQUEST</code>; pin 8: <code>ACK_BYTE_REQUEST</code>
+              </td>
             </tr>
             <tr>
-              <td>8, 11</td>
-              <td>Unused outputs</td>
-              <td>Leave unconnected</td>
+              <td>12, 13, 11</td>
+              <td>Gate 4 inputs and output</td>
+              <td>
+                Pin 12: <code>ACK_ARM_AS</code>; pin 13:
+                <code>ACK_BYTE_REQUEST</code>; pin 11: <code>ACK_D</code> to
+                <code>U_DRAM_ACK</code> pin 2
+              </td>
             </tr>
             <tr>
               <td>7</td>
@@ -2880,16 +3193,15 @@ BYTE_ACTIVE --------/</code></pre>
         </table>
 
         <p>
-          The synchronous clear must return the acknowledgement register to its
-          inactive state before the next CPU bus cycle can assert
-          <code>AS_n</code> and before any clock edge that could recapture a
-          high <code>ACK_ARM</code>. The MC68EC000FN10's 105 ns minimum with
-          <code>AS_n</code> and the data strobes negated leaves at least two
-          <code>CPU_CLK_DIV2</code> periods for this.
-          <code>ACK_ARM</code> itself must fall in
-          <code>WAIT_REQUEST_CLEAR</code> before the controller re-arms, so a
-          second bus cycle cannot re-assert <code>ACK_ACTIVE</code> on a stale
-          <code>ACK_D</code>.
+          The controller testbench exposed a stale-acknowledgement failure with
+          the former three-input ACK_D equation at a 105 ns strobe gap: raw
+          strobes could reassert before ACK_ARM had cleared through the
+          synchronizer. ACK_REQUEST blocks that old state immediately when
+          REQ_SYNC2 is low, and CPU_REQUEST_ENDED keeps it blocked through
+          precharge. The spare third mode flip-flop remembers the low request so
+          phase 9 cannot miss it. No raw bus strobe drives an asynchronous
+          register clear. The regression covers both the stale ACK and the
+          subsequent re-arm failure.
         </p>
 
         <p>
@@ -4312,11 +4624,16 @@ Plus the CPU still needs data only 5 ns (#27) before its next latching clock edg
   --&gt; U_DTACK_A (SN74F21) --&gt; U_DTACK_B (SN74F21) --&gt; U_OR_DTACK (SN74F32) --&gt; CPU /DTACK
 
 D-input setup at U_DRAM_ACK (ACK_ARM is a registered state output; AS_ACTIVE and
-BYTE_ACTIVE are already high during an active cycle):
-    setup_slack = Tdiv2_min - 2 x tPHL(F08 6.6) - tsu(F74 D, 3) - t_pcb
-                = 49.995 - 13.2 - 3 - t_pcb
-                = 33.8 ns - t_pcb                          PASS for t_pcb &lt; 33.8 ns
-    hold: ACK_ARM held through WAIT_REQUEST_CLEAR; th(F74 D)=1 ns met.
+BYTE_ACTIVE and ACK_REQUEST are already high during an accepted cycle):
+    setup_slack = Tdiv2_min - tCQ(F175 8.5) - 2 x tPHL(F08 6.6)
+                  - tsu(F74 D, 3) - t_pcb - t_clock_skew
+                = 49.995 - 8.5 - 13.2 - 3 - t_pcb - t_clock_skew
+                = 25.3 ns - t_pcb - t_clock_skew
+    request-qualification paths cross three F08 gates:
+        conservative slack = 49.995 - 9.2 - 19.8 - 3 - t_pcb - t_clock_skew
+                           = 18.0 ns - t_pcb - t_clock_skew
+    Verify setup and hold on all four ACK_D gates and the new mode-bit path;
+    Icarus does not enforce the device models' specify timing checks.
 
 Assertion delay from the U_DRAM_ACK clock edge to CPU /DTACK low:
     t_assert = tPLH(F74 CLK->Q, 7.8)   [1Q = ACK_ACTIVE rises]
@@ -4332,9 +4649,12 @@ controller holds ACK_ACTIVE and every strobe, so the CPU simply inserts one
 more wait state. No transaction is lost.</code></pre>
 
         <p>
-          <strong>Status: PASS.</strong> The F74 data setup has 33.8 ns of slack
-          before board delay; the assertion logic is a deterministic 30.4 ns; a
-          missed sampling edge only adds a wait state. The registered
+          The revised ACK_ARM setup budget is 25.3 ns before board delay and
+          clock skew; the added request-qualification paths have a conservative
+          18.0 ns budget. The output assertion path remains 30.4 ns before board
+          delay. The controller regression passes with modeled propagation
+          delays; setup, hold, fanout, and clock skew still require schematic
+          and board verification. The registered
           <code>ACK_ARM</code> output settles one full clock before the
           acknowledgement register samples it. Measure at least 3 ns of setup at
           <code>U_DRAM_ACK</code> and 5 ns at the CPU pin.
@@ -4804,11 +5124,12 @@ why tRP is allocated two ticks.</code></pre>
             </tr>
             <tr>
               <td>Read ACK assertion</td>
-              <td>PASS</td>
+              <td>Simulation passes; verify revised setup/hold paths</td>
               <td>
-                F74 D-setup slack 33.8 ns - <code>t_pcb</code>; assertion logic
-                30.4 ns deterministic; a missed CPU sampling edge inserts one
-                wait state. Measure at least 5 ns of setup at the CPU pin.
+                ACK_ARM setup budget 25.3 ns; added request-qualification budget
+                18.0 ns, both before board delay and clock skew. Output
+                assertion logic remains 30.4 ns before board delay. See section
+                20.4; measure at least 5 ns of setup at the CPU pin.
               </td>
             </tr>
             <tr>
@@ -5485,7 +5806,7 @@ special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</c
             </tr>
             <tr>
               <td><code>U_DRAM_ACK_D</code>, <code>SN74F08N</code></td>
-              <td>All four unused inputs LOW; unused outputs open</td>
+              <td>All four gates allocated; no unused inputs or outputs</td>
               <td><strong>PASS</strong></td>
             </tr>
             <tr>
