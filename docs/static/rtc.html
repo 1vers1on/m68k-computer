@@ -450,10 +450,11 @@ Register D, $0D:  VRT 0 0 0 0 0 0 0</code></pre>
         <h3>32.768 kHz Crystal</h3>
         <p>
           Y_RTC is a 32.768 kHz tuning-fork crystal connected directly between
-          pins 2 and 3. Select a parallel-resonant crystal specified for 6 pF
-          load capacitance and no more than 50 kohms series resistance. The RTC
-          supplies its own bias and load network, so no external crystal
-          capacitors or feedback resistor are fitted.
+          pins 2 and 3. The specified part is the IQD Frequency Products
+          <code>LFXTAL014219B</code>. Any substitute must be a parallel-resonant
+          crystal specified for 6 pF load capacitance and no more than 50 kohms
+          series resistance. The RTC supplies its own bias and load network, so
+          no external crystal capacitors or feedback resistor are fitted.
         </p>
         <p>
           Register A must contain <code>DV2..DV0 = 010</code> before the divider
@@ -467,6 +468,11 @@ Register D, $0D:  VRT 0 0 0 0 0 0 0</code></pre>
           holder. Its positive terminal connects directly to
           <code>VBAT</code>; its negative terminal connects to ground. No series
           diode, resistor, or charging circuit is permitted in the battery path.
+        </p>
+        <p>
+          The recommended holder is the MPD <code>BA2032</code>. It is a
+          through-hole retainer for a 20 mm cell. Any through-hole holder is
+          acceptable.
         </p>
         <p>
           The DS1285 disconnects the host interface during power failure and
@@ -1004,12 +1010,15 @@ board allowance            81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>Y_RTC</code></td>
-              <td>32.768 kHz, 6 pF crystal</td>
+              <td>32.768 kHz, 6 pF crystal; IQD <code>LFXTAL014219B</code></td>
               <td>Time base, 50 kohms maximum ESR.</td>
             </tr>
             <tr>
               <td><code>BT_RTC</code></td>
-              <td>CR2032 and through-hole holder</td>
+              <td>
+                CR2032 and through-hole holder; recommended holder MPD
+                <code>BA2032</code>
+              </td>
               <td>Replaceable 3 V backup supply.</td>
             </tr>
             <tr>

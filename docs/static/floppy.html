@@ -309,11 +309,12 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
         <h3>24 MHz Reference</h3>
         <p>
           Y_FDC is a 24 MHz parallel-resonant, fundamental-mode crystal between
-          <code>X1</code> and <code>X2</code>. C_FDC_X1 and C_FDC_X2 are 22 pF
-          C0G capacitors from the corresponding crystal pins to ground, matching
-          Intel's application circuit. Select a crystal with no more than 40
-          ohms series resistance, less than 5 pF shunt capacitance, and a total
-          frequency error within +/-0.1%.
+          <code>X1</code> and <code>X2</code>. The specified part is the YIC
+          <code>24M20PI/49US</code> in an HC-49/US package. C_FDC_X1 and
+          C_FDC_X2 are 22 pF C0G capacitors from the corresponding crystal pins
+          to ground, matching Intel's application circuit. Any substitute must
+          have no more than 40 ohms series resistance, less than 5 pF shunt
+          capacitance, and a total frequency error within +/-0.1%.
         </p>
         <p>
           The oscillator requires 10 ms after +5 V reaches 4.5 V before the
@@ -432,6 +433,11 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
           the cable. Intel recommends about 10 kohms for PS/2-mode 3.5-inch
           drives because their outputs become high impedance when deselected.
         </p>
+        <p>
+          The recommended network is the Bourns <code>4610X-102-103LF</code>, a
+          10-pin SIP holding five isolated 10 kohm resistors. Any five-element
+          isolated 10 kohm SIP with the same footprint is acceptable.
+        </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Drive returns to the controller
@@ -495,6 +501,11 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
           ground. The cable stays inside the enclosure and has one untwisted
           drive connector followed by a twist in conductors 10 through 16 and a
           final drive connector.
+        </p>
+        <p>
+          The recommended header is the Amphenol ICC <code>66506-019LF</code>.
+          Any keyed, shrouded, 2-by-17, 2.54 mm header with the same footprint
+          and the pinout below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -627,6 +638,11 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
           draws no normal current. Supplying the standard +12 V contact keeps
           the motherboard connector compatible with ordinary 3.5-inch drive
           power cables.
+        </p>
+        <p>
+          The recommended header is the TE Connectivity <code>171825-4</code>, a
+          four-position keyed through-hole male header. Any four-contact keyed
+          header with the same footprint and the pinout below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1261,12 +1277,18 @@ board allowance              86.8 ns</code></pre>
             </tr>
             <tr>
               <td>1</td>
-              <td><code>Y_FDC</code>, 24 MHz crystal</td>
+              <td>
+                <code>Y_FDC</code>, 24 MHz crystal; YIC
+                <code>24M20PI/49US</code>
+              </td>
               <td>Controller reference.</td>
             </tr>
             <tr>
               <td>1</td>
-              <td><code>J_FDC</code>, keyed 2-by-17 shrouded header</td>
+              <td>
+                <code>J_FDC</code>, keyed 2-by-17 shrouded header; Amphenol ICC
+                <code>66506-019LF</code>
+              </td>
               <td>Internal drive cable.</td>
             </tr>
             <tr>
@@ -1276,7 +1298,10 @@ board allowance              86.8 ns</code></pre>
             </tr>
             <tr>
               <td>2</td>
-              <td>Four-contact keyed mini-Berg headers</td>
+              <td>
+                Four-contact keyed mini-Berg headers; recommended part TE
+                Connectivity <code>171825-4</code>
+              </td>
               <td>Drive power.</td>
             </tr>
             <tr>
@@ -1291,7 +1316,10 @@ board allowance              86.8 ns</code></pre>
             </tr>
             <tr>
               <td>1</td>
-              <td>Five-element isolated 10 kohm SIP</td>
+              <td>
+                Five-element isolated 10 kohm SIP; recommended part Bourns
+                <code>4610X-102-103LF</code>
+              </td>
               <td>Drive-return pull-ups.</td>
             </tr>
             <tr>

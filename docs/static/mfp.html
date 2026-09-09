@@ -763,6 +763,12 @@ TDDR = 0 represents a count of 256.</code></pre>
           </tbody>
         </table>
         <h3>DE-9 DTE Connector</h3>
+        <p>
+          J_RS232 is a male DE-9 receptacle at the board edge. The recommended
+          part is the Amphenol ICC <code>LD09P33E4GV00LF</code>, a right-angle
+          through-hole male DE-9 with board locks. Any male DE-9 with the same
+          footprint and the pinout below is acceptable.
+        </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Male DE-9 serial connector
@@ -855,6 +861,12 @@ TDDR = 0 represents a count of 256.</code></pre>
           PS/2 wired-AND behavior. Reset sets the DDR to input and releases both
           lines. GPIP7 detects falling clock edges while the keyboard is
           sending; GPIP1 supplies the data level.
+        </p>
+        <p>
+          J_PS2 is a female mini-DIN-6 receptacle at the board edge. The
+          recommended part is the Kycon <code>KMDGX-6S-BS</code>, a through-hole
+          shielded mini-DIN-6 with board locks. Any mini-DIN-6 receptacle with
+          the same footprint and the pinout below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1368,17 +1380,23 @@ board allowance            32.8 ns</code></pre>
             </tr>
             <tr>
               <td><code>Y_MFP_TIMER</code></td>
-              <td>2.4576 MHz crystal</td>
+              <td>2.4576 MHz crystal; CTS <code>MP024S</code></td>
               <td>Parallel resonance, 32 pF load, 300 ohms maximum ESR.</td>
             </tr>
             <tr>
               <td><code>J_RS232</code></td>
-              <td>DE-9 male, right-angle through-hole</td>
+              <td>
+                DE-9 male, right-angle through-hole; recommended part Amphenol
+                ICC <code>LD09P33E4GV00LF</code>
+              </td>
               <td>DTE serial connector.</td>
             </tr>
             <tr>
               <td><code>J_PS2</code></td>
-              <td>Mini-DIN-6 female, through-hole</td>
+              <td>
+                Mini-DIN-6 female, through-hole; recommended part Kycon
+                <code>KMDGX-6S-BS</code>
+              </td>
               <td>PS/2 keyboard connector.</td>
             </tr>
             <tr>

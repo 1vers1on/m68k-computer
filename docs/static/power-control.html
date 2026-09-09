@@ -39,7 +39,7 @@
         <dt>Nominal load requirement</dt>
         <dd>Up to approximately 5 A at +5 V and 3 A at +12 V</dd>
         <dt>Front-panel control</dt>
-        <dd>Momentary normally-open pushbutton</dd>
+        <dd>Momentary normally-open pushbutton, C&amp;K FP11SPC1B1TP00</dd>
         <dt>Turn-on delay</dt>
         <dd>Approximately 3 seconds of continuous button hold</dd>
         <dt>Turn-off delay</dt>
@@ -237,6 +237,12 @@
           ms time constant before the Schmitt trigger. A 1 kohm resistor in the
           switch lead limits capacitor discharge current when the contacts
           close.
+        </p>
+        <p>
+          The specified switch is the C&amp;K <code>FP11SPC1B1TP00</code>, a
+          normally-open momentary SPST pushbutton. The same part is used for the
+          manual reset switch in clock-and-reset.html and the NMI button in
+          interrupts.html.
         </p>
         <p>
           The conditioned internal signal is named <code>BTN</code>.
@@ -532,6 +538,10 @@ tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
           computer is off.
         </p>
         <p>
+          The specified part is the Omron <code>G4W-2212P-US-TV5-HP DC12</code>,
+          a two-pole normally-open power relay with a 12 V DC coil.
+        </p>
+        <p>
           A 2N7000 N-channel MOSFET drives the selected relay coil. The coil
           current must remain within the MOSFET's drain-current and dissipation
           limits at a 5 V gate drive. <code>POWER_STATE</code> drives the gate
@@ -631,7 +641,8 @@ tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
           A red LED and 1 kohm series resistor connect from
           <code>POWER_STATE</code> to ground. The LED current is about 3 mA with
           a 2 V forward drop, within the SN74HC74N's 4 mA output specification
-          at a 5 V supply.
+          at a 5 V supply. The specified LED is the Kingbright
+          <code>WP7113ID</code>, a 5 mm red indicator.
         </p>
         <pre>
         POWER_STATE = 0 -> LED off
@@ -707,17 +718,23 @@ tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
             </tr>
             <tr>
               <td>1</td>
-              <td>12 V DPST normally-open power relay</td>
+              <td>
+                12 V DPST normally-open power relay; Omron
+                <code>G4W-2212P-US-TV5-HP DC12</code>
+              </td>
               <td>Switches the +5 V and +12 V computer rails</td>
             </tr>
             <tr>
               <td>1</td>
-              <td>Momentary normally-open pushbutton</td>
+              <td>
+                Momentary normally-open pushbutton; C&amp;K
+                <code>FP11SPC1B1TP00</code>
+              </td>
               <td>Front-panel power control</td>
             </tr>
             <tr>
               <td>1</td>
-              <td>Red LED</td>
+              <td>Red LED; Kingbright <code>WP7113ID</code></td>
               <td>Front-panel power indicator</td>
             </tr>
           </tbody>

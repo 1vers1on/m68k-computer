@@ -984,6 +984,11 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
           uses. The conditioned output is <code>NMI_n</code>, wired to
           <code>U_IPL_ENC</code> <code>/I7</code>.
         </p>
+        <p>
+          The specified switch is the C&amp;K FP11SPC1B1TP00, the same
+          normally-open momentary SPST pushbutton used for the front-panel power
+          and reset buttons.
+        </p>
         <pre><code>button --- RC --- SN74LS14 stage --- gate with RESET_n --- NMI_n --- U_IPL_ENC /I7</code></pre>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>

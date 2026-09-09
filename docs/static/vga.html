@@ -899,8 +899,8 @@ VGA_DTACK_n   = NOT (VGA_AS_ACTIVE AND VGA_ACK_READY)</code></pre>
           and fill the host window exactly. Each device must have separate lower
           and upper column-address strobes, one write enable, one output enable,
           nine symmetric address inputs, and a 70 ns row access time. The
-          HM514260-70 is the reference device; the TRM characterizes it in its
-          own 70 ns DRAM table.
+          <code>HM514260CJ7</code> is the specified device; the TRM
+          characterizes it in its own 70 ns DRAM table.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1049,12 +1049,15 @@ VGA_DTACK_n   = NOT (VGA_AS_ACTIVE AND VGA_ACK_READY)</code></pre>
         <h2>8. Clock and Reset</h2>
         <h3>Dedicated Reference Oscillator</h3>
         <p>
-          Y_VGA_CLK is a packaged 14.31818 MHz clock oscillator. No specific
-          part is called out; any oscillator meeting the specification below is
-          acceptable. Its output reaches CL-GD5428 <code>OSC</code>, pin 159,
-          through R_VGA_CLK, a 33 ohm source-series resistor, and reaches
-          U_VGA_INV_B for the adapter clock. Oscillator enable is tied high.
-          <code>XTAL</code>, pin 158, is left open because no crystal is fitted.
+          Y_VGA_CLK is a packaged 14.31818 MHz clock oscillator. Any oscillator
+          meeting the specification below is acceptable. The Epson SG-615 series
+          is the reference part and the source of the output levels checked
+          below; the ECS <code>ECS-100AX-143</code> is an equivalent alternative
+          if the Epson part cannot be sourced. Its output reaches CL-GD5428
+          <code>OSC</code>, pin 159, through R_VGA_CLK, a 33 ohm source-series
+          resistor, and reaches U_VGA_INV_B for the adapter clock. Oscillator
+          enable is tied high. <code>XTAL</code>, pin 158, is left open because
+          no crystal is fitted.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1368,6 +1371,12 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
           J_VGA is a DE-15 receptacle at the board edge. The CL-GD5428 has no
           DDC engine, so the display data channel and monitor identification
           pins are unconnected.
+        </p>
+        <p>
+          The recommended part is the Amphenol <code>L77HDE15SD1CH4FVGA</code>,
+          a right-angle through-hole high-density DE-15 receptacle with board
+          locks. Any DE-15 receptacle with the same footprint and the pinout
+          below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -2219,7 +2228,7 @@ board allowance             81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>U_VGA_VRAM0..3</code></td>
-              <td>4 x HM514260-70 or equivalent</td>
+              <td>4 x HM514260CJ7</td>
               <td>
                 256K x 16 FPM DRAM with separate lower and upper
                 <code>CAS*</code>, one <code>WE*</code>, one <code>OE*</code>,
@@ -2234,7 +2243,10 @@ board allowance             81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>Y_VGA_CLK</code></td>
-              <td>14.31818 MHz packaged oscillator, +/-100 ppm</td>
+              <td>
+                14.31818 MHz packaged oscillator, +/-100 ppm; Epson SG-615
+                series or ECS <code>ECS-100AX-143</code>
+              </td>
               <td>Dedicated synthesizer reference.</td>
             </tr>
             <tr>
@@ -2298,7 +2310,10 @@ board allowance             81.5 ns</code></pre>
           <tbody>
             <tr>
               <td><code>J_VGA</code></td>
-              <td>DE-15 receptacle</td>
+              <td>
+                DE-15 receptacle; recommended part Amphenol
+                <code>L77HDE15SD1CH4FVGA</code>
+              </td>
               <td>Monitor output at the board edge.</td>
             </tr>
             <tr>
@@ -2695,8 +2710,8 @@ board allowance             81.5 ns</code></pre>
             Epson,
             <a href="datasheets/SG-615_531_51_Series_DS.pdf"
               ><cite>SG-615, SG-531, and SG-51 Series</cite></a
-            >. Example compliant oscillator; frequency tolerance, symmetry,
-            output levels, and load conditions.
+            >. Reference oscillator; frequency tolerance, symmetry, output
+            levels, and load conditions.
           </li>
           <li>
             Texas Instruments,

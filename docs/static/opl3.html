@@ -115,11 +115,11 @@ SMPAC ------------------------------&gt; both DAC SMP1 inputs
 SMPBD ------------------------------&gt; both DAC SMP2 inputs
 
 A -- filter --+
-              +-- left mix -- volume -- NJM4556D -- tip
+              +-- left mix -- volume -- NJM4556AD -- tip
 C -- filter --+
 
 B -- filter --+
-              +-- right mix - volume -- NJM4556D -- ring
+              +-- right mix - volume -- NJM4556AD -- ring
 D -- filter --+
 
 audio ground ------------------------------------------- sleeve</code></pre>
@@ -426,11 +426,13 @@ OPL3_DTACK_n = NOT (OPL3_AS_ACTIVE AND OPL3_ACK_READY)</code></pre>
         <h2>6. Clock and Reset</h2>
         <h3>Dedicated Master Clock</h3>
         <p>
-          Y_OPL_CLK is a packaged 14.31818 MHz clock oscillator. No specific
-          part is called out; any oscillator meeting the specification below is
-          acceptable. Its output reaches YMF262 pin 24 through R_OPL_CLK, a 33
-          ohm source-series resistor. Oscillator enable is tied high. No other
-          subsystem uses <code>OPL3_CLK_14</code>.
+          Y_OPL_CLK is a packaged 14.31818 MHz clock oscillator. Any oscillator
+          meeting the specification below is acceptable. The Epson SG-615 series
+          is the reference part and the source of the output levels checked
+          below; the ECS <code>ECS-100AX-143</code> is an equivalent alternative
+          if the Epson part cannot be sourced. Its output reaches YMF262 pin 24
+          through R_OPL_CLK, a 33 ohm source-series resistor. Oscillator enable
+          is tied high. No other subsystem uses <code>OPL3_CLK_14</code>.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -623,12 +625,17 @@ DAC B and DAC D use the same network for VOLUME_R.</code></pre>
           channel through 2.2 uF. The 47 kohm summing resistors prevent one DAC
           channel from driving another.
         </p>
+        <p>
+          The recommended part is the Bourns <code>PDB182-K415K-103A1</code>, a
+          dual-gang 10 kohm audio-taper panel potentiometer. Any dual-gang 10
+          kohm logarithmic potentiometer with the same footprint is acceptable.
+        </p>
       </section>
 
       <section id="headphones">
         <h2>10. Headphone Output</h2>
         <p>
-          U_OPL_HP is an NJM4556D dual high-current amplifier on
+          U_OPL_HP is an NJM4556AD dual high-current amplifier on
           <code>AUDIO_12V</code> and ground. Two 10 kohm resistors create
           <code>OPL3_AUDIO_BIAS</code> at half supply; 100 uF and 100 nF bypass
           that node.
@@ -639,6 +646,11 @@ DAC B and DAC D use the same network for VOLUME_R.</code></pre>
           a 10 kohm feedback resistor set gain to two. Each output reaches the
           jack through 470 uF, positive terminal toward the amplifier, followed
           by 10 ohms.
+        </p>
+        <p>
+          The recommended jack is the Same Sky <code>SJ1-3535N</code>, a
+          through-hole 3.5 mm stereo switched jack. Any 3.5 mm TRS jack with the
+          same footprint and the contact assignment below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -887,7 +899,7 @@ DAC B and DAC D use the same network for VOLUME_R.</code></pre>
               </td>
             </tr>
             <tr>
-              <td>NJM4556D</td>
+              <td>NJM4556AD</td>
               <td>8-pin DIP</td>
               <td>
                 Standard dual-op-amp pinout; pin 8 is <code>AUDIO_12V</code> and
@@ -951,7 +963,7 @@ DAC B and DAC D use the same network for VOLUME_R.</code></pre>
             </tr>
             <tr>
               <td>Headphone load</td>
-              <td>NJM4556 high-current output</td>
+              <td>NJM4556AD high-current output</td>
               <td>32 ohms or higher through 10 ohms per channel</td>
             </tr>
           </tbody>
@@ -1008,7 +1020,10 @@ board allowance             81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>Y_OPL_CLK</code></td>
-              <td>14.31818 MHz packaged oscillator</td>
+              <td>
+                14.31818 MHz packaged oscillator; Epson SG-615 series or ECS
+                <code>ECS-100AX-143</code>
+              </td>
               <td>Dedicated master oscillator.</td>
             </tr>
             <tr>
@@ -1068,17 +1083,23 @@ board allowance             81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>U_OPL_HP</code></td>
-              <td>NJM4556D</td>
+              <td>NJM4556AD</td>
               <td>Stereo headphone amplifier.</td>
             </tr>
             <tr>
               <td><code>RV_OPL_VOLUME</code></td>
-              <td>Dual 10 kohm logarithmic potentiometer</td>
+              <td>
+                Dual 10 kohm logarithmic potentiometer; recommended part Bourns
+                <code>PDB182-K415K-103A1</code>
+              </td>
               <td>Volume control.</td>
             </tr>
             <tr>
               <td><code>J_OPL_AUDIO</code></td>
-              <td>3.5 mm TRS jack</td>
+              <td>
+                3.5 mm TRS jack; recommended part Same Sky
+                <code>SJ1-3535N</code>
+              </td>
               <td>Stereo output.</td>
             </tr>
           </tbody>
@@ -1159,7 +1180,7 @@ board allowance             81.5 ns</code></pre>
         <p>
           The YMF262 and YAC512 were sold as an OPL3 pair before 1994. Their SOP
           packages are exceptions to the through-hole IC rule. Yamaha's period
-          YAC512 circuit names the NJM4560. The NJM4556, LT1054, HCT, and FAST
+          YAC512 circuit names the NJM4560. The NJM4556A, LT1054, HCT, and FAST
           families also predate 1994. All other ICs use DIP packages. Each IC
           has a 100 nF ceramic bypass capacitor at its supply pins.
         </p>
@@ -1411,8 +1432,8 @@ board allowance             81.5 ns</code></pre>
             Epson,
             <a href="datasheets/SG-615_531_51_Series_DS.pdf"
               ><cite>SG-615, SG-531, and SG-51 Series</cite></a
-            >. Example compliant oscillator; clock output, supply, tolerance,
-            and loading.
+            >. Reference oscillator; clock output, supply, tolerance, and
+            loading.
           </li>
           <li>
             Seiko Epson,
@@ -1438,7 +1459,7 @@ board allowance             81.5 ns</code></pre>
             Nisshinbo Micro Devices,
             <a href="datasheets/NJM4556A_E.pdf"
               ><cite>NJM4556A Dual High-Current Operational Amplifier</cite></a
-            >. Supply range, current output, and gain stability for the NJM4556
+            >. Supply range, current output, and gain stability for the NJM4556A
             family.
           </li>
           <li>
