@@ -25,7 +25,7 @@
         <dt>Canonical ports</dt>
         <dd><code>$E40001-$E40007</code>, odd byte addresses</dd>
         <dt>Master clock</dt>
-        <dd>14.31818 MHz from a dedicated Epson SG-51P</dd>
+        <dd>14.31818 MHz from a dedicated packaged oscillator</dd>
         <dt>Converters</dt>
         <dd>Two Yamaha YAC512-M devices, four analog channels</dd>
         <dt>Stereo mix</dt>
@@ -104,7 +104,7 @@ OPL3_CLK_14 --&gt; counter and state ---&gt; /CS, /RD, /WR
 adapter completion ------------------&gt; OPL3_DTACK_n
 PERIPH_RESET_n --&gt; reset stretcher --&gt; /IC
 
-SG-51P 14.31818 MHz -----------------&gt; OPL3_CLK_14
+Y_OPL_CLK 14.31818 MHz --------------&gt; OPL3_CLK_14
 
 YMF262-M                              two YAC512-M converters
 
@@ -426,11 +426,63 @@ OPL3_DTACK_n = NOT (OPL3_AS_ACTIVE AND OPL3_ACK_READY)</code></pre>
         <h2>6. Clock and Reset</h2>
         <h3>Dedicated Master Clock</h3>
         <p>
-          Y_OPL_CLK is an Epson SG-51P made for 14.31818 MHz, C grade (+/-100
-          ppm). Its output reaches YMF262 pin 24 through R_OPL_CLK, a 33 ohm
-          source-series resistor. Oscillator enable is tied high. No other
+          Y_OPL_CLK is a packaged 14.31818 MHz clock oscillator. No specific
+          part is called out; any oscillator meeting the specification below is
+          acceptable. Its output reaches YMF262 pin 24 through R_OPL_CLK, a 33
+          ohm source-series resistor. Oscillator enable is tied high. No other
           subsystem uses <code>OPL3_CLK_14</code>.
         </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Y_OPL_CLK oscillator specification
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Requirement</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Nominal frequency</td>
+              <td>14.31818 MHz</td>
+              <td>
+                YMF262 master clock; sets the 49.716 kHz nominal sample rate.
+              </td>
+            </tr>
+            <tr>
+              <td>Frequency tolerance</td>
+              <td>+/-100 ppm or tighter, over 0 to 70 C</td>
+              <td>Holds the sample rate and timer periods within 0.01 percent.</td>
+            </tr>
+            <tr>
+              <td>Symmetry</td>
+              <td>40 to 60 percent</td>
+              <td>YMF262 clock-input duty limit.</td>
+            </tr>
+            <tr>
+              <td>Output</td>
+              <td>
+                5 V CMOS; VOH at least 4.6 V, VOL at most 0.4 V, into 50 pF
+              </td>
+              <td>Meets the YMF262 3.5 V high threshold with margin.</td>
+            </tr>
+            <tr>
+              <td>Supply</td>
+              <td>+5 V, 25 mA maximum</td>
+              <td>Board supply budget.</td>
+            </tr>
+            <tr>
+              <td>Package</td>
+              <td>
+                Through-hole full-can DIP oscillator with an enable pin, tied
+                high
+              </td>
+              <td>Footprint is fixed at layout; no crystal load network.</td>
+            </tr>
+          </tbody>
+        </table>
         <p>
           The nominal sample rate is 49.716 kHz because the YMF262 divides its
           clock by 288. The oscillator's CMOS output meets the YMF262 clock
@@ -870,7 +922,7 @@ DAC B and DAC D use the same network for VOLUME_R.</code></pre>
             <tr>
               <td>Master clock</td>
               <td>10 to 16 MHz; 40% to 60% duty</td>
-              <td>14.31818 MHz SG-51P</td>
+              <td>14.31818 MHz oscillator, +/-100 ppm</td>
             </tr>
             <tr>
               <td>Write width</td>
@@ -956,7 +1008,7 @@ board allowance             81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>Y_OPL_CLK</code></td>
-              <td>SG-51P, 14.31818 MHz</td>
+              <td>14.31818 MHz packaged oscillator</td>
               <td>Dedicated master oscillator.</td>
             </tr>
             <tr>
@@ -1359,7 +1411,8 @@ board allowance             81.5 ns</code></pre>
             Epson,
             <a href="datasheets/SG-615_531_51_Series_DS.pdf"
               ><cite>SG-615, SG-531, and SG-51 Series</cite></a
-            >. Clock output, supply, tolerance, and loading.
+            >. Example compliant oscillator; clock output, supply, tolerance,
+            and loading.
           </li>
           <li>
             Seiko Epson,

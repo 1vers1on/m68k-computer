@@ -34,7 +34,7 @@
         <dt>Display memory</dt>
         <dd>2 MiB in four 256K x 16 dual-CAS* FPM DRAMs, 70 ns</dd>
         <dt>Master clock</dt>
-        <dd>14.31818 MHz from a dedicated Epson SG-51P</dd>
+        <dd>14.31818 MHz from a dedicated packaged oscillator</dd>
         <dt>Memory clock</dt>
         <dd>41.16477 MHz, strapped, standard six-MCLK RAS* timing</dd>
         <dt>Configuration EEPROM</dt>
@@ -1049,23 +1049,81 @@ VGA_DTACK_n   = NOT (VGA_AS_ACTIVE AND VGA_ACK_READY)</code></pre>
         <h2>8. Clock and Reset</h2>
         <h3>Dedicated Reference Oscillator</h3>
         <p>
-          Y_VGA_CLK is an Epson SG-51P made for 14.31818 MHz, C grade. Its
-          output reaches CL-GD5428 <code>OSC</code>, pin 159, through R_VGA_CLK,
-          a 33 ohm source-series resistor, and reaches U_VGA_INV_B for the
-          adapter clock. Oscillator enable is tied high. <code>XTAL</code>, pin
-          158, is left open because no crystal is fitted.
+          Y_VGA_CLK is a packaged 14.31818 MHz clock oscillator. No specific
+          part is called out; any oscillator meeting the specification below is
+          acceptable. Its output reaches CL-GD5428 <code>OSC</code>, pin 159,
+          through R_VGA_CLK, a 33 ohm source-series resistor, and reaches
+          U_VGA_INV_B for the adapter clock. Oscillator enable is tied high.
+          <code>XTAL</code>, pin 158, is left open because no crystal is fitted.
         </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Y_VGA_CLK oscillator specification
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Requirement</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Nominal frequency</td>
+              <td>14.31818 MHz</td>
+              <td>
+                CL-GD5428 <code>OSC</code> reference and the adapter clock
+                source.
+              </td>
+            </tr>
+            <tr>
+              <td>Frequency tolerance</td>
+              <td>+/-100 ppm or tighter, over 0 to 70 C</td>
+              <td>
+                The controller requires 14.31818 MHz within 0.01 percent.
+              </td>
+            </tr>
+            <tr>
+              <td>Symmetry</td>
+              <td>40 to 60 percent</td>
+              <td>The controller requires 50 percent plus or minus 10 percent.</td>
+            </tr>
+            <tr>
+              <td>Output</td>
+              <td>
+                5 V CMOS; VOH at least 4.6 V, VOL at most 0.4 V, into 50 pF
+              </td>
+              <td>Drives <code>OSC</code>, pin 159, and U_VGA_INV_B.</td>
+            </tr>
+            <tr>
+              <td>Supply</td>
+              <td>+5 V, 25 mA maximum</td>
+              <td>Board supply budget.</td>
+            </tr>
+            <tr>
+              <td>Package</td>
+              <td>
+                Through-hole full-can DIP oscillator with an enable pin, tied
+                high
+              </td>
+              <td>Footprint is fixed at layout; no crystal load network.</td>
+            </tr>
+          </tbody>
+        </table>
         <p>
           The controller requires 14.31818 MHz within 0.01 percent at a duty
-          cycle of 50 percent plus or minus 10 percent. C grade is 100 parts per
-          million, which is 0.01 percent, and the SG-51P symmetry limit is 40 to
-          60 percent. Both parameters meet the requirement with no margin, so
-          both appear on the assembled-board measurement list.
+          cycle of 50 percent plus or minus 10 percent. The tolerance above, 100
+          parts per million, is 0.01 percent, and the symmetry limit above is 40
+          to 60 percent. Both parameters meet the requirement with no margin, so
+          both appear on the assembled-board measurement list. An oscillator with
+          a tighter tolerance or symmetry than the minimum specified is
+          preferred where one is available.
         </p>
         <p>
-          The OPL3 uses a separate SG-51P at the same frequency. Sharing one
-          oscillator would put the video PLL reference and the audio master
-          clock on the same net, so each subsystem keeps its own.
+          The OPL3 uses a separate oscillator at the same frequency and to the
+          same specification. Sharing one oscillator would put the video PLL
+          reference and the audio master clock on the same net, so each
+          subsystem keeps its own.
         </p>
         <pre><code>Y_VGA_CLK
     |
@@ -2112,7 +2170,7 @@ board allowance             81.5 ns</code></pre>
               <td>2.0 V / 0.8 V</td>
             </tr>
             <tr>
-              <td>SG-51P to CL-GD5428 <code>OSC</code></td>
+              <td>Y_VGA_CLK to CL-GD5428 <code>OSC</code></td>
               <td>4.6 V / 0.4 V</td>
               <td>2.0 V / 0.8 V</td>
             </tr>
@@ -2134,7 +2192,8 @@ board allowance             81.5 ns</code></pre>
         <p>
           The CL-GD5428 draws 260 mA at an 80 MHz video clock and a 50 MHz
           memory clock, and dissipates up to 1.5 W. Four 256K x 16 DRAMs, one
-          SG-51P at 23 mA, and ten logic packages add to that. Fold the total
+          14.31818 MHz oscillator at up to 25 mA, and ten logic packages add to
+          that. Fold the total
           into the board supply budget before layout.
         </p>
       </section>
@@ -2175,7 +2234,7 @@ board allowance             81.5 ns</code></pre>
             </tr>
             <tr>
               <td><code>Y_VGA_CLK</code></td>
-              <td>SG-51P, 14.31818 MHz, C grade</td>
+              <td>14.31818 MHz packaged oscillator, +/-100 ppm</td>
               <td>Dedicated synthesizer reference.</td>
             </tr>
             <tr>
@@ -2636,8 +2695,8 @@ board allowance             81.5 ns</code></pre>
             Epson,
             <a href="datasheets/SG-615_531_51_Series_DS.pdf"
               ><cite>SG-615, SG-531, and SG-51 Series</cite></a
-            >. Reference oscillator frequency tolerance, symmetry, output
-            levels, and load conditions.
+            >. Example compliant oscillator; frequency tolerance, symmetry,
+            output levels, and load conditions.
           </li>
           <li>
             Texas Instruments,
