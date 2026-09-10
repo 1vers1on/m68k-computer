@@ -1364,10 +1364,21 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               </td>
               <td>110 ns maximum</td>
               <td>
-                MFP or PI/T <code>/DTACK</code> release followed by the FAST
-                completion tree. The MFP total is 77.2 ns, leaving 32.8 ns for
-                the routed board. The PI/T total is 68.8 ns, leaving 41.2 ns;
-                see <a href="pit.html#timing">the PI/T timing section</a>.
+                Both device acknowledges release through <code>U_IACK_DEC</code>
+                (<code>SN74HCT138</code>, 42 ns enable-to-output) and the
+                <code>IACK_n</code> qualifier before the device drives
+                <code>/DTACK</code> high and the FAST completion tree follows.
+                For the PI/T the decoder edge plus specification 10 plus the
+                tree already sum to 104.2 ns of the 110 ns window, so the
+                acknowledge path has essentially no margin and is the tightest
+                termination on the board; see
+                <a href="pit.html#timing">the PI/T timing section</a>. The MFP
+                shares the decoder and adds its own measured
+                <code>/IACK</code>-to-<code>/DTACK</code> latency on top.
+                Closing this needs a faster <code>IACK_n</code> path, a FAST or
+                AC <code>U_IACK_DEC</code>, or a dedicated fast acknowledge
+                strobe, decided at schematic capture against assembled-board
+                measurements.
               </td>
             </tr>
             <tr>
@@ -1400,9 +1411,11 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
           >
           tables, is added once package pins and gate packing are set at
           schematic capture. The dominant unknown is the MC68901 acknowledge
-          latency, which is a measurement. The PI/T path is already worked
-          through because the MC68230 states its acknowledge delay in clock
-          periods.
+          latency, which is a measurement. The MC68230 states its own
+          acknowledge delay in clock periods, so the PI/T path is worked from
+          the <code>IACK_Lx_n</code> edge onward; the shared
+          <code>U_IACK_DEC</code> delay ahead of that edge is the open item in
+          the specification-28 row above.
         </p>
         <p>
           There is no motherboard bus timeout on this cycle. The only backstop

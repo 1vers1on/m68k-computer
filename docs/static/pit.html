@@ -768,16 +768,20 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
               <td>About 0.4 microseconds at 100 pF of bus capacitance</td>
               <td>
                 0.8473 x 4.7 kohm x 100 pF, inside the 1 microsecond
-                standard-mode limit.
+                standard-mode limit. The same product reaches 1 microsecond
+                near 250 pF.
               </td>
             </tr>
             <tr>
               <td>Bus capacitance</td>
-              <td>400 pF maximum</td>
+              <td>About 250 pF with the fitted pull-ups</td>
               <td>
-                I2C standard-mode limit. Short header wiring keeps the routed
-                board contribution small; the attached cable and devices consume
-                the rest.
+                The I2C standard-mode ceiling is 400 pF, but the 4.7 kohm
+                pull-ups reach the 1 microsecond rise limit near 250 pF, so
+                that is the practical cap. A sub-100 kHz firmware-paced clock
+                tolerates a slower edge in any case. Short header wiring keeps
+                the routed board contribution small; the attached cable and
+                devices consume the rest.
               </td>
             </tr>
             <tr>
@@ -1153,8 +1157,8 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
           The PI/T ignores RS1 through RS5 during an acknowledge cycle. Mask
           sets GG7 and KD1 carry an erratum in which an acknowledge corrupts
           PIVR or TIVR if the register selects happen to address one of them.
-          During a CPU-space cycle the processor drives
-          <code>A19..A4</code> high and puts the level on
+          During a CPU-space cycle the processor drives every address line
+          above <code>A3</code> high and puts the level on
           <code>A3..A1</code>, so <code>RS5..RS1</code> read
           <code>11100</code> for level 4 and <code>11101</code> for level 5.
           Both fall in the null block, and neither is the PIVR select
@@ -1232,6 +1236,11 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
             Set TCR bits 2 and 1 to <code>00</code> to clock the prescaler from
             the CLK pin and leave <code>PC2</code> as a port C pin for the
             header.
+          </li>
+          <li>
+            Leave TCR bit 4 at zero so the counter reloads from the preload
+            registers on zero detect. That is the periodic mode section 9
+            describes; reset already clears the bit.
           </li>
           <li>
             Clear the ZDS bit in TSR inside the level-5 handler by writing a one
@@ -1601,11 +1610,13 @@ PI/T byte access           7 to 8 CPU clock periods, 700 to 800 ns</code></pre>
           the 30 ns minimum select gap of specification 45 by a wide margin.
         </p>
 
-        <h3>Acknowledgement Release</h3>
+        <h3>Acknowledgement Release, Register Cycle</h3>
         <p>
-          <code>LDS_n</code> rises at the end of S7 and reaches
-          <code>U_OR_DTACK</code> gate 2 with no logic in between, so it, rather
-          than the slow slot decode, releases <code>PIT_CS_n</code>.
+          MC68EC000 specification 28 allows 110 ns from strobe negation to
+          <code>/DTACK</code> release. On a register cycle <code>LDS_n</code>
+          rises at the end of S7 and reaches <code>U_OR_DTACK</code> gate 2 with
+          no logic in between, so it, rather than the slow slot decode, releases
+          <code>PIT_CS_n</code>.
         </p>
         <pre><code>U_OR_DTACK gate 2 SN74F32, tPLH   6.6 ns
 MC68230 /CS high to /DTACK high  45.0 ns   PI/T 10
@@ -1617,22 +1628,56 @@ component total                  68.8 ns
 MC68EC000 limit                 110.0 ns
 board allowance                  41.2 ns</code></pre>
         <p>
-          The same path releases an acknowledge cycle, with
-          <code>IACK_L4_n</code> or <code>IACK_L5_n</code> rising in place of
-          <code>PIT_CS_n</code>. Specification 10 covers all three inputs with
-          one limit.
-        </p>
-        <p>
           The device three-states <code>/DTACK</code> within 55 ns of the same
           edge, specification 11, so it has let go of the net well before the
           next chip select arrives.
         </p>
+
+        <h3>Acknowledgement Release, Acknowledge Cycle</h3>
         <p>
-          The 41.2 ns allowance is the second tightest on the board after the
+          A level-4 or level-5 acknowledge releases through the interrupt
+          decoder, not the chip-select gate. <code>AS_n</code> rises,
+          <code>U_INT_GATE</code> drops <code>IACK_ACTIVE</code> and raises
+          <code>IACK_n</code>, and <code>U_IACK_DEC</code> raises
+          <code>IACK_L4_n</code> or <code>IACK_L5_n</code>. Specification 10
+          still fixes the 45 ns from that strobe edge to the start of the
+          <code>/DTACK</code> release, but the <code>SN74HCT138</code>
+          enable-to-output delay, 42 ns from
+          <a href="bus-and-decode.html#decoder-timing-verification"
+            >Bus and Address Decode</a
+          >
+          section 24, replaces the 6.6 ns FAST gate of the register path.
+        </p>
+        <pre><code>U_IACK_DEC enable to strobe, SN74HCT138  42.0 ns
+MC68230 PIACK or TIACK high to /DTACK    45.0 ns   PI/T 10
+group SN74F21, tPLH                       5.3 ns
+final SN74F21, tPLH                       5.3 ns
+SN74F32 timeout mask, tPLH                6.6 ns
+----------------------------------------------------
+from IACK_n rising                      104.2 ns
+MC68EC000 limit, from AS_n negation     110.0 ns</code></pre>
+        <p>
+          That leaves 5.8 ns of the specification-28 window for the path from
+          <code>AS_n</code> to <code>IACK_n</code>, and the qualifier in
+          <code>U_INT_GATE</code> alone is an <code>SN74HCT08</code> stage near
+          30 ns. Summed at the datasheet maxima this page uses everywhere else,
+          the acknowledge release runs past 110 ns with no board allowance, so
+          it is the tightest termination path on the board. The register cycle
+          above is unaffected and keeps its 41.2 ns allowance.
+        </p>
+        <p>
+          <a href="interrupts.html#acknowledge-timing">Interrupts</a> section 14
+          tracks the fix, chosen at schematic capture: bring <code>IACK_n</code>
+          forward with fewer gates, give <code>U_IACK_DEC</code> a FAST or AC
+          part, or route the PI/T a dedicated fast acknowledge strobe. Typical
+          delays at room temperature are far shorter, so the assembled-board
+          measurement decides whether any change is needed.
+        </p>
+        <p>
+          The MC68901 level-6 acknowledge shares <code>U_IACK_DEC</code> and
+          sees the same decoder delay, so the
           <a href="interrupts.html#acknowledge-timing">MFP acknowledge path</a>
-          at 32.8 ns. Both are far smaller than the 81.5 ns the DRAM and RTC
-          paths keep, because a device rather than a gate produces the release
-          edge.
+          carries this constraint too.
         </p>
 
         <h3>Acknowledge Cycle</h3>
@@ -1845,7 +1890,7 @@ watchdog limit             3.2 us</code></pre>
           <code>MC68230G10</code>. Production plastic parts carry a P suffix.
           <code>MC68230P10</code> is the 10 MHz plastic DIP specified here and
           in the <a href="memory-map.html">Memory Map</a>; confirm the suffix
-          against the part actually sourced. The RXEF series and the CD74ACT244
+          against the sourced part. The RXEF series and the CD74ACT244
           both predate 1994.
         </p>
       </section>
@@ -1861,9 +1906,10 @@ watchdog limit             3.2 us</code></pre>
           </li>
           <li>
             Keep <code>PIT_CS_n</code> and <code>PIT_DTACK_n</code> short and
-            free of stubs. Measure the routed release path at the CPU
-            <code>/DTACK</code> pin and keep the board contribution below 41.2
-            ns.
+            free of stubs. Measure the routed register-cycle release path at
+            the CPU <code>/DTACK</code> pin and keep the board contribution
+            below 41.2 ns. The acknowledge-cycle release path in section 13 is
+            tighter and depends on the interrupt-decoder fix.
           </li>
           <li>
             Place <code>R_PIT_DTACK</code> beside <code>U_PIT</code> pin 42.
