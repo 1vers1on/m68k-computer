@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Memory Map, Revision 1.1</title>
+    <title>68EC000 Computer - Memory Map, Revision 1.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,14 +14,19 @@
         and firmware. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        The revision 1.1 address specification is frozen. This document may be
+        The revision 1.2 address specification is frozen. This document may be
         corrected or expanded without a new revision. Any change to an address
         range, slot assignment, or register address requires a new memory map
         revision.
       </p>
+      <p>
+        Revision 1.2 assigns I/O slot 9 to the MC68230 PI/T. Every other
+        address range, slot assignment, and register address carries over from
+        revision 1.1 unchanged.
+      </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.1; the address specification is frozen</dd>
+        <dd>Revision 1.2; the address specification is frozen</dd>
         <dt>CPU</dt>
         <dd>MC68EC000FN10</dd>
         <dt>Address bus</dt>
@@ -44,6 +49,8 @@
         </dd>
         <dt>Floppy controller</dt>
         <dd>Intel 82077AA-1 with two Mitsumi D359M3D drives</dd>
+        <dt>Parallel interface and timer</dt>
+        <dd>MC68230P10 PI/T</dd>
       </dl>
     </header>
 
@@ -324,8 +331,13 @@
               <td><code>$F20000</code></td>
               <td><code>$F3FFFF</code></td>
               <td>128 KiB</td>
-              <td>Reserved</td>
-              <td>Available for future I/O.</td>
+              <td>MC68230 PI/T</td>
+              <td>
+                Provides three parallel ports and a 24-bit timer. Its 32
+                register selects occupy odd addresses
+                <code>$F20001-$F2003F</code> on the lower data byte. See
+                <a href="pit.html">MC68230 PI/T</a>.
+              </td>
             </tr>
             <tr>
               <th scope="row">10</th>
@@ -705,6 +717,17 @@
           <code>$EA0001</code> and <code>$EA0003</code> as the canonical copy.
           The complete interface is defined in the
           <a href="midi.html">MC6850 MIDI design</a>.
+        </p>
+
+        <h3>MC68230 PI/T</h3>
+        <p>
+          The MC68230P10 occupies I/O slot 9 and connects to
+          <code>D7..D0</code>. CPU address lines <code>A1..A5</code> connect to
+          register selects <code>RS1..RS5</code>, so the 32 register selects
+          land on odd addresses <code>$F20001</code> through
+          <code>$F2003F</code>. Address lines <code>A16..A6</code> are not
+          decoded, so this 64-byte block repeats throughout the slot. The
+          complete register table is in <a href="pit.html">MC68230 PI/T</a>.
         </p>
       </section>
 

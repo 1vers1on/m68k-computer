@@ -57,6 +57,12 @@
           Yamaha YMF262 OPL3, two YAC512 converters, stereo headphone amplifier,
           volume control, and 3.5 mm output
         </dd>
+
+        <dt>Parallel I/O and timer</dt>
+        <dd>
+          MC68230P10 PI/T driving a bit-banged 5 V I2C bus, a 34-pin user I/O
+          header, and a 24-bit timer
+        </dd>
       </dl>
     </header>
 
@@ -79,7 +85,7 @@
           <tbody>
             <tr>
               <td><a href="memory-map.html">Memory Map</a></td>
-              <td>Revision 1.1; address specification frozen</td>
+              <td>Revision 1.2; address specification frozen</td>
               <td>
                 Address ranges, I/O slots, boot overlay, peripheral registers,
                 and DRAM organization.
@@ -87,7 +93,7 @@
             </tr>
             <tr>
               <td><a href="bus-and-decode.html">Bus and Address Decode</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 1.1 pre-layout design</td>
               <td>
                 Bus cycles, address decoders, boot-overlay logic, worked decode
                 examples, timing, and bus termination.
@@ -95,8 +101,11 @@
             </tr>
             <tr>
               <td><a href="clock-and-reset.html">Clock and Reset</a></td>
-              <td>Revision 1.0 pre-layout design</td>
-              <td>10 MHz clock and active-low reset generation.</td>
+              <td>Revision 1.1 pre-layout design</td>
+              <td>
+                10 MHz clock, the DRAM and I/O clock buffers, and active-low
+                reset generation.
+              </td>
             </tr>
             <tr>
               <td><a href="power-control.html">Power Control</a></td>
@@ -108,10 +117,10 @@
             </tr>
             <tr>
               <td><a href="interrupts.html">Interrupts</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 1.1 pre-layout design</td>
               <td>
-                Priority encoding, acknowledge decode, autovector and MFP
-                vectors, and spurious-interrupt handling.
+                Priority encoding, acknowledge decode, autovector and the MFP
+                and PI/T vectors, and spurious-interrupt handling.
               </td>
             </tr>
             <tr>
@@ -186,6 +195,14 @@
               <td>
                 Multiplexed-bus adapter, register map, timing, crystal, battery,
                 reset, firmware access rules, and interrupt wiring.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="pit.html">MC68230 PI/T</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                Bus connection, register map, bit-banged I2C port, user I/O
+                header, 24-bit timer, and two vectored interrupt levels.
               </td>
             </tr>
             <tr>
@@ -322,6 +339,14 @@
               <td>USART, timers, interrupt controller, and GPIO.</td>
             </tr>
             <tr>
+              <td>Motorola MC68230</td>
+              <td><a href="datasheets/mc68230.pdf">PDF</a></td>
+              <td>
+                Parallel ports, handshake pins, 24-bit timer, vectored
+                interrupts, and the asynchronous bus interface.
+              </td>
+            </tr>
+            <tr>
               <td>Maxim MAX232</td>
               <td>
                 <a href="datasheets/max220-max249.pdf">PDF</a>
@@ -415,7 +440,10 @@
             <tr>
               <td>CD74ACT244</td>
               <td><a href="datasheets/cd74act244.pdf">PDF</a></td>
-              <td>DRAM clock, reset, and control-net buffers.</td>
+              <td>
+                DRAM clock, reset, and control-net buffers, and the I/O clock
+                buffer that feeds the PI/T and the bus timeout.
+              </td>
             </tr>
             <tr>
               <td>SN74F00 / F02 / F04 / F08 / F20 / F30 / F32 / F86</td>
@@ -432,7 +460,8 @@
               <td>
                 FAST glue logic used by the DRAM controller and by the floppy,
                 RTC, MIDI, OPL3, VGA, and expansion adapters. The F32 also
-                carries the final <code>DTACK_n</code> timeout mask.
+                carries the final <code>DTACK_n</code> timeout mask and the
+                PI/T chip select.
               </td>
             </tr>
             <tr>

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Expansion Slots, Revision 1.0</title>
+    <title>68EC000 Computer - Expansion Slots, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,10 +13,15 @@
         electrical interface, connector pinout, address assignments, and card
         requirements. <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 1.1 records that memory-map revision 1.2 gave I/O slot 9 to the
+        <a href="pit.html">MC68230 PI/T</a>. No connector contact, signal,
+        window, or card rule changes.
+      </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; board layout and assembled-system
+          Revision 1.1 pre-layout design; board layout and assembled-system
           checks remain
         </dd>
         <dt>Slots</dt>
@@ -118,9 +123,11 @@
         </p>
         <p>
           <code>EXP_MEM5_n</code>, <code>EXP_MEM6_n</code>, and
-          <code>IO9_n..IO14_n</code> remain reserved motherboard decode outputs.
-          They do not reach either connector, and accesses to their
-          unimplemented ranges time out under memory-map revision 1.0.
+          <code>IO10_n..IO14_n</code> remain reserved motherboard decode
+          outputs. They do not reach either connector, and accesses to their
+          unimplemented ranges time out under memory-map revision 1.2.
+          <code>IO9_n</code> now selects the PI/T on the motherboard and is no
+          longer available for a future connector route.
         </p>
       </section>
       <section id="mechanical">

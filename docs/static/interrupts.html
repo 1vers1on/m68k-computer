@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Interrupts, Revision 1.0</title>
+    <title>68EC000 Computer - Interrupts, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,18 +13,25 @@
         spurious-interrupt termination for the MC68EC000.
         <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 1.1 gives levels 4 and 5 to the
+        <a href="pit.html">MC68230 PI/T</a> as vectored levels, adds
+        <code>PIT_DTACK_n</code> to the watchdog's answered term, and reduces
+        the unwired-level decode to levels 1 and 2. Levels 3, 6, and 7 and every
+        MFP routing carry over from revision 1.0 unchanged.
+      </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; the MC68901 acknowledge latency and
+          Revision 1.1 pre-layout design; the MC68901 acknowledge latency and
           the worked termination budgets remain board measurements
         </dd>
         <dt>Scope</dt>
         <dd>
           The CPU-facing interrupt hardware: priority encoding onto
           <code>/IPL2../IPL0</code>, acknowledge-cycle decode, autovector and
-          MFP-vectored termination, spurious-interrupt handling, and the wiring
-          from each peripheral interrupt output to that hardware.
+          vectored termination, spurious-interrupt handling, and the wiring from
+          each peripheral interrupt output to that hardware.
         </dd>
         <dt>CPU boundary</dt>
         <dd>
@@ -35,9 +42,18 @@
         </dd>
         <dt>Primary controller</dt>
         <dd>
-          MC68901 MFP, vectored, at CPU level 6. Levels 3 and 7 are
-          autovectored; levels 1, 2, 4, and 5 are unwired and reach the spurious
-          path. See <a href="mfp.html">MFP</a>.
+          MC68901 MFP, vectored, at CPU level 6. See
+          <a href="mfp.html">MFP</a>.
+        </dd>
+        <dt>Second vectored device</dt>
+        <dd>
+          MC68230 PI/T at CPU levels 5 and 4, one for the timer and one for the
+          handshake pins. See <a href="pit.html">PI/T</a>.
+        </dd>
+        <dt>Remaining levels</dt>
+        <dd>
+          Levels 3 and 7 are autovectored; levels 1 and 2 are unwired and reach
+          the spurious path.
         </dd>
       </dl>
     </header>
@@ -53,6 +69,7 @@
         <li><a href="#iack-decode">Interrupt Acknowledge Decode</a></li>
         <li><a href="#autovector">Autovector Generation</a></li>
         <li><a href="#mfp-vectored">MFP Vectored Acknowledge</a></li>
+        <li><a href="#pit-vectored">PI/T Vectored Acknowledge</a></li>
         <li><a href="#source-routing">Peripheral Source Routing</a></li>
         <li>
           <a href="#spurious">Spurious and Phantom Acknowledge Termination</a>
@@ -327,40 +344,52 @@ INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code
           than consuming a processor level.
         </p>
         <p>
-          Only two other processor levels are used: level 3 for the
-          expansion-bus request and level 7 for the manual non-maskable
-          interrupt. Both are autovectored and served by reading device status
-          in software. Levels 1, 2, 4, and 5 carry no source.
+          The MC68230 PI/T holds levels 5 and 4. It supplies its own vectors on
+          both, through separate request and acknowledge pins, because its timer
+          and its handshake pins have independent acknowledge inputs and
+          independent vector registers.
         </p>
-        <pre><code>            MFP /IRQ ---------------------+
- EXP_IRQ_n --------------------------+     |
- NMI_n -----------------------+      |     |
-                              |      |     |
-              level 7 --------+      |     |
-              level 3 ---------------+     |
-              level 6 ---------------------+
-                              |      |     |
-                              v      v     v
-                        +--------------------------+
-                        |  U_IPL_ENC   74LS148     |   I1..I7 = levels
-                        +------------+-------------+
-                                     | A2..A0
-                                     v
-                        +--------------------------+
-                        |  U_IPL_SYNC  74LS174 x2  |   two stages on INT_CLK
-                        +------------+-------------+
-                                     v
-                        /IPL2  /IPL1  /IPL0  ->  MC68EC000
+        <p>
+          Two further levels are used: level 3 for the expansion-bus request and
+          level 7 for the manual non-maskable interrupt. Both are autovectored
+          and served by reading device status in software. Levels 1 and 2 carry
+          no source.
+        </p>
+        <pre><code>            MFP /IRQ -----------------------+
+ PIT_TIRQ_n -----------------------+     |
+ PIT_PIRQ_n -----------------+     |     |
+ EXP_IRQ_n ------------+     |     |     |
+ NMI_n ----------+     |     |     |     |
+                 |     |     |     |     |
+     level 7 ----+     |     |     |     |
+     level 3 ----------+     |     |     |
+     level 4 ----------------+     |     |
+     level 5 ----------------------+     |
+     level 6 ----------------------------+
+                 |     |     |     |     |
+                 v     v     v     v     v
+           +--------------------------+
+           |  U_IPL_ENC   74LS148     |   I1..I7 = levels
+           +------------+-------------+
+                        | A2..A0
+                        v
+           +--------------------------+
+           |  U_IPL_SYNC  74LS174 x2  |   two stages on INT_CLK
+           +------------+-------------+
+                        v
+           /IPL2  /IPL1  /IPL0  ->  MC68EC000
 
  CPU_SPACE, AS_n, A16..A19 --> IACK qualifier --> U_IACK_DEC 74HCT138
-                                                   |  IACK_L1_n .. IACK_L7_n
-                    +------------------------------+------------------+
-                    v                              v                  v
-           autovector OR (U_AVEC_OR)      IACK_L6_n -> MFP /IACK   watchdog
-                    |                              |  MFP D7..D0 + /DTACK   (U_INT_WDOG)
-                    v                              v                  v
-                  /AVEC -> CPU               MFP_DTACK_n         INT_BERR_n
-                                             -> completion tree  -> CPU /BERR
+                                                 |  IACK_L1_n .. IACK_L7_n
+     +--------------+-------------------+-----------------+
+     v              v                   v                 v
+ autovector    IACK_L6_n -> MFP     IACK_L4_n -> PIACK   watchdog
+ OR gate       /IACK, D7..D0        IACK_L5_n -> TIACK   (U_INT_WDOG)
+ (U_AVEC_OR)   and /DTACK           D7..D0 and /DTACK
+     v              v                   v                 v
+ /AVEC -> CPU   MFP_DTACK_n         PIT_DTACK_n       INT_BERR_n
+                -> completion tree  -> completion     -> CPU /BERR
+                                       tree
 
  INT_CLK = spare U_DRAM_CLK_BUF channel off DRAM_CLK_10 (see dram.html)</code></pre>
       </section>
@@ -397,17 +426,20 @@ INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code
             </tr>
             <tr>
               <td>5</td>
-              <td>None</td>
-              <td>Spurious</td>
-              <td>24; address <code>$000060</code></td>
-              <td><code>/I5</code> tied to +5 V</td>
+              <td>MC68230 PI/T timer <code>PIT_TIRQ_n</code></td>
+              <td>Vectored by the PI/T through <code>TIACK</code></td>
+              <td>TIVR, programmed to <code>$54</code></td>
+              <td><code>/I5</code></td>
             </tr>
             <tr>
               <td>4</td>
-              <td>None</td>
-              <td>Spurious</td>
-              <td>24; address <code>$000060</code></td>
-              <td><code>/I4</code> tied to +5 V</td>
+              <td>MC68230 PI/T ports <code>PIT_PIRQ_n</code></td>
+              <td>Vectored by the PI/T through <code>PIACK</code></td>
+              <td>
+                PIVR base <code>$50</code> plus the source number,
+                <code>$50</code>-<code>$53</code>
+              </td>
+              <td><code>/I4</code></td>
             </tr>
             <tr>
               <td>3</td>
@@ -439,7 +471,7 @@ INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code
           <a href="rtc.html">DS1285</a> RTC <code>/IRQ</code>. They use GPIP5,
           GPIP4, and GPIP3 respectively. See
           <a href="mfp.html#interrupts">the MFP channel map</a> and
-          <a href="#source-routing">section 9</a>.
+          <a href="#source-routing">section 10</a>.
         </p>
         <p>
           The video controller has no processor-level interrupt. MFP Timer C
@@ -506,13 +538,13 @@ INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code
             </tr>
             <tr>
               <td><code>/I4</code></td>
-              <td>+5 V</td>
-              <td>Level 4 unwired</td>
+              <td><code>PIT_PIRQ_n</code></td>
+              <td>Level 4 request (PI/T ports)</td>
             </tr>
             <tr>
               <td><code>/I5</code></td>
-              <td>+5 V</td>
-              <td>Level 5 unwired</td>
+              <td><code>PIT_TIRQ_n</code></td>
+              <td>Level 5 request (PI/T timer)</td>
             </tr>
             <tr>
               <td><code>/I6</code></td>
@@ -537,9 +569,11 @@ INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code
           </tbody>
         </table>
         <p>
-          An unwired input is tied to +5 V so it never requests. Only
-          <code>/I3</code>, <code>/I6</code>, and <code>/I7</code> take a source
-          in this design; the other four inputs are held inactive.
+          An unwired input is tied to +5 V so it never requests.
+          <code>/I3</code>, <code>/I4</code>, <code>/I5</code>,
+          <code>/I6</code>, and <code>/I7</code> take a source in this design;
+          <code>/I0</code>, <code>/I1</code>, and <code>/I2</code> are held
+          inactive.
         </p>
 
         <h3>Synchronizer</h3>
@@ -573,7 +607,7 @@ INT_BERR_n           spurious-acknowledge abort    into the CPU /BERR path</code
           budget. This design takes <code>INT_CLK</code> from a spare channel of
           the DRAM clock buffer; see
           <a href="dram.html#clock-distribution">dram.html</a> and
-          <a href="#electrical-fanout">section 16</a>. The
+          <a href="#electrical-fanout">section 17</a>. The
           <code>SN74LS174</code> common clear is tied inactive: clearing would
           force the encoded code to 000, which is level 7. Instead, two
           <code>INT_CLK</code> edges after reset release load the true
@@ -711,11 +745,12 @@ IACK_n      = NOT IACK_ACTIVE</code></pre>
 /AVEC  = AVEC_n</code></pre>
         <p>
           The equation is an AND of active-low strobes: either the level-3 or
-          the level-7 acknowledge pulls <code>/AVEC</code> low. Levels 1, 2, 4,
-          and 5 are not included; an acknowledge to any of them falls through to
-          the spurious path in <a href="#spurious">section 10</a>, which treats
-          an unwired level as a hardware fault. <code>U_AVEC_OR</code> is one
-          gate of a <code>SN74HCT08</code> AND package.
+          the level-7 acknowledge pulls <code>/AVEC</code> low. Levels 4, 5, and
+          6 are vectored by their devices and are not included. Levels 1 and 2
+          fall through to the spurious path in
+          <a href="#spurious">section 11</a>, which treats an unwired level as a
+          hardware fault. <code>U_AVEC_OR</code> is one gate of a
+          <code>SN74HCT08</code> AND package.
         </p>
         <p>
           <code>/AVEC</code> is combinational from the decoder, so it is valid
@@ -817,8 +852,159 @@ level-6 acknowledge:   /CS high, /IACK low</code></pre>
         </p>
       </section>
 
+      <section id="pit-vectored">
+        <h2>9. PI/T Vectored Acknowledge</h2>
+        <p>
+          Levels 5 and 4 belong to the
+          <a href="pit.html">MC68230 PI/T</a>. The device holds a separate
+          request pin, acknowledge pin, and vector register for its timer and
+          for its four handshake pins, so each level resolves to a vector
+          without software reading a status register first.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PI/T interrupt-acknowledge connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">MC68230 signal</th>
+              <th scope="col">Connection</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>PC3/TOUT</code></td>
+              <td>
+                <code>PIT_TIRQ_n</code> to <code>U_IPL_ENC</code>
+                <code>/I5</code>
+              </td>
+              <td>
+                Timer interrupt request. Drives low or goes to high impedance
+                within 225 ns of the causing clock edge; motherboard pull-up.
+                Sinks 8.8 mA at 0.5 V. Active low.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PC7/TIACK</code></td>
+              <td><code>IACK_L5_n</code> from <code>U_IACK_DEC</code></td>
+              <td>Asserted only for a level-5 acknowledge.</td>
+            </tr>
+            <tr>
+              <td><code>PC5/PIRQ</code></td>
+              <td>
+                <code>PIT_PIRQ_n</code> to <code>U_IPL_ENC</code>
+                <code>/I4</code>
+              </td>
+              <td>
+                Port interrupt request from <code>H1</code> through
+                <code>H4</code>. Drives low or goes to high impedance within 225
+                ns of the causing clock edge; motherboard pull-up. Sinks 8.8 mA
+                at 0.5 V. Active low.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PC6/PIACK</code></td>
+              <td><code>IACK_L4_n</code> from <code>U_IACK_DEC</code></td>
+              <td>Asserted only for a level-4 acknowledge.</td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>CPU <code>D7..D0</code></td>
+              <td>
+                Vector number during acknowledge; register data otherwise.
+              </td>
+            </tr>
+            <tr>
+              <td><code>/DTACK</code></td>
+              <td><code>PIT_DTACK_n</code> into the completion tree</td>
+              <td>
+                Asserted for register cycles and for both vectored
+                acknowledges.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The PI/T uses one <code>/DTACK</code> pin for all three cycle types,
+          as the MFP does. <code>PIT_CS_n</code> is inactive during CPU space,
+          so <code>/CS</code> stays high while an acknowledge strobe is low.
+          The MC68230 forbids asserting <code>/CS</code>,
+          <code>PIACK</code>, and <code>TIACK</code> in any combination.
+        </p>
+        <pre><code>MC68230 /DTACK pin = PIT_DTACK_n -> U_DTACK_B gate 1 -> tree
+
+normal register cycle: /CS low,  PIACK high, TIACK high
+level-4 acknowledge:   /CS high, PIACK low,  TIACK high
+level-5 acknowledge:   /CS high, PIACK high, TIACK low</code></pre>
+
+        <h3>Vector Registers</h3>
+        <p>
+          Firmware programs PIVR to <code>$50</code> and TIVR to
+          <code>$54</code>. During a level-4 acknowledge the PI/T replaces the
+          low two bits of PIVR with a fixed source number, giving four port
+          vectors. The timer vector is the whole TIVR byte.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PI/T vector numbers
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Level</th>
+              <th scope="col">Source</th>
+              <th scope="col">Vector number</th>
+              <th scope="col">Vector address</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>4</td>
+              <td><code>H1</code></td>
+              <td><code>$50</code></td>
+              <td><code>$000140</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>H2</code></td>
+              <td><code>$51</code></td>
+              <td><code>$000144</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>H3</code></td>
+              <td><code>$52</code></td>
+              <td><code>$000148</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td><code>H4</code></td>
+              <td><code>$53</code></td>
+              <td><code>$00014C</code></td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>Timer zero detect</td>
+              <td><code>$54</code></td>
+              <td><code>$000150</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The five vectors sit above the MFP block at
+          <code>$40</code>-<code>$4F</code>, so the two vectored devices share
+          no vector number. An unwritten PIVR or TIVR returns <code>$0F</code>,
+          the M68000 uninitialized-interrupt vector, which is a diagnostic
+          rather than a handler.
+        </p>
+        <p>
+          The full register map, port assignment, and firmware configuration
+          order are in <a href="pit.html">the PI/T document</a>.
+        </p>
+      </section>
+
       <section id="source-routing">
-        <h2>9. Peripheral Source Routing</h2>
+        <h2>10. Peripheral Source Routing</h2>
         <p>
           Peripheral interrupt outputs that do not have their own processor
           level connect to the MFP's general-purpose interrupt inputs. The MFP
@@ -870,13 +1056,33 @@ level-6 acknowledge:   /CS high, /IACK low</code></pre>
               <td>Priority encoder <code>/I3</code>, autovectored level 3</td>
               <td>Level</td>
             </tr>
+            <tr>
+              <td><a href="pit.html">MC68230</a> <code>PC5/PIRQ</code></td>
+              <td>Drives low or high impedance, active low</td>
+              <td>
+                Priority encoder <code>/I4</code>, vectored level 4, with
+                pull-up
+              </td>
+              <td>Level</td>
+            </tr>
+            <tr>
+              <td><a href="pit.html">MC68230</a> <code>PC3/TOUT</code></td>
+              <td>Drives low or high impedance, active low</td>
+              <td>
+                Priority encoder <code>/I5</code>, vectored level 5, with
+                pull-up
+              </td>
+              <td>Level</td>
+            </tr>
           </tbody>
         </table>
         <p>
           Each open-drain interrupt output gets a 4.7 kohm pull-up to +5 V at
           its receiver. That sinks about 1 mA, within an open-drain output's
           rating alongside the <code>SN74LS148</code> input current on the
-          encoder lines, and releases quickly given the small wired-OR count.
+          encoder lines, and releases without delay given the small wired-OR
+          count. The two MC68230 pins are rated at 8.8 mA, the strongest
+          low-side drive on that device.
           Size the pull-up down toward 3.3 kohm if a line gathers more loads or
           needs a faster release; confirm the final value against trace
           capacitance and load count on the assembled board.
@@ -902,24 +1108,29 @@ level-6 acknowledge:   /CS high, /IACK low</code></pre>
       </section>
 
       <section id="spurious">
-        <h2>10. Spurious and Phantom Acknowledge Termination</h2>
+        <h2>11. Spurious and Phantom Acknowledge Termination</h2>
         <p>
           The motherboard bus timeout is disabled during CPU space, so an
           acknowledge cycle that no source terminates would stall the processor
           forever. This logic terminates every acknowledge that is not answered
-          by <code>/AVEC</code> or <code>MFP_DTACK_n</code>.
+          by <code>/AVEC</code>, <code>MFP_DTACK_n</code>, or
+          <code>PIT_DTACK_n</code>.
         </p>
 
         <h3>Unwired Levels</h3>
         <p>
           An acknowledge to a level with no source and no autovector wiring
-          (levels 1, 2, 4, and 5) is terminated immediately.
+          (levels 1 and 2) is terminated immediately.
         </p>
-        <pre><code>UNWIRED_IACK_n = IACK_L1_n AND IACK_L2_n AND IACK_L4_n AND IACK_L5_n</code></pre>
+        <pre><code>UNWIRED_IACK_n = IACK_L1_n AND IACK_L2_n AND 1 AND 1</code></pre>
         <p>
           <code>UNWIRED_IACK_n</code> is one gate of a <code>CD74HCT21</code>
-          4-input AND. When any of those strobes is low it goes low and drives
-          <code>INT_BERR_n</code> low without waiting.
+          4-input AND. When either strobe is low it goes low and drives
+          <code>INT_BERR_n</code> low without waiting. The two unused inputs
+          connect to +5 V. Revision 1.0 also fed <code>IACK_L4_n</code> and
+          <code>IACK_L5_n</code> into this gate; the PI/T now answers both
+          levels, so an unanswered acknowledge there is a fault condition rather
+          than the normal case and belongs to the watchdog below.
         </p>
 
         <h3>Phantom Acknowledge Watchdog</h3>
@@ -930,23 +1141,36 @@ level-6 acknowledge:   /CS high, /IACK low</code></pre>
           counts <code>INT_CLK</code> edges while an acknowledge is unanswered
           and asserts <code>INT_BERR_n</code> when the count is reached.
         </p>
-        <pre><code>ANSWERED       = (NOT AVEC_n) OR (NOT MFP_DTACK_n)   any legitimate termination
-WDOG_COUNT_EN  = IACK_ACTIVE AND AVEC_n AND MFP_DTACK_n
-WDOG_MR        = NOT WDOG_COUNT_EN                   active-high counter reset
-WDOG_TIMEOUT_n = NOT Q5                              Q5 = 32 counted INT_CLK edges
+        <pre><code>ANSWERED       = (NOT AVEC_n) OR (NOT MFP_DTACK_n)
+                 OR (NOT PIT_DTACK_n)          any legitimate termination
+WDOG_COUNT_EN  = IACK_ACTIVE AND AVEC_n
+                 AND MFP_DTACK_n AND PIT_DTACK_n
+WDOG_MR        = NOT WDOG_COUNT_EN             active-high counter reset
+WDOG_TIMEOUT_n = NOT Q5                        Q5 = 32 counted INT_CLK edges
 INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
         <p>
           The count is <code>Q5</code>, 32 <code>INT_CLK</code> periods, about
           3.2 us. That is comfortably past the longest MC68901 acknowledge
-          latency, still about sixteen times shorter than the 51.1 us normal bus
-          timeout, and far below any software concern. If a measured MFP
-          acknowledge is unexpectedly slow, <code>Q6</code> (6.4 us) is the next
-          tap; <code>Q4</code> (1.6 us) is the tighter one.
+          latency and more than six times the PI/T's longest acknowledge
+          response of under 500 ns, still about sixteen times shorter than the
+          51.1 us normal bus timeout, and far below any software concern. If a
+          measured MFP acknowledge is unexpectedly slow, <code>Q6</code> (6.4
+          us) is the next tap; <code>Q4</code> (1.6 us) is the tighter one.
         </p>
         <p>
-          <code>WDOG_COUNT_EN</code> is a three-input AND,
+          <code>WDOG_COUNT_EN</code> is a four-input AND,
           <code>WDOG_MR</code> its inversion, and <code>WDOG_TIMEOUT_n</code> an
-          inverter on <code>Q5</code>, all in <code>U_INT_GATE</code>.
+          inverter on <code>Q5</code>, all in <code>U_INT_GATE</code>. The
+          fourth input arrived with revision 1.1 and takes one more
+          <code>SN74HCT08</code> gate; the spare gates of
+          <code>U_AVEC_OR</code> cover it.
+        </p>
+        <p>
+          The PI/T drives no response at all to an acknowledge whose interrupt
+          function is unselected or whose request it is not asserting, which is
+          the state before firmware programs PSRR and TCR. The watchdog
+          terminates those cycles the same way it terminates a withdrawn MFP
+          request.
         </p>
 
         <h3>Motherboard Bus Error</h3>
@@ -970,7 +1194,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="nmi">
-        <h2>11. NMI and Level 7</h2>
+        <h2>12. NMI and Level 7</h2>
         <p>
           Level 7 cannot be masked. The processor takes a level-7 interrupt on
           every transition of the request level from below 7 up to 7, so a held
@@ -1036,7 +1260,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="reset-behavior">
-        <h2>12. Reset Behavior</h2>
+        <h2>13. Reset Behavior</h2>
         <p>After <code>RESET_n</code>:</p>
         <ul>
           <li>
@@ -1045,6 +1269,14 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               >Clock and Reset</a
             >). All MFP channels are disabled and <code>/IRQ</code> is negated,
             so <code>U_IPL_ENC</code> <code>/I6</code> is inactive.
+          </li>
+          <li>
+            The PI/T is reset through the same
+            <code>PERIPH_RESET_n</code> net. Its control registers clear, which
+            leaves <code>PC5</code> and <code>PC3</code> as port C inputs, so
+            <code>PIT_PIRQ_n</code> and <code>PIT_TIRQ_n</code> release and
+            <code>U_IPL_ENC</code> <code>/I4</code> and <code>/I5</code> are
+            inactive.
           </li>
           <li>
             <code>NMI_n</code> is held inactive while <code>RESET_n</code> is
@@ -1079,12 +1311,13 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="acknowledge-timing">
-        <h2>13. Acknowledge Timing</h2>
+        <h2>14. Acknowledge Timing</h2>
         <p>
           The acknowledge cycle is a normal-length MC68EC000 read cycle, four
           clock periods plus wait states, terminated by <code>/AVEC</code>, by
-          the MFP vector and <code>MFP_DTACK_n</code>, or by
-          <code>INT_BERR_n</code>. Use the 10 MHz column of
+          a device vector with <code>MFP_DTACK_n</code> or
+          <code>PIT_DTACK_n</code>, or by <code>INT_BERR_n</code>. Use the 10
+          MHz column of
           <a href="datasheets/M68000UM.pdf"
             >M68000 User's Manual, section 10.14</a
           >, together with the interrupt-acknowledge timing in the manual's
@@ -1110,15 +1343,19 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               </td>
               <td>
                 <code>/AVEC</code> is combinational and early; the MFP vector
-                path and the watchdog need their own margin checks.
+                path, the PI/T vector path, and the watchdog need their own
+                margin checks.
               </td>
             </tr>
             <tr>
               <td>#27 read-data setup</td>
               <td>Vector byte valid 5 ns before the sampling edge</td>
               <td>
-                The MFP drives <code>D7..D0</code> during acknowledge; margin
-                measured on the assembled board against the MFP output timing.
+                The MFP or the PI/T drives <code>D7..D0</code> during
+                acknowledge. The PI/T places its vector one clock period ahead
+                of its own <code>/DTACK</code>, so it supplies 100 ns of setup
+                by construction. The MFP margin is measured on the assembled
+                board against the MFP output timing.
               </td>
             </tr>
             <tr>
@@ -1127,9 +1364,10 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               </td>
               <td>110 ns maximum</td>
               <td>
-                MFP <code>/DTACK</code> release followed by the FAST completion
-                tree. The component total is 77.2 ns, leaving 32.8 ns for the
-                routed board under the 110 ns limit.
+                MFP or PI/T <code>/DTACK</code> release followed by the FAST
+                completion tree. The MFP total is 77.2 ns, leaving 32.8 ns for
+                the routed board. The PI/T total is 68.8 ns, leaving 41.2 ns;
+                see <a href="pit.html#timing">the PI/T timing section</a>.
               </td>
             </tr>
             <tr>
@@ -1147,9 +1385,9 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
                 timeout
               </td>
               <td>
-                32 <code>INT_CLK</code> periods, 3.2 us. Confirm against the
-                measured MFP acknowledge latency; move to <code>Q6</code> if
-                needed.
+                32 <code>INT_CLK</code> periods, 3.2 us. The PI/T answers in
+                under 500 ns. Confirm against the measured MFP acknowledge
+                latency; move to <code>Q6</code> if needed.
               </td>
             </tr>
           </tbody>
@@ -1162,7 +1400,9 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
           >
           tables, is added once package pins and gate packing are set at
           schematic capture. The dominant unknown is the MC68901 acknowledge
-          latency, which is a measurement.
+          latency, which is a measurement. The PI/T path is already worked
+          through because the MC68230 states its acknowledge delay in clock
+          periods.
         </p>
         <p>
           There is no motherboard bus timeout on this cycle. The only backstop
@@ -1171,7 +1411,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="motherboard-integration">
-        <h2>14. Motherboard Integration</h2>
+        <h2>15. Motherboard Integration</h2>
         <p>
           Four signals connect the interrupt controller to the bus and clock
           circuits. The <a href="bus-and-decode.html">Bus and Decode</a> and
@@ -1210,6 +1450,15 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               </td>
             </tr>
             <tr>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>Completion tree</td>
+              <td>
+                Directly into <code>U_DTACK_B</code> gate 1. The tree is active
+                during CPU space, so this path also terminates the vectored
+                level-4 and level-5 acknowledges.
+              </td>
+            </tr>
+            <tr>
               <td><code>INT_BERR_n</code></td>
               <td>Bus-error path</td>
               <td>
@@ -1238,7 +1487,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="package-pin-map">
-        <h2>15. Package and Pin Map</h2>
+        <h2>16. Package and Pin Map</h2>
         <p>
           Reference designators and parts. Package pin numbers and the gate
           assignment within the multi-gate packages follow from the schematic;
@@ -1284,7 +1533,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td><code>CD74HCT21E</code></td>
               <td>
                 <code>IACK_TYPE</code> (gate 1);
-                <code>UNWIRED_IACK_n</code> (gate 2)
+                <code>UNWIRED_IACK_n</code> (gate 2, two inputs tied to +5 V)
               </td>
             </tr>
             <tr>
@@ -1292,7 +1541,8 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td><code>SN74HCT08N</code></td>
               <td>
                 Autovector strobe combine to <code>/AVEC</code> (AND of
-                active-low strobes)
+                active-low strobes); one spare gate extends
+                <code>WDOG_COUNT_EN</code> to four inputs
               </td>
             </tr>
             <tr>
@@ -1328,7 +1578,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="electrical-fanout">
-        <h2>16. Electrical and Fanout</h2>
+        <h2>17. Electrical and Fanout</h2>
         <p>
           All parts run from the regulated 5 V +/-5% rail and use TTL-compatible
           thresholds.
@@ -1373,6 +1623,16 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td>Add to the CPU address-line budget in Bus and Decode.</td>
             </tr>
             <tr>
+              <td><code>IACK_L4_n</code>, <code>IACK_L5_n</code></td>
+              <td>One MC68230 input each</td>
+              <td>
+                <code>U_IACK_DEC</code> outputs 4 and 5 now leave the interrupt
+                block for <code>U_PIT</code> pins 36 and 37. Each strobe gains
+                10 uA and 15 pF; see
+                <a href="pit.html#timing">PI/T loading</a>.
+              </td>
+            </tr>
+            <tr>
               <td><code>A16..A19</code></td>
               <td>One <code>CD74HCT21E</code> input each</td>
               <td>
@@ -1382,10 +1642,14 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
             </tr>
             <tr>
               <td><code>D7..D0</code></td>
-              <td>MFP output during a level-6 acknowledge only</td>
               <td>
-                Already part of the MFP data-bus connection; check against the
-                shared bus budget.
+                MFP output during a level-6 acknowledge and PI/T output during a
+                level-4 or level-5 acknowledge
+              </td>
+              <td>
+                Already part of each device's data-bus connection; check against
+                the shared bus budget. The three acknowledge levels are mutually
+                exclusive, so the two devices never drive the bus together.
               </td>
             </tr>
             <tr>
@@ -1408,7 +1672,8 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td>Open-drain <code>/IRQ</code> nets</td>
               <td>4.7 kohm pull-up each</td>
               <td>
-                <code>MFP_IRQ_n</code>, <code>EXP_IRQ_n</code>, and each
+                <code>MFP_IRQ_n</code>, <code>EXP_IRQ_n</code>,
+                <code>PIT_PIRQ_n</code>, <code>PIT_TIRQ_n</code>, and each
                 peripheral <code>/IRQ</code> at its MFP input. Final value
                 against card count and trace capacitance on the assembled board.
               </td>
@@ -1418,7 +1683,7 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
       </section>
 
       <section id="design-notes">
-        <h2>17. Design Notes</h2>
+        <h2>18. Design Notes</h2>
         <p>Why the design is shaped this way, for anyone adapting it.</p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1443,12 +1708,30 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               </td>
             </tr>
             <tr>
-              <td>MFP vectored, other used levels autovectored</td>
+              <td>MFP and PI/T vectored, expansion autovectored</td>
               <td>
-                The MFP supplies real per-channel vectors, so its handlers
-                dispatch directly. The one or two remaining sources are rare
-                enough that a status poll in an autovector handler costs
-                nothing.
+                Both devices supply real vectors, so their handlers dispatch
+                directly. An expansion card is rare enough that a status poll in
+                an autovector handler costs nothing.
+              </td>
+            </tr>
+            <tr>
+              <td>PI/T on two levels rather than one</td>
+              <td>
+                The MC68230 has one acknowledge pin for the ports and another
+                for the timer, and each has its own vector register. Sharing one
+                level would leave the acknowledge decoder unable to choose which
+                pin to strobe and would put a status poll back into the handler.
+                Levels 4 and 5 were unused, so the second level costs nothing.
+              </td>
+            </tr>
+            <tr>
+              <td>Timer above the ports</td>
+              <td>
+                A periodic source loses meaning when it is late, while a
+                handshake edge is latched in the port status register and waits.
+                Putting the timer on level 5 keeps header activity from delaying
+                it.
               </td>
             </tr>
             <tr>
@@ -1462,7 +1745,8 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td>Unwired levels fall through to spurious</td>
               <td>
                 An acknowledge to a level with no source is a wiring or software
-                fault. Vector 24 lets the handler log it rather than hang.
+                fault. Vector 24 lets the handler log it rather than hang. Only
+                levels 1 and 2 remain in that state.
               </td>
             </tr>
             <tr>
@@ -1520,20 +1804,33 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
                 zero works.
               </td>
             </tr>
+            <tr>
+              <td>
+                PI/T vector base <code>$50</code>, timer vector
+                <code>$54</code>
+              </td>
+              <td>
+                The next free numbers above the MFP block. The PI/T forces the
+                low two bits of the port vector, so the port base needs a low
+                nibble that is a multiple of four.
+              </td>
+            </tr>
           </tbody>
         </table>
         <p>
           The <a href="mfp.html">MFP design</a> fixes the GPIP assignments, a
           2.5 MHz MFP clock, 4.7 kohm open-drain pull-ups, and the direct
           <code>MFP_DTACK_n</code> completion path. The MC68901's worst-phase
-          acknowledge response fits inside the 3.2 us Q5 watchdog interval.
-          Board layout must preserve the acknowledgement timing limits in
-          section 13.
+          acknowledge response fits inside the 3.2 us Q5 watchdog interval. The
+          <a href="pit.html">PI/T design</a> fixes its two vector registers, its
+          pull-ups, and the direct <code>PIT_DTACK_n</code> completion path, and
+          its acknowledge response is under 500 ns. Board layout must preserve
+          the acknowledgement timing limits in section 14.
         </p>
       </section>
 
       <section id="internal-signal-reference">
-        <h2>18. Internal Signal Reference</h2>
+        <h2>19. Internal Signal Reference</h2>
         <p>
           Names ending in <code>_n</code> are active low. Others are active high
           unless the description says otherwise.
@@ -1583,6 +1880,22 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td><code>U_IPL_ENC</code> input <code>/I6</code></td>
             </tr>
             <tr>
+              <td><code>PIT_PIRQ_n</code></td>
+              <td>
+                MC68230 <code>PC5/PIRQ</code>, low or high impedance, 4.7 kohm
+                pull-up
+              </td>
+              <td><code>U_IPL_ENC</code> input <code>/I4</code></td>
+            </tr>
+            <tr>
+              <td><code>PIT_TIRQ_n</code></td>
+              <td>
+                MC68230 <code>PC3/TOUT</code>, low or high impedance, 4.7 kohm
+                pull-up
+              </td>
+              <td><code>U_IPL_ENC</code> input <code>/I5</code></td>
+            </tr>
+            <tr>
               <td><code>NMI_n</code></td>
               <td>
                 Conditioned NMI button, gated inactive while
@@ -1623,15 +1936,23 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td><code>U_DTACK_A</code> gate 1 in Bus and Decode</td>
             </tr>
             <tr>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>MC68230 <code>/DTACK</code> pin, 4.7 kohm pull-up</td>
+              <td><code>U_DTACK_B</code> gate 1 in Bus and Decode</td>
+            </tr>
+            <tr>
               <td><code>UNWIRED_IACK_n</code></td>
-              <td>
-                <code>IACK_L1_n AND IACK_L2_n AND IACK_L4_n AND IACK_L5_n</code>
-              </td>
+              <td><code>IACK_L1_n AND IACK_L2_n</code></td>
               <td>Immediate spurious termination for an unwired level</td>
             </tr>
             <tr>
               <td><code>WDOG_MR</code></td>
-              <td><code>NOT (IACK_ACTIVE AND AVEC_n AND MFP_DTACK_n)</code></td>
+              <td>
+                <code
+                  >NOT (IACK_ACTIVE AND AVEC_n AND MFP_DTACK_n AND
+                  PIT_DTACK_n)</code
+                >
+              </td>
               <td>
                 <code>U_INT_WDOG</code> active-high reset; low only while
                 counting
@@ -1655,14 +1976,17 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
             <tr>
               <td><code>PERIPH_RESET_n</code></td>
               <td>Clock and Reset</td>
-              <td>Resets the MFP; negates <code>MFP_IRQ_n</code></td>
+              <td>
+                Resets the MFP and the PI/T; negates <code>MFP_IRQ_n</code>,
+                <code>PIT_PIRQ_n</code>, and <code>PIT_TIRQ_n</code>
+              </td>
             </tr>
           </tbody>
         </table>
       </section>
 
       <section id="sources">
-        <h2>19. Sources</h2>
+        <h2>20. Sources</h2>
         <p>
           <a href="datasheets/M68000UM.pdf">M68000 User's Manual</a>: section
           3.5 (interrupt control inputs), section 5.1.4 (CPU space cycle),
@@ -1677,6 +2001,12 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
           <code>IEO</code> daisy chain, the vector register, general-purpose
           interrupt inputs and the active-edge register, and
           <code>/DTACK</code> generation.
+        </p>
+        <p>
+          <a href="datasheets/mc68230.pdf">MC68230 PI/T</a>: the port service
+          request register, the timer control register, port and timer
+          interrupt-acknowledge behavior, the two vector registers, and the
+          response to an acknowledge with no request asserted.
         </p>
         <h3>Devices</h3>
         <table border="1" cellpadding="4" cellspacing="0">
@@ -1695,6 +2025,11 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td>MC68901</td>
               <td>Interrupt controller, vectored on level 6</td>
               <td><a href="datasheets/MC68901.pdf">PDF</a></td>
+            </tr>
+            <tr>
+              <td>MC68230</td>
+              <td>Parallel interface and timer, vectored on levels 5 and 4</td>
+              <td><a href="datasheets/mc68230.pdf">PDF</a></td>
             </tr>
             <tr>
               <td>SN74LS148</td>
@@ -1742,6 +2077,8 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
           <a href="bus-and-decode.html">Bus and Decode</a> (CPU-space decode,
           completion tree, bus error), <a href="mfp.html">MFP</a> (channel map,
           GPI assignments, vector base),
+          <a href="pit.html">PI/T</a> (port assignment, timer, vector
+          registers),
           <a href="dram.html#clock-distribution">DRAM</a>
           (<code>INT_CLK</code> spare clock-buffer channel),
           <a href="clock-and-reset.html">Clock and Reset</a>

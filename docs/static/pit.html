@@ -1,0 +1,2040 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - MC68230 PI/T, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+
+  <body>
+    <header>
+      <h1>MC68230 PI/T</h1>
+      <p>
+        This document defines the MC68230 parallel interface and timer, its
+        MC68EC000 bus connection, the bit-banged I2C port, the user I/O header,
+        and the two vectored interrupt levels it owns.
+        <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>Revision 1.0 pre-layout design</dd>
+        <dt>Device</dt>
+        <dd>Motorola MC68230P10, 48-pin plastic DIP</dd>
+        <dt>Bus connection</dt>
+        <dd>
+          I/O slot 9, <code>$F20000-$F3FFFF</code>, on <code>D7..D0</code>
+        </dd>
+        <dt>Canonical register block</dt>
+        <dd><code>$F20001-$F2003F</code>, odd byte addresses</dd>
+        <dt>Clock</dt>
+        <dd><code>PIT_CLK</code>, a buffered 10 MHz copy of the CPU clock</dd>
+        <dt>Completion response</dt>
+        <dd>
+          <code>PIT_DTACK_n</code> from the device, for register cycles and for
+          both acknowledge cycles
+        </dd>
+        <dt>Port interrupt</dt>
+        <dd>
+          Level 4, vectored, vector numbers <code>$50</code>-<code>$53</code>
+        </dd>
+        <dt>Timer interrupt</dt>
+        <dd>Level 5, vectored, vector number <code>$54</code></dd>
+        <dt>I2C bus</dt>
+        <dd>
+          <code>PC0</code> and <code>PC1</code> driven as open drain on a 5 V
+          four-pin header
+        </dd>
+        <dt>User I/O</dt>
+        <dd>
+          Port A, port B, <code>H1..H4</code>, <code>PC2</code>, and
+          <code>PC4</code> on a 34-pin header
+        </dd>
+      </dl>
+    </header>
+
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#scope">Purpose and Scope</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#bus-interface">Bus Interface</a></li>
+        <li><a href="#register-map">Register Map</a></li>
+        <li><a href="#clock-reset">Clock and Reset</a></li>
+        <li><a href="#port-assignment">Port Assignment</a></li>
+        <li><a href="#i2c">I2C Port</a></li>
+        <li><a href="#user-header">User I/O Header</a></li>
+        <li><a href="#timer">Timer</a></li>
+        <li><a href="#interrupts">Interrupts</a></li>
+        <li><a href="#firmware">Firmware Configuration Rules</a></li>
+        <li><a href="#pins">Package and Pin Map</a></li>
+        <li><a href="#timing">Timing and Electrical Checks</a></li>
+        <li><a href="#parts">Parts Added</a></li>
+        <li><a href="#layout">Board Layout</a></li>
+        <li><a href="#signals">Internal Signal Reference</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2>1. Purpose and Scope</h2>
+        <p>
+          The MC68230 supplies two 8-bit parallel ports, four programmable
+          handshake pins, eight dual-function port C pins, and a 24-bit timer.
+          The board uses two port C pins as a bit-banged I2C bus, routes the
+          remaining general-purpose pins to a user header, and takes the port
+          and timer interrupts on their own processor levels. This page fixes
+          every motherboard connection to the device and the firmware rules
+          that the wiring imposes.
+        </p>
+        <p>
+          The <a href="memory-map.html">Memory Map</a> owns the slot assignment.
+          <a href="bus-and-decode.html">Bus and Address Decode</a> owns
+          <code>IO9_n</code>, the <code>PIT_CS_n</code> gate, the global
+          completion tree, and timeout behavior.
+          <a href="interrupts.html">Interrupts</a> owns the priority encoder
+          inputs and the two acknowledge strobes, and
+          <a href="clock-and-reset.html">Clock and Reset</a> owns
+          <code>PIT_CLK</code> and <code>PERIPH_RESET_n</code>.
+        </p>
+        <p>
+          The MC68230 is a native M68000 peripheral. It decodes its own register
+          selects, drives the data bus, and produces its own
+          <code>/DTACK</code>, so it needs no cycle sequencer of the kind the
+          RTC, floppy, and VGA interfaces use. The motherboard adds one OR gate,
+          one clock branch, and five resistors.
+        </p>
+        <p>
+          Signal names ending in <code>_n</code>, and signal names written with
+          a leading slash, are active low. The board uses +5 V logic and
+          through-hole packages. Every IC family selected here existed before
+          1994.
+        </p>
+      </section>
+
+      <section id="architecture">
+        <h2>2. Architecture</h2>
+        <pre><code>MC68EC000 bus                    MC68230 PI/T
+
+A5..A1 -------------------------&gt; RS5..RS1
+D7..D0 &lt;-----------------------&gt; D7..D0
+R/W ----------------------------&gt; R/W
+IO9_n --&gt; U_OR_DTACK gate 2 ----&gt; /CS
+LDS_n --&gt; U_OR_DTACK gate 2
+PIT_CLK ------------------------&gt; CLK
+PERIPH_RESET_n -----------------&gt; RESET
+IACK_L4_n ----------------------&gt; PC6/PIACK
+IACK_L5_n ----------------------&gt; PC7/TIACK
+
+PIT_DTACK_n &lt;--- 4.7 kohm pull-up --- /DTACK
+PIT_PIRQ_n  &lt;--- 4.7 kohm pull-up --- PC5/PIRQ
+PIT_TIRQ_n  &lt;--- 4.7 kohm pull-up --- PC3/TOUT
+
+I2C_SCL &lt;------- 4.7 kohm pull-up --- PC0 ---&gt; J_PIT_I2C pin 2
+I2C_SDA &lt;------- 4.7 kohm pull-up --- PC1 ---&gt; J_PIT_I2C pin 3
+
+PA7..PA0, PB7..PB0, H1..H4, PC2, PC4 -&gt; J_PIT_USER
+F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
+        <p>
+          <code>PIT_DTACK_n</code> joins the motherboard completion tree at
+          <code>U_DTACK_B</code> gate 1. The same net terminates register
+          cycles, level-4 acknowledge cycles, and level-5 acknowledge cycles,
+          because the completion tree stays active during CPU space.
+        </p>
+        <p>
+          <code>PC4/DMAREQ</code> reaches the user header as a port C pin. The
+          board has no DMA controller, so firmware leaves the DMA request
+          function unselected.
+        </p>
+      </section>
+
+      <section id="bus-interface">
+        <h2>3. Bus Interface</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC68230 processor-bus connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">MC68230 signal</th>
+              <th scope="col">Motherboard connection</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>CPU <code>D7..D0</code></td>
+              <td>Register data and interrupt vectors.</td>
+            </tr>
+            <tr>
+              <td><code>RS1..RS5</code></td>
+              <td>CPU <code>A1..A5</code>, in order</td>
+              <td>Selects one of 32 register positions.</td>
+            </tr>
+            <tr>
+              <td><code>/CS</code></td>
+              <td><code>PIT_CS_n</code></td>
+              <td>
+                Selects the device in slot 9 on the lower byte lane during a
+                normal bus cycle.
+              </td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>CPU <code>R/W</code></td>
+              <td>High for reads and low for writes.</td>
+            </tr>
+            <tr>
+              <td><code>CLK</code></td>
+              <td><code>PIT_CLK</code></td>
+              <td>Free-running 10 MHz internal timing reference.</td>
+            </tr>
+            <tr>
+              <td><code>RESET</code></td>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>Clears the control and direction registers.</td>
+            </tr>
+            <tr>
+              <td><code>/DTACK</code></td>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>
+                Terminates register cycles and both vectored acknowledge
+                cycles.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PC6/PIACK</code></td>
+              <td><code>IACK_L4_n</code></td>
+              <td>Port interrupt acknowledge from the level decoder.</td>
+            </tr>
+            <tr>
+              <td><code>PC7/TIACK</code></td>
+              <td><code>IACK_L5_n</code></td>
+              <td>Timer interrupt acknowledge from the level decoder.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Chip Select</h3>
+        <p>
+          The MC68230 has no separate data-strobe input, so the byte-lane
+          strobe belongs in the chip-select equation. Gate 2 of
+          <code>U_OR_DTACK</code>, a spare <code>SN74F32N</code> OR gate in the
+          <a href="bus-and-decode.html#glue-logic-package-assignments"
+            >motherboard glue logic</a
+          >, combines the slot select with <code>LDS_n</code>.
+        </p>
+        <pre><code>PIT_CS_n = IO9_n OR LDS_n</code></pre>
+        <p>
+          <code>IO9_n</code> already carries the address decode and the normal
+          bus-cycle qualification, so <code>PIT_CS_n</code> satisfies the
+          MC68230 requirement that address strobe, a data strobe, and the
+          address bits all appear in the chip select. The gate is FAST rather
+          than HCT because <code>PIT_CS_n</code> also starts the
+          acknowledgement release path measured in section 13.
+        </p>
+        <p>
+          <code>IO9_n</code> is inactive during CPU space, so
+          <code>/CS</code> stays high while <code>PIACK</code> or
+          <code>TIACK</code> is low. The MC68230 forbids asserting
+          <code>/CS</code>, <code>PIACK</code>, and <code>TIACK</code> in any
+          combination, and the decoder structure makes that impossible.
+        </p>
+
+        <h3>Addressing Rules</h3>
+        <p>
+          Software accesses the PI/T as bytes at odd addresses. A lower-byte
+          access asserts <code>LDS_n</code>; an upper-byte-only access leaves
+          <code>PIT_CS_n</code> high and reaches the motherboard bus timeout. A
+          word access includes the lower lane and completes, but only
+          <code>D7..D0</code> carry PI/T data, so word accesses are outside the
+          interface contract.
+        </p>
+        <p>
+          Address lines <code>A16..A6</code> do not enter the local decode. The
+          64-byte register block repeats throughout slot 9. The table in section
+          4 names the canonical copy beginning at <code>$F20000</code>.
+        </p>
+
+        <h3>Completion Response</h3>
+        <p>
+          The MC68230 drives <code>/DTACK</code> high before entering its
+          high-impedance state, and it contains an internal active pull-up that
+          shortens the rising edge. <code>R_PIT_DTACK</code>, 4.7 kohm to +5 V,
+          holds the completion-tree input inactive while the device is not
+          driving it. This matches the
+          <a href="mfp.html#bus-interface">MC68901 arrangement</a> on the same
+          tree.
+        </p>
+        <p>
+          The device asserts <code>/DTACK</code> on a falling
+          <code>PIT_CLK</code> edge after it recognizes the chip select. It
+          never asserts <code>/DTACK</code> for a cycle it does not own, so an
+          access to another slot leaves <code>PIT_DTACK_n</code> released.
+        </p>
+
+        <h3>Bus Cycle Recovery</h3>
+        <p>
+          The MC68230 recognizes a new chip select three <code>PIT_CLK</code>
+          periods after the clock edge on which it asserted <code>/DTACK</code>
+          for the previous cycle. A chip select that arrives inside that window
+          does not produce an error: the device postpones the new cycle, and
+          with it <code>/DTACK</code>, until its internal operations finish.
+          The processor waits.
+        </p>
+        <p>
+          Three <code>PIT_CLK</code> periods are 300 ns. The longest
+          postponement is far inside the 51.1 microsecond motherboard timeout,
+          so back-to-back PI/T accesses cost wait states and nothing else.
+          Section 13 shows that consecutive accesses do not reach the window in
+          practice.
+        </p>
+      </section>
+
+      <section id="register-map">
+        <h2>4. Register Map</h2>
+        <p>
+          The MC68230 answers 32 register selects. Twenty-three hold registers
+          and the rest read as zero. The register functions and select values
+          come from the MC68230 register model; this table does not prescribe
+          firmware values.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Canonical MC68230 register addresses
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Address</th>
+              <th scope="col">RS5..RS1</th>
+              <th scope="col">Register</th>
+              <th scope="col">Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$F20001</code></td>
+              <td><code>00000</code></td>
+              <td>PGCR</td>
+              <td>Port mode, handshake enables, and handshake sense.</td>
+            </tr>
+            <tr>
+              <td><code>$F20003</code></td>
+              <td><code>00001</code></td>
+              <td>PSRR</td>
+              <td>
+                Service-request select, interrupt pin functions, and port
+                interrupt priority.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20005</code></td>
+              <td><code>00010</code></td>
+              <td>PADDR</td>
+              <td>
+                Port A direction; one selects output and zero selects input.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20007</code></td>
+              <td><code>00011</code></td>
+              <td>PBDDR</td>
+              <td>Port B direction.</td>
+            </tr>
+            <tr>
+              <td><code>$F20009</code></td>
+              <td><code>00100</code></td>
+              <td>PCDDR</td>
+              <td>Port C direction, including the two I2C pins.</td>
+            </tr>
+            <tr>
+              <td><code>$F2000B</code></td>
+              <td><code>00101</code></td>
+              <td>PIVR</td>
+              <td>
+                Port interrupt vector base; reads <code>$0F</code> until
+                written.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F2000D</code></td>
+              <td><code>00110</code></td>
+              <td>PACR</td>
+              <td>
+                Port A submode, H2 control, and the H1 and H2 interrupt
+                enables.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F2000F</code></td>
+              <td><code>00111</code></td>
+              <td>PBCR</td>
+              <td>
+                Port B submode, H4 control, and the H3 and H4 interrupt
+                enables.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20011</code></td>
+              <td><code>01000</code></td>
+              <td>PADR</td>
+              <td>Port A data.</td>
+            </tr>
+            <tr>
+              <td><code>$F20013</code></td>
+              <td><code>01001</code></td>
+              <td>PBDR</td>
+              <td>Port B data.</td>
+            </tr>
+            <tr>
+              <td><code>$F20015</code></td>
+              <td><code>01010</code></td>
+              <td>PAAR</td>
+              <td>
+                Port A pin levels; reading does not disturb the handshake.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20017</code></td>
+              <td><code>01011</code></td>
+              <td>PBAR</td>
+              <td>
+                Port B pin levels; reading does not disturb the handshake.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20019</code></td>
+              <td><code>01100</code></td>
+              <td>PCDR</td>
+              <td>
+                Port C data; input bits return the pin level, which is how
+                firmware reads the I2C lines.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F2001B</code></td>
+              <td><code>01101</code></td>
+              <td>PSR</td>
+              <td>
+                Handshake pin levels <code>H4..H1</code> and status bits
+                <code>H4S..H1S</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F2001D</code>-<code>$F2001F</code></td>
+              <td><code>01110</code>-<code>01111</code></td>
+              <td>Null</td>
+              <td>Read as zero.</td>
+            </tr>
+            <tr>
+              <td><code>$F20021</code></td>
+              <td><code>10000</code></td>
+              <td>TCR</td>
+              <td>
+                TOUT and TIACK function, zero-detect control, clock source, and
+                timer enable.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20023</code></td>
+              <td><code>10001</code></td>
+              <td>TIVR</td>
+              <td>
+                Timer interrupt vector; reads <code>$0F</code> until written.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20025</code></td>
+              <td><code>10010</code></td>
+              <td>Null</td>
+              <td>Read as zero.</td>
+            </tr>
+            <tr>
+              <td><code>$F20027</code></td>
+              <td><code>10011</code></td>
+              <td>CPRH</td>
+              <td>Counter preload, bits 23 through 16.</td>
+            </tr>
+            <tr>
+              <td><code>$F20029</code></td>
+              <td><code>10100</code></td>
+              <td>CPRM</td>
+              <td>Counter preload, bits 15 through 8.</td>
+            </tr>
+            <tr>
+              <td><code>$F2002B</code></td>
+              <td><code>10101</code></td>
+              <td>CPRL</td>
+              <td>Counter preload, bits 7 through 0.</td>
+            </tr>
+            <tr>
+              <td><code>$F2002D</code></td>
+              <td><code>10110</code></td>
+              <td>Null</td>
+              <td>Read as zero.</td>
+            </tr>
+            <tr>
+              <td><code>$F2002F</code></td>
+              <td><code>10111</code></td>
+              <td>CNTRH</td>
+              <td>Current count, bits 23 through 16.</td>
+            </tr>
+            <tr>
+              <td><code>$F20031</code></td>
+              <td><code>11000</code></td>
+              <td>CNTRM</td>
+              <td>Current count, bits 15 through 8.</td>
+            </tr>
+            <tr>
+              <td><code>$F20033</code></td>
+              <td><code>11001</code></td>
+              <td>CNTRL</td>
+              <td>Current count, bits 7 through 0.</td>
+            </tr>
+            <tr>
+              <td><code>$F20035</code></td>
+              <td><code>11010</code></td>
+              <td>TSR</td>
+              <td>
+                Zero-detect status; firmware clears it by writing a one to bit
+                0.
+              </td>
+            </tr>
+            <tr>
+              <td><code>$F20037</code>-<code>$F2003F</code></td>
+              <td><code>11011</code>-<code>11111</code></td>
+              <td>Null</td>
+              <td>Read as zero.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The three counter registers are read as three separate bytes, so a
+          count read while the timer runs can straddle a borrow. Firmware that
+          needs a coherent 24-bit count reads the three bytes twice and repeats
+          when the high byte changes.
+        </p>
+      </section>
+
+      <section id="clock-reset">
+        <h2>5. Clock and Reset</h2>
+        <p>
+          The MC68230 contains dynamic logic. Its clock must run at all times.
+          The 10 MHz grade accepts 2.0 to 10.0 MHz, a 100 to 500 ns period, and
+          45 to 250 ns in each half period, with rise and fall times at or below
+          10 ns. The clock does not need a phase relationship with the processor
+          clock, and the device handles the resulting uncertainty through
+          <code>/DTACK</code>.
+        </p>
+        <p>
+          <code>PIT_CLK</code> is a 10 MHz square wave with 50 ns in each half
+          period, which clears the 45 ns minimum by 5 ns, and the
+          <code>CD74ACT244E</code> edges are far shorter than the 10 ns limit.
+          The 500 ns period maximum and the 250 ns half-period maximum are why
+          the net is never gated: a stopped clock loses the device's internal
+          state within one period of the limit.
+        </p>
+        <p>
+          <code>PIT_CLK</code> comes from <code>U_IO_CLK_BUF</code>, the
+          <code>CD74ACT244E</code> I/O clock buffer defined in
+          <a href="clock-and-reset.html#io-clock-buffer">Clock and Reset</a>.
+          Two buffer stages separate <code>PIT_CLK</code> from
+          <code>CPU_CLK_10</code>, so the PI/T clock lags the processor clock by
+          the buffer delay and keeps the same 100 ns period and edge structure.
+          The processor clock net gains one <code>CD74ACT244E</code> input and
+          loses the bus-timeout counter, so its known load is unchanged.
+        </p>
+        <p>
+          The lag helps the chip-select setup and costs margin on the
+          acknowledgement arrival. Section 13 works both directions.
+        </p>
+
+        <h3>Reset Behavior</h3>
+        <p>
+          <code>PERIPH_RESET_n</code> drives the MC68230 <code>RESET</code>
+          input. Asserting it clears PGCR, PSRR, PACR, PBCR, the three data
+          direction registers, TCR, and the port status bits, and it loads
+          <code>$0F</code> into PIVR and TIVR.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            State of the board's PI/T pins after reset
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">State</th>
+              <th scope="col">Board consequence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>PA7..PA0</code>, <code>PB7..PB0</code></td>
+              <td>Inputs, internal pull-ups active</td>
+              <td>The user header floats high and drives nothing.</td>
+            </tr>
+            <tr>
+              <td><code>PC0</code>, <code>PC1</code></td>
+              <td>Inputs</td>
+              <td>
+                <code>I2C_SCL</code> and <code>I2C_SDA</code> release to their
+                4.7 kohm pull-ups, which is the idle bus state.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PC3/TOUT</code>, <code>PC5/PIRQ</code></td>
+              <td>Port C inputs; alternate functions unselected</td>
+              <td>
+                <code>PIT_TIRQ_n</code> and <code>PIT_PIRQ_n</code> stay
+                released, so the encoder sees no request.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PC6/PIACK</code>, <code>PC7/TIACK</code></td>
+              <td>Port C inputs; alternate functions unselected</td>
+              <td>
+                An acknowledge to level 4 or level 5 gets no response until
+                firmware enables the interrupt.
+              </td>
+            </tr>
+            <tr>
+              <td><code>H1..H4</code></td>
+              <td>Inputs; <code>H2</code> and <code>H4</code> pulled up</td>
+              <td>Status bits held clear while the enables are clear.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Reset does not clear PADR, PBDR, or PCDR. Their contents after
+          power-on are undefined, so firmware writes them before it programs any
+          direction register. Section 11 states the ordering rule.
+        </p>
+      </section>
+
+      <section id="port-assignment">
+        <h2>6. Port Assignment</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Board use of every MC68230 port pin
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pins</th>
+              <th scope="col">Board function</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>PA7..PA0</code></td>
+              <td>Bit-programmable I/O</td>
+              <td><code>J_PIT_USER</code></td>
+            </tr>
+            <tr>
+              <td><code>PB7..PB0</code></td>
+              <td>Bit-programmable I/O</td>
+              <td><code>J_PIT_USER</code></td>
+            </tr>
+            <tr>
+              <td><code>H1</code>, <code>H2</code></td>
+              <td>Edge-sensitive status inputs for port A</td>
+              <td><code>J_PIT_USER</code></td>
+            </tr>
+            <tr>
+              <td><code>H3</code>, <code>H4</code></td>
+              <td>Edge-sensitive status inputs for port B</td>
+              <td><code>J_PIT_USER</code></td>
+            </tr>
+            <tr>
+              <td><code>PC0</code></td>
+              <td>I2C clock, driven as open drain</td>
+              <td><code>I2C_SCL</code> and <code>J_PIT_I2C</code></td>
+            </tr>
+            <tr>
+              <td><code>PC1</code></td>
+              <td>I2C data, driven as open drain</td>
+              <td><code>I2C_SDA</code> and <code>J_PIT_I2C</code></td>
+            </tr>
+            <tr>
+              <td><code>PC2/TIN</code></td>
+              <td>
+                Port C I/O, or an external timer clock or run/halt control if
+                firmware selects it
+              </td>
+              <td><code>J_PIT_USER</code></td>
+            </tr>
+            <tr>
+              <td><code>PC3/TOUT</code></td>
+              <td>Timer interrupt request</td>
+              <td><code>PIT_TIRQ_n</code></td>
+            </tr>
+            <tr>
+              <td><code>PC4/DMAREQ</code></td>
+              <td>Port C I/O; the DMA function stays unselected</td>
+              <td><code>J_PIT_USER</code></td>
+            </tr>
+            <tr>
+              <td><code>PC5/PIRQ</code></td>
+              <td>Port interrupt request</td>
+              <td><code>PIT_PIRQ_n</code></td>
+            </tr>
+            <tr>
+              <td><code>PC6/PIACK</code></td>
+              <td>Port interrupt acknowledge input</td>
+              <td><code>IACK_L4_n</code></td>
+            </tr>
+            <tr>
+              <td><code>PC7/TIACK</code></td>
+              <td>Timer interrupt acknowledge input</td>
+              <td><code>IACK_L5_n</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Both ports run in mode 0 with the bit I/O submode, so each port A and
+          port B pin takes its direction from its own bit in PADDR or PBDDR, and
+          the four handshake pins act as status and interrupt inputs rather than
+          transfer controls. That fits a header whose attached hardware is not
+          known at design time.
+        </p>
+        <p>
+          <code>PC6</code> and <code>PC7</code> carry acknowledge strobes and
+          never reach the header. Firmware can still read their pin levels
+          through PCDR while they carry the alternate function, which is useful
+          during bring-up.
+        </p>
+      </section>
+
+      <section id="i2c">
+        <h2>7. I2C Port</h2>
+        <p>
+          <code>PC0</code> and <code>PC1</code> form a 5 V I2C bus that firmware
+          drives one bit at a time. The MC68230 has no open-drain port outputs,
+          so the interface produces the open-drain behavior I2C requires by
+          switching pin direction instead of pin level.
+        </p>
+        <pre><code>PCDR bits 1 and 0 = 0     written once during initialization
+
+PCDDR bit = 1  -&gt; pin drives low, line asserted
+PCDDR bit = 0  -&gt; pin is an input, line released to its pull-up
+
+PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
+        <p>
+          Writing a one to either PCDR bit while the matching direction bit is
+          set drives the line high and fights every other device on the bus.
+          Firmware treats those two PCDR bits as constant zeros.
+        </p>
+        <p>
+          Reading PCDR returns the pin level for a pin programmed as an input,
+          which gives firmware the acknowledge bit from a slave and the released
+          level of the clock line. Waiting for <code>PC0</code> to read high
+          after releasing it implements clock-stretch tolerance.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            I2C electrical arrangement
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Value</th>
+              <th scope="col">Basis</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Bus voltage</td>
+              <td>+5 V</td>
+              <td>
+                Fed from <code>F_PIT_5V</code>. A 3.3 V device needs its own
+                level translation on the attached board.
+              </td>
+            </tr>
+            <tr>
+              <td>Pull-up resistors</td>
+              <td>
+                <code>R_I2C_SCL</code> and <code>R_I2C_SDA</code>, 4.7 kohm to
+                +5 V
+              </td>
+              <td>
+                1.12 mA maximum pull-up current at 5.25 V.
+                <code>PC0</code> and <code>PC1</code> are rated to sink 2.4 mA
+                at 0.5 V, so the bus low sits under 0.5 V against an I2C
+                receiver threshold of 1.5 V.
+              </td>
+            </tr>
+            <tr>
+              <td>Rise time</td>
+              <td>About 0.4 microseconds at 100 pF of bus capacitance</td>
+              <td>
+                0.8473 x 4.7 kohm x 100 pF, inside the 1 microsecond
+                standard-mode limit.
+              </td>
+            </tr>
+            <tr>
+              <td>Bus capacitance</td>
+              <td>400 pF maximum</td>
+              <td>
+                I2C standard-mode limit. Short header wiring keeps the routed
+                board contribution small; the attached cable and devices consume
+                the rest.
+              </td>
+            </tr>
+            <tr>
+              <td>Clock rate</td>
+              <td>Set by firmware, below 100 kHz</td>
+              <td>
+                Each bus edge costs at least one PI/T byte access, so the loop
+                cannot approach the standard-mode ceiling. I2C sets no minimum
+                clock rate, so a firmware-paced clock is legal at any speed and
+                may pause between bits.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>J_PIT_I2C</code> is a four-pin 0.1 inch header. Pin 1 is +5 V,
+          pin 2 is <code>I2C_SCL</code>, pin 3 is <code>I2C_SDA</code>, and pin
+          4 is ground. Mark pin 1 and the signal names on the silkscreen; I2C
+          breakout boards do not agree on a pin order, so the label is what
+          keeps a cable from reversing the supply.
+        </p>
+        <p>
+          Nothing on the motherboard other than the two pull-ups connects to the
+          bus. An empty header leaves both lines high, which firmware reads as
+          an idle bus.
+        </p>
+      </section>
+
+      <section id="user-header">
+        <h2>8. User I/O Header</h2>
+        <p>
+          <code>J_PIT_USER</code> is a 34-pin, 0.1 inch, shrouded and keyed IDC
+          header. It carries 22 signals and interleaves ground pairs between the
+          signal groups so that a ribbon cable has a return next to every group.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            J_PIT_USER pinout
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Pin</th>
+              <th scope="col">Signal</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>+5 V fused</td>
+              <td>2</td>
+              <td>+5 V fused</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>GND</td>
+              <td>4</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td><code>PA0</code></td>
+              <td>6</td>
+              <td><code>PA1</code></td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td><code>PA2</code></td>
+              <td>8</td>
+              <td><code>PA3</code></td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td><code>PA4</code></td>
+              <td>10</td>
+              <td><code>PA5</code></td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td><code>PA6</code></td>
+              <td>12</td>
+              <td><code>PA7</code></td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td>GND</td>
+              <td>14</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <td>15</td>
+              <td><code>PB0</code></td>
+              <td>16</td>
+              <td><code>PB1</code></td>
+            </tr>
+            <tr>
+              <td>17</td>
+              <td><code>PB2</code></td>
+              <td>18</td>
+              <td><code>PB3</code></td>
+            </tr>
+            <tr>
+              <td>19</td>
+              <td><code>PB4</code></td>
+              <td>20</td>
+              <td><code>PB5</code></td>
+            </tr>
+            <tr>
+              <td>21</td>
+              <td><code>PB6</code></td>
+              <td>22</td>
+              <td><code>PB7</code></td>
+            </tr>
+            <tr>
+              <td>23</td>
+              <td>GND</td>
+              <td>24</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <td>25</td>
+              <td><code>H1</code></td>
+              <td>26</td>
+              <td><code>H2</code></td>
+            </tr>
+            <tr>
+              <td>27</td>
+              <td><code>H3</code></td>
+              <td>28</td>
+              <td><code>H4</code></td>
+            </tr>
+            <tr>
+              <td>29</td>
+              <td>GND</td>
+              <td>30</td>
+              <td>GND</td>
+            </tr>
+            <tr>
+              <td>31</td>
+              <td><code>PC2/TIN</code></td>
+              <td>32</td>
+              <td><code>PC4</code></td>
+            </tr>
+            <tr>
+              <td>33</td>
+              <td>GND</td>
+              <td>34</td>
+              <td>GND</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Pin 1 is marked on copper and silkscreen. The shroud key faces the
+          board edge so a cable cannot seat reversed.
+        </p>
+
+        <h3>Header Rules</h3>
+        <ul>
+          <li>
+            The header is unbuffered. Every pin connects to an MC68230 pin
+            through a board trace and nothing else, so attached hardware sees
+            the device's own drive and threshold limits.
+          </li>
+          <li>
+            A port pin programmed as an output sinks 2.4 mA at 0.5 V and sources
+            150 uA at 2.4 V. The low side drives one standard TTL load or six LS
+            loads; the high side suits CMOS inputs and LS inputs, seven of them
+            at the 20 uA LS figure. An LED, a relay, or anything else with a
+            milliamp-scale high-side draw needs its own driver on the attached
+            board.
+          </li>
+          <li>
+            Attached hardware must not drive a pin that firmware has programmed
+            as an output. The MC68230 port outputs are push-pull.
+          </li>
+          <li>
+            <code>PA7..PA0</code>, <code>PB7..PB0</code>, <code>H2</code>, and
+            <code>H4</code> hold internal pull-ups, so an unconnected input pin
+            reads high. Those pull-ups source 0.1 to 1.0 mA, so an attached
+            device that pulls one of these pins low must sink 1.0 mA and still
+            hold a valid low.
+          </li>
+          <li>
+            <code>H1</code> and <code>H3</code> have no internal pull-up. An
+            attached board drives them or adds its own pull-up.
+          </li>
+          <li>
+            <code>PC2/TIN</code> as an external timer clock is limited to one
+            eighth of <code>PIT_CLK</code>, 1.25 MHz, with the prescaler
+            bypassed, and needs 45 ns in each half period. With the prescaler in
+            use the device accepts up to the CLK frequency itself, but a source
+            unrelated to <code>PIT_CLK</code> should stay at or below 80 percent
+            of it, 8 MHz, or the timer drops cycles. As a run/halt control the
+            low time must last at least one <code>PIT_CLK</code> period.
+          </li>
+          <li>
+            The header carries no reset, no clock, and no bus signal. A card
+            that needs those belongs in an
+            <a href="expansion.html">expansion slot</a>.
+          </li>
+        </ul>
+
+        <h3>Header Power</h3>
+        <p>
+          <code>F_PIT_5V</code>, an <code>RXEF050</code> radial resettable fuse,
+          feeds the +5 V pins of both <code>J_PIT_USER</code> and
+          <code>J_PIT_I2C</code>. It holds 0.50 A at 20 C and 0.27 A at 70 C, so
+          the two headers together supply a quarter of an amp at the top of the
+          case temperature range. The
+          <a href="expansion.html#power">expansion slots</a> use larger parts
+          from the same RXEF series.
+        </p>
+        <p>
+          Neither header supplies +12 V. A shorted cable trips
+          <code>F_PIT_5V</code> and leaves the rest of the board running.
+        </p>
+      </section>
+
+      <section id="timer">
+        <h2>9. Timer</h2>
+        <p>
+          The timer is a 24-bit down counter with a 5-bit prescaler. With the
+          clock-control field set to use the CLK pin and the prescaler, the
+          prescaler divides <code>PIT_CLK</code> by 32 and the counter
+          decrements at 312.5 kHz.
+        </p>
+        <pre><code>counter tick     = 32 / 10 MHz          = 3.2 us
+period           = (preload + 1) x 3.2 us
+longest period   = 2^24 x 3.2 us        = 53.687 s
+100 Hz preload   = (10 ms / 3.2 us) - 1 = 3124 = $000C34</code></pre>
+        <p>
+          On zero detect the counter sets the ZDS bit in TSR, asserts
+          <code>TOUT</code> low, and reloads from the preload registers. Reading
+          TSR and writing a one to bit 0 clears the status bit and releases
+          <code>TOUT</code>.
+        </p>
+        <p>
+          The <a href="mfp.html#interrupts">MFP Timer C</a> already produces the
+          100 Hz system tick, so firmware owns this timer for measurement,
+          timeouts, and software that wants a second periodic source. The 3.2
+          microsecond resolution and 53 second range suit interval measurement
+          better than the MFP's 8-bit timers.
+        </p>
+        <p>
+          <code>PC2/TIN</code> reaches the user header. Firmware that selects
+          the TIN clock source counts external edges instead of the internal
+          clock, and firmware that selects the run/halt source gates the counter
+          from the header. Both choices take <code>PC2</code> away from port C
+          I/O for as long as they are selected.
+        </p>
+      </section>
+
+      <section id="interrupts">
+        <h2>10. Interrupts</h2>
+        <p>
+          The PI/T owns two processor levels. Each has its own request pin, its
+          own acknowledge pin, and its own vector register, so the two never
+          need software to work out which source fired.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PI/T interrupt levels
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Level</th>
+              <th scope="col">Source</th>
+              <th scope="col">Request</th>
+              <th scope="col">Acknowledge</th>
+              <th scope="col">Vector</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>5</td>
+              <td>Timer zero detect</td>
+              <td>
+                <code>PC3/TOUT</code> to <code>PIT_TIRQ_n</code>, encoder
+                <code>/I5</code>
+              </td>
+              <td><code>IACK_L5_n</code> to <code>PC7/TIACK</code></td>
+              <td>TIVR, programmed to <code>$54</code></td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>Handshake pins <code>H1</code> through <code>H4</code></td>
+              <td>
+                <code>PC5/PIRQ</code> to <code>PIT_PIRQ_n</code>, encoder
+                <code>/I4</code>
+              </td>
+              <td><code>IACK_L4_n</code> to <code>PC6/PIACK</code></td>
+              <td>PIVR base <code>$50</code>, plus the source number</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Both request pins drive low or go to high impedance, so each gets a
+          4.7 kohm pull-up at the priority encoder:
+          <code>R_PIT_TIRQ</code> and <code>R_PIT_PIRQ</code>. Each pin reaches
+          its new state within 225 ns of the clock edge that caused it,
+          specifications 39 and 44, which the two-stage
+          <a href="interrupts.html#ipl-generation"><code>/IPL</code>
+          synchronizer</a> then samples.
+        </p>
+        <p>
+          The timer sits above the ports so a periodic source cannot be held off
+          by header activity.
+        </p>
+
+        <h3>Port Vectors</h3>
+        <p>
+          During a level-4 acknowledge the PI/T replaces the low two bits of
+          PIVR with the number of the highest-priority active handshake source.
+          The mapping is fixed and does not follow the priority field in PSRR.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Port interrupt vector numbers with PIVR set to <code>$50</code>
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Source</th>
+              <th scope="col">Low two bits</th>
+              <th scope="col">Vector number</th>
+              <th scope="col">Vector address</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>H1</code></td>
+              <td><code>00</code></td>
+              <td><code>$50</code></td>
+              <td><code>$000140</code></td>
+            </tr>
+            <tr>
+              <td><code>H2</code></td>
+              <td><code>01</code></td>
+              <td><code>$51</code></td>
+              <td><code>$000144</code></td>
+            </tr>
+            <tr>
+              <td><code>H3</code></td>
+              <td><code>10</code></td>
+              <td><code>$52</code></td>
+              <td><code>$000148</code></td>
+            </tr>
+            <tr>
+              <td><code>H4</code></td>
+              <td><code>11</code></td>
+              <td><code>$53</code></td>
+              <td><code>$00014C</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The timer vector <code>$54</code> lies at
+          <code>$000150</code>. The five PI/T vectors sit above the MFP block at
+          <code>$40</code>-<code>$4F</code> and inside the M68000 user vector
+          range, which starts at 64.
+        </p>
+
+        <h3>Acknowledge Behavior</h3>
+        <p>
+          An acknowledge cycle places a vector on <code>D7..D0</code> and
+          asserts <code>PIT_DTACK_n</code>. It changes no register, no data, and
+          no status bit inside the device.
+        </p>
+        <pre><code>register cycle:      /CS low,  PIACK high, TIACK high
+level-4 acknowledge: /CS high, PIACK low,  TIACK high
+level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
+        <p>
+          The PI/T ignores RS1 through RS5 during an acknowledge cycle. Mask
+          sets GG7 and KD1 carry an erratum in which an acknowledge corrupts
+          PIVR or TIVR if the register selects happen to address one of them.
+          During a CPU-space cycle the processor drives
+          <code>A19..A4</code> high and puts the level on
+          <code>A3..A1</code>, so <code>RS5..RS1</code> read
+          <code>11100</code> for level 4 and <code>11101</code> for level 5.
+          Both fall in the null block, and neither is the PIVR select
+          <code>00101</code> or the TIVR select <code>10001</code>. The erratum
+          cannot reach this board.
+        </p>
+
+        <h3>Unanswered Acknowledge Cycles</h3>
+        <p>
+          The PI/T makes no response at all to an acknowledge whose interrupt
+          function is unselected or whose request it is not asserting. It drives
+          no vector and no <code>/DTACK</code>. That happens before firmware
+          programs PSRR and TCR, and after an interrupt is withdrawn between the
+          processor latching the level and running the acknowledge.
+        </p>
+        <p>
+          The motherboard bus timeout does not run during CPU space, so the
+          <a href="interrupts.html#spurious">phantom acknowledge watchdog</a>
+          terminates those cycles. It fires 3.2 microseconds after an
+          unanswered acknowledge begins, more than six times the PI/T's longest
+          legitimate acknowledge response of under 500 ns. The processor takes
+          the spurious-interrupt exception, vector 24.
+        </p>
+        <p>
+          <code>PIT_DTACK_n</code> joins <code>MFP_DTACK_n</code> and
+          <code>/AVEC</code> in the watchdog's answered term, so a PI/T
+          acknowledge holds the counter in reset.
+        </p>
+      </section>
+
+      <section id="firmware">
+        <h2>11. Firmware Configuration Rules</h2>
+        <p>
+          These rules follow from the board wiring. Register bit fields beyond
+          them belong to the
+          <a href="datasheets/mc68230.pdf">MC68230 data sheet</a>.
+        </p>
+        <ol>
+          <li>
+            Write PCDR bits 1 and 0 to zero before writing PCDDR. Reset leaves
+            the data registers undefined, and a stale one in either bit drives
+            an I2C line high the moment its direction bit is set.
+          </li>
+          <li>
+            Program the ports in this order: write PGCR bits 7 and 6 to
+            <code>00</code> for mode 0 with the H12 and H34 enable bits (5 and
+            4) clear, set the port A and port B submode fields to the bit I/O
+            submode in PACR and PBCR, choose the handshake sense in PGCR bits 3
+            through 0, then set the two enable bits. A submode field must not
+            change while its handshake enable is set.
+          </li>
+          <li>
+            Leave the H12 and H34 enable bits set for as long as the handshake
+            pins are in use. Clearing either one clears the matching status bits
+            in PSR, which withdraws a pending port interrupt.
+          </li>
+          <li>
+            Set PSRR bits 4 and 3 to <code>11</code>. That gives
+            <code>PC5</code> the PIRQ function and <code>PC6</code> the PIACK
+            function with vectored interrupts. Leave PSRR bit 6 clear so
+            <code>PC4</code> keeps its port C function and the DMA request stays
+            unselected.
+          </li>
+          <li>
+            Write PIVR before enabling any handshake interrupt. An unwritten
+            PIVR returns <code>$0F</code>, the M68000 uninitialized-interrupt
+            vector, which is a diagnostic rather than a handler.
+          </li>
+          <li>
+            Set TCR bits 7 through 5 to <code>101</code> for a vectored timer
+            interrupt on <code>PC3/TOUT</code> with <code>PC7</code> carrying
+            TIACK, and write TIVR before setting the timer enable bit.
+          </li>
+          <li>
+            Set TCR bits 2 and 1 to <code>00</code> to clock the prescaler from
+            the CLK pin and leave <code>PC2</code> as a port C pin for the
+            header.
+          </li>
+          <li>
+            Clear the ZDS bit in TSR inside the level-5 handler by writing a one
+            to bit 0. <code>TOUT</code> stays low and the level stays asserted
+            until that write happens.
+          </li>
+          <li>
+            Change PSRR bits 2 through 0, the port interrupt priority, only
+            while the affected handshake interrupts are disabled.
+          </li>
+          <li>
+            Access every register as a byte at an odd address. Read the three
+            count bytes twice when a coherent 24-bit value matters.
+          </li>
+          <li>
+            Drive the I2C lines by direction only. Set a PCDDR bit to pull its
+            line low and clear it to release the line. Never write a one into
+            PCDR bit 0 or bit 1.
+          </li>
+        </ol>
+      </section>
+
+      <section id="pins">
+        <h2>12. Package and Pin Map</h2>
+        <h3>MC68230P10</h3>
+        <p>
+          The MC68230P10 is a 48-pin plastic dual in-line package. Pin 12 is +5
+          V and pin 38 is ground.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_PIT connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Pin</th>
+              <th scope="col">MC68230 signal</th>
+              <th scope="col">Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><code>D5</code></td>
+              <td>CPU <code>D5</code></td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><code>D6</code></td>
+              <td>CPU <code>D6</code></td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>D7</code></td>
+              <td>CPU <code>D7</code></td>
+            </tr>
+            <tr>
+              <td>4-11</td>
+              <td><code>PA0</code>-<code>PA7</code></td>
+              <td>
+                <code>J_PIT_USER</code> pins 5, 6, 7, 8, 9, 10, 11, and 12
+              </td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td><code>VCC</code></td>
+              <td>+5 V</td>
+            </tr>
+            <tr>
+              <td>13-16</td>
+              <td><code>H1</code>-<code>H4</code></td>
+              <td><code>J_PIT_USER</code> pins 25, 26, 27, and 28</td>
+            </tr>
+            <tr>
+              <td>17-24</td>
+              <td><code>PB0</code>-<code>PB7</code></td>
+              <td>
+                <code>J_PIT_USER</code> pins 15, 16, 17, 18, 19, 20, 21, and 22
+              </td>
+            </tr>
+            <tr>
+              <td>25</td>
+              <td><code>RS5</code></td>
+              <td>CPU <code>A5</code></td>
+            </tr>
+            <tr>
+              <td>26</td>
+              <td><code>RS4</code></td>
+              <td>CPU <code>A4</code></td>
+            </tr>
+            <tr>
+              <td>27</td>
+              <td><code>RS3</code></td>
+              <td>CPU <code>A3</code></td>
+            </tr>
+            <tr>
+              <td>28</td>
+              <td><code>RS2</code></td>
+              <td>CPU <code>A2</code></td>
+            </tr>
+            <tr>
+              <td>29</td>
+              <td><code>RS1</code></td>
+              <td>CPU <code>A1</code></td>
+            </tr>
+            <tr>
+              <td>30</td>
+              <td><code>PC0</code></td>
+              <td><code>I2C_SCL</code> and <code>R_I2C_SCL</code></td>
+            </tr>
+            <tr>
+              <td>31</td>
+              <td><code>PC1</code></td>
+              <td><code>I2C_SDA</code> and <code>R_I2C_SDA</code></td>
+            </tr>
+            <tr>
+              <td>32</td>
+              <td><code>PC2/TIN</code></td>
+              <td><code>J_PIT_USER</code> pin 31</td>
+            </tr>
+            <tr>
+              <td>33</td>
+              <td><code>PC3/TOUT</code></td>
+              <td><code>PIT_TIRQ_n</code> and <code>R_PIT_TIRQ</code></td>
+            </tr>
+            <tr>
+              <td>34</td>
+              <td><code>PC4/DMAREQ</code></td>
+              <td><code>J_PIT_USER</code> pin 32</td>
+            </tr>
+            <tr>
+              <td>35</td>
+              <td><code>PC5/PIRQ</code></td>
+              <td><code>PIT_PIRQ_n</code> and <code>R_PIT_PIRQ</code></td>
+            </tr>
+            <tr>
+              <td>36</td>
+              <td><code>PC6/PIACK</code></td>
+              <td><code>IACK_L4_n</code></td>
+            </tr>
+            <tr>
+              <td>37</td>
+              <td><code>PC7/TIACK</code></td>
+              <td><code>IACK_L5_n</code></td>
+            </tr>
+            <tr>
+              <td>38</td>
+              <td><code>VSS</code></td>
+              <td>Ground</td>
+            </tr>
+            <tr>
+              <td>39</td>
+              <td><code>RESET</code></td>
+              <td><code>PERIPH_RESET_n</code></td>
+            </tr>
+            <tr>
+              <td>40</td>
+              <td><code>CLK</code></td>
+              <td><code>PIT_CLK</code></td>
+            </tr>
+            <tr>
+              <td>41</td>
+              <td><code>/CS</code></td>
+              <td><code>PIT_CS_n</code></td>
+            </tr>
+            <tr>
+              <td>42</td>
+              <td><code>/DTACK</code></td>
+              <td><code>PIT_DTACK_n</code> and <code>R_PIT_DTACK</code></td>
+            </tr>
+            <tr>
+              <td>43</td>
+              <td><code>R/W</code></td>
+              <td>CPU <code>R/W</code></td>
+            </tr>
+            <tr>
+              <td>44-48</td>
+              <td><code>D0</code>-<code>D4</code></td>
+              <td>
+                CPU <code>D0</code>, <code>D1</code>, <code>D2</code>,
+                <code>D3</code>, and <code>D4</code>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The pin numbers above come from MC68230 section 7.1, the
+          pin-assignment drawing for the 48-pin package.
+        </p>
+
+        <h3>Motherboard Gate</h3>
+        <p>
+          <code>PIT_CS_n</code> uses gate 2 of <code>U_OR_DTACK</code>, the
+          <code>SN74F32N</code> that already carries the timeout mask on gate 1.
+          Input pin 4 takes <code>IO9_n</code>, input pin 5 takes
+          <code>LDS_n</code>, and output pin 6 is <code>PIT_CS_n</code>. Gates 3
+          and 4 stay unused with their inputs grounded.
+        </p>
+      </section>
+
+      <section id="timing">
+        <h2>13. Timing and Electrical Checks</h2>
+        <p>
+          Every figure below comes from the 10 MHz column of MC68230 sections
+          6.4, 6.5, and 6.6. A numbered specification refers to the section 6.6
+          table.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            MC68230 specifications used on this page, 10 MHz column
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Number</th>
+              <th scope="col">Characteristic</th>
+              <th scope="col">Min</th>
+              <th scope="col">Max</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2</td>
+              <td>
+                <code>/CS</code> low to <code>R/W</code> and
+                <code>RS1-RS5</code> invalid, hold
+              </td>
+              <td>65 ns</td>
+              <td>-</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><code>/CS</code> low to CLK low, setup</td>
+              <td>20 ns</td>
+              <td>-</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>CLK low to <code>/DTACK</code> low, read or write cycle</td>
+              <td>0</td>
+              <td>60 ns</td>
+            </tr>
+            <tr>
+              <td>10</td>
+              <td>
+                <code>/CS</code>, <code>PIACK</code>, or <code>TIACK</code> high
+                to <code>/DTACK</code> high
+              </td>
+              <td>-</td>
+              <td>45 ns</td>
+            </tr>
+            <tr>
+              <td>11</td>
+              <td>
+                <code>/CS</code>, <code>PIACK</code>, or <code>TIACK</code> high
+                to <code>/DTACK</code> high impedance
+              </td>
+              <td>-</td>
+              <td>55 ns</td>
+            </tr>
+            <tr>
+              <td>13</td>
+              <td><code>/CS</code> low to data in invalid, hold</td>
+              <td>65 ns</td>
+              <td>-</td>
+            </tr>
+            <tr>
+              <td>29</td>
+              <td>CLK low to data out valid, acknowledge cycle</td>
+              <td>-</td>
+              <td>100 ns</td>
+            </tr>
+            <tr>
+              <td>31</td>
+              <td>
+                <code>PIACK</code> or <code>TIACK</code> low to CLK low, setup
+              </td>
+              <td>40 ns</td>
+              <td>-</td>
+            </tr>
+            <tr>
+              <td>34</td>
+              <td>CLK low to <code>/DTACK</code> low, acknowledge cycle</td>
+              <td>-</td>
+              <td>100 ns</td>
+            </tr>
+            <tr>
+              <td>39</td>
+              <td>CLK low to <code>PIRQ</code> low or high impedance</td>
+              <td>0</td>
+              <td>225 ns</td>
+            </tr>
+            <tr>
+              <td>44</td>
+              <td>CLK low to <code>TOUT</code> high, low, or high impedance</td>
+              <td>0</td>
+              <td>225 ns</td>
+            </tr>
+            <tr>
+              <td>45</td>
+              <td>
+                <code>/CS</code>, <code>PIACK</code>, or <code>TIACK</code> high
+                to the next one low
+              </td>
+              <td>30 ns</td>
+              <td>-</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Chip Select Arrival</h3>
+        <p>
+          <code>PIT_CS_n</code> follows the slot decode.
+          <a href="bus-and-decode.html#decoder-timing-verification"
+            >Bus and Address Decode</a
+          >
+          gives 144 ns from <code>AS_n</code> to any <code>IOx_n</code> through
+          the HCT qualification and slot decoders, and the
+          <code>SN74F32N</code> adds its high-to-low delay.
+        </p>
+        <pre><code>AS_n low, from the S2 clock edge     55.0 ns   M68000 #9
+AS_n -&gt; IO9_n                       144.0 ns   HCT32, HCT244,
+                                               HCT32, HCT138
+IO9_n -&gt; PIT_CS_n, SN74F32 tPHL       6.3 ns
+--------------------------------------------
+PIT_CS_n low, from the S2 clock edge 205.3 ns</code></pre>
+        <p>
+          A write cycle asserts <code>LDS_n</code> two states later than a read
+          cycle, at S4 rather than S2, but the slot-decode path still arrives
+          last, so both cycle types give the same figure.
+        </p>
+        <p>
+          The MC68230 samples chip select on a falling clock edge and needs 20
+          ns of setup. The falling <code>PIT_CLK</code> edge that starts S7
+          arrives 250 ns after the S2 edge, plus the two buffer stages, so the
+          setup is at least 44.7 ns before counting the buffer delay. The device
+          recognizes the chip select on that edge at the latest.
+        </p>
+
+        <h3>Cycle Length</h3>
+        <p>
+          The MC68230 asserts <code>/DTACK</code> on the falling clock edge
+          after the one that recognized chip select, within 60 ns of that edge.
+          The processor samples <code>/DTACK</code> on its own falling edges and
+          inserts a wait state whenever the response misses one.
+        </p>
+        <pre><code>chip select recognized     falling edge at or before S7
+/DTACK asserted            one PIT_CLK period later, plus 60 ns
+processor completes        150 ns after the sampling edge that sees it
+
+PI/T byte access           7 to 8 CPU clock periods, 700 to 800 ns</code></pre>
+        <p>
+          The exact wait-state count moves with the phase between the processor
+          clock and the buffered PI/T clock. Correctness does not depend on the
+          count: a late response adds a wait state, and every count sits inside
+          the 51.1 microsecond timeout. The access length matches the
+          <a href="rtc.html#timing">DS1285 interface</a>, which needs 700 to 800
+          ns for the same reason.
+        </p>
+        <p>
+          Consecutive PI/T accesses do not reach the 300 ns recovery window.
+          The device asserts <code>/DTACK</code> at least 250 ns before
+          <code>AS_n</code> negates, the processor spends two more clock states
+          before it asserts <code>AS_n</code> again, and the slot decode then
+          takes another 150.3 ns. At least 500 ns separate one
+          <code>/DTACK</code> edge from the next chip select, which also clears
+          the 30 ns minimum select gap of specification 45 by a wide margin.
+        </p>
+
+        <h3>Acknowledgement Release</h3>
+        <p>
+          <code>LDS_n</code> rises at the end of S7 and reaches
+          <code>U_OR_DTACK</code> gate 2 with no logic in between, so it, rather
+          than the slow slot decode, releases <code>PIT_CS_n</code>.
+        </p>
+        <pre><code>U_OR_DTACK gate 2 SN74F32, tPLH   6.6 ns
+MC68230 /CS high to /DTACK high  45.0 ns   PI/T 10
+group SN74F21, tPLH               5.3 ns
+final SN74F21, tPLH               5.3 ns
+SN74F32 timeout mask, tPLH        6.6 ns
+------------------------------------------
+component total                  68.8 ns
+MC68EC000 limit                 110.0 ns
+board allowance                  41.2 ns</code></pre>
+        <p>
+          The same path releases an acknowledge cycle, with
+          <code>IACK_L4_n</code> or <code>IACK_L5_n</code> rising in place of
+          <code>PIT_CS_n</code>. Specification 10 covers all three inputs with
+          one limit.
+        </p>
+        <p>
+          The device three-states <code>/DTACK</code> within 55 ns of the same
+          edge, specification 11, so it has let go of the net well before the
+          next chip select arrives.
+        </p>
+        <p>
+          The 41.2 ns allowance is the second tightest on the board after the
+          <a href="interrupts.html#acknowledge-timing">MFP acknowledge path</a>
+          at 32.8 ns. Both are far smaller than the 81.5 ns the DRAM and RTC
+          paths keep, because a device rather than a gate produces the release
+          edge.
+        </p>
+
+        <h3>Acknowledge Cycle</h3>
+        <p>
+          The MC68230 synchronizes <code>PIACK</code> or <code>TIACK</code> on a
+          falling clock edge, drives the vector one clock period later, and
+          asserts <code>/DTACK</code> one clock period after that. That order
+          gives the vector a full 100 ns of setup ahead of its own
+          acknowledgement.
+        </p>
+        <pre><code>PIACK/TIACK recognized  falling edge, 40 ns setup   PI/T 31
+vector on D7..D0        +1 period, within 100 ns    PI/T 29
+/DTACK asserted         +1 period, within 100 ns    PI/T 34
+
+device contribution        under 500 ns worst case
+watchdog limit             3.2 us</code></pre>
+        <p>
+          A missed setup pushes the first synchronizing edge one clock period
+          later, which is where the 500 ns worst case comes from. The response
+          is more than six times faster than the phantom-acknowledge watchdog,
+          so adding two vectored levels does not move the watchdog tap.
+        </p>
+
+        <h3>Loading</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PI/T interface loading
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Net</th>
+              <th scope="col">Added load</th>
+              <th scope="col">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>A5..A1</code></td>
+              <td>One MC68230 register-select input per line</td>
+              <td>10 uA leakage and 15 pF per line.</td>
+            </tr>
+            <tr>
+              <td><code>D7..D0</code></td>
+              <td>One MC68230 data pin per line</td>
+              <td>
+                20 uA off-state current and 15 pF per line. The pin drives only
+                during a PI/T read or an acknowledge cycle, sourcing 400 uA at
+                2.4 V and sinking 5.3 mA at 0.5 V.
+              </td>
+            </tr>
+            <tr>
+              <td><code>R/W</code></td>
+              <td>One MC68230 input</td>
+              <td>10 uA leakage and 15 pF.</td>
+            </tr>
+            <tr>
+              <td><code>PIT_CLK</code></td>
+              <td>One MC68230 clock input</td>
+              <td>
+                10 uA leakage and 15 pF on its own
+                <code>CD74ACT244E</code> channel, leaving 35 pF for routing
+                inside the buffer's 50 pF timing load.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PERIPH_RESET_n</code></td>
+              <td>One MC68230 reset input</td>
+              <td>
+                10 uA leakage and 15 pF. Polarity and the 2.0 V TTL threshold
+                match the LS07 open-collector driver.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>4.7 kohm pull-up and one SN74F21 input</td>
+              <td>
+                1.12 mA maximum pull-up current at 5.25 V against a 5.3 mA sink
+                rating, 21 percent of it. Off-state current is 20 uA.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PIT_PIRQ_n</code>, <code>PIT_TIRQ_n</code></td>
+              <td>4.7 kohm pull-up and one SN74LS148 input each</td>
+              <td>
+                1.12 mA against the 8.8 mA sink rating that
+                <code>PC5/PIRQ</code> and <code>PC3/TOUT</code> carry, 13
+                percent of it. These two pins have the strongest low-side drive
+                on the device, which is what the wired-OR role wants.
+              </td>
+            </tr>
+            <tr>
+              <td><code>I2C_SCL</code>, <code>I2C_SDA</code></td>
+              <td>4.7 kohm pull-up and the header each</td>
+              <td>
+                1.12 mA against the 2.4 mA sink rating of
+                <code>PC0</code> and <code>PC1</code>, 47 percent of it.
+              </td>
+            </tr>
+            <tr>
+              <td><code>IACK_L4_n</code>, <code>IACK_L5_n</code></td>
+              <td>One MC68230 input each</td>
+              <td>
+                The SN74HCT138 level decoder gains 10 uA and 15 pF per strobe.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Every MC68230 input draws at most 10 uA and presents at most 15 pF,
+          from section 6.4. Add the 15 pF figures to the CPU address, data, and
+          control totals in
+          <a href="bus-and-decode.html#electrical-compatibility-and-fanout"
+            >Bus and Address Decode</a
+          >
+          after routing.
+        </p>
+        <p>
+          Every pull-up on this page is 4.7 kohm and draws at most 1.12 mA at
+          5.25 V. The tightest of the three is the I2C pair at 47 percent of the
+          pin's rated sink current, and the device guarantees 0.5 V at the full
+          2.4 mA, so the actual low sits under that. An I2C receiver reads low
+          below 0.3 times the supply, 1.5 V on this bus, so the level holds with
+          a full volt to spare even at the guaranteed figure.
+        </p>
+        <p>
+          Internal power dissipation is 750 mW maximum measured at 0 C, which is
+          150 mA from the +5 V rail. Add that to the board supply budget
+          alongside the two header feeds behind <code>F_PIT_5V</code>.
+        </p>
+        <p>
+          <code>U_PIT</code> gets a 100 nF ceramic bypass capacitor at each
+          supply pin pair and a 1 uF bulk capacitor beside pin 12.
+        </p>
+      </section>
+
+      <section id="parts">
+        <h2>14. Parts Added</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PI/T subsystem parts
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Reference</th>
+              <th scope="col">Part</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_PIT</code></td>
+              <td>MC68230P10</td>
+              <td>
+                Parallel interface and timer, 48-pin plastic DIP, 10 MHz grade.
+              </td>
+            </tr>
+            <tr>
+              <td><code>R_PIT_DTACK</code></td>
+              <td>4.7 kohm, 0.125 W</td>
+              <td>Completion-tree pull-up.</td>
+            </tr>
+            <tr>
+              <td><code>R_PIT_PIRQ</code></td>
+              <td>4.7 kohm, 0.125 W</td>
+              <td>Port interrupt pull-up.</td>
+            </tr>
+            <tr>
+              <td><code>R_PIT_TIRQ</code></td>
+              <td>4.7 kohm, 0.125 W</td>
+              <td>Timer interrupt pull-up.</td>
+            </tr>
+            <tr>
+              <td><code>R_I2C_SCL</code>, <code>R_I2C_SDA</code></td>
+              <td>4.7 kohm, 0.125 W</td>
+              <td>I2C bus pull-ups.</td>
+            </tr>
+            <tr>
+              <td><code>J_PIT_USER</code></td>
+              <td>34-pin shrouded and keyed 0.1 inch header</td>
+              <td>Port A, port B, handshake, and spare port C pins.</td>
+            </tr>
+            <tr>
+              <td><code>J_PIT_I2C</code></td>
+              <td>4-pin 0.1 inch header</td>
+              <td>+5 V, <code>I2C_SCL</code>, <code>I2C_SDA</code>, ground.</td>
+            </tr>
+            <tr>
+              <td><code>F_PIT_5V</code></td>
+              <td>RXEF050, 0.50 A hold at 20 C and 0.27 A at 70 C</td>
+              <td>Resettable fuse for both header +5 V feeds.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>U_IO_CLK_BUF</code>, the <code>CD74ACT244E</code> that supplies
+          <code>PIT_CLK</code>, belongs to
+          <a href="clock-and-reset.html#io-clock-buffer">Clock and Reset</a>.
+          <code>PIT_CS_n</code> uses a gate that the motherboard already has.
+          This subsystem adds two 100 nF ceramic bypass capacitors and one 1 uF
+          capacitor beside <code>U_PIT</code>.
+        </p>
+        <p>
+          <code>U_PIT</code> dissipates at most 750 mW internally, 150 mA from
+          the +5 V rail, before either header draws anything. The two headers
+          share <code>F_PIT_5V</code> and add up to 0.27 A more at 70 C.
+        </p>
+        <p>
+          The archived data sheet is 1983 advance information and lists the
+          plastic 48-pin package with a G suffix,
+          <code>MC68230G10</code>. Production plastic parts carry a P suffix.
+          <code>MC68230P10</code> is the 10 MHz plastic DIP specified here and
+          in the <a href="memory-map.html">Memory Map</a>; confirm the suffix
+          against the part actually sourced. The RXEF series and the CD74ACT244
+          both predate 1994.
+        </p>
+      </section>
+
+      <section id="layout">
+        <h2>15. Board Layout</h2>
+        <ul>
+          <li>
+            Place <code>U_PIT</code> so that <code>D7..D0</code>,
+            <code>A5..A1</code>, and <code>R/W</code> reach it without crossing
+            the DRAM or video areas. It is a 48-pin package on a 0.6 inch row
+            spacing and needs the footprint reserved early.
+          </li>
+          <li>
+            Keep <code>PIT_CS_n</code> and <code>PIT_DTACK_n</code> short and
+            free of stubs. Measure the routed release path at the CPU
+            <code>/DTACK</code> pin and keep the board contribution below 41.2
+            ns.
+          </li>
+          <li>
+            Place <code>R_PIT_DTACK</code> beside <code>U_PIT</code> pin 42.
+            Place <code>R_PIT_PIRQ</code> and <code>R_PIT_TIRQ</code> at the
+            priority encoder, matching the other open-drain interrupt lines.
+          </li>
+          <li>
+            Place <code>R_I2C_SCL</code> and <code>R_I2C_SDA</code> between
+            <code>U_PIT</code> and <code>J_PIT_I2C</code>. Keep both I2C traces
+            short and away from the clock nets; their capacitance counts against
+            the 400 pF bus limit.
+          </li>
+          <li>
+            Put <code>J_PIT_USER</code> and <code>J_PIT_I2C</code> at a board
+            edge that a ribbon cable can reach with the case closed. Mark pin 1
+            on copper and silkscreen and orient the shroud key away from the
+            board interior.
+          </li>
+          <li>
+            Route <code>F_PIT_5V</code> so that both header +5 V pins sit behind
+            it and no other load shares the fuse.
+          </li>
+          <li>
+            Include the <code>U_PIT</code> address, data, and control pins
+            in the CPU bus capacitance totals in
+            <a href="bus-and-decode.html">Bus and Address Decode</a> after
+            routing.
+          </li>
+          <li>
+            Include the <code>PIT_CLK</code> branch in the
+            <code>U_IO_CLK_BUF</code> load check in
+            <a href="clock-and-reset.html#io-clock-buffer">Clock and Reset</a>.
+            The routed branch must stay inside the
+            <code>CD74ACT244E</code> 50 pF timing-analysis load.
+          </li>
+          <li>
+            Place each 100 nF capacitor at its supply pins and the 1 uF
+            capacitor beside <code>U_PIT</code> pins 12 and 38.
+          </li>
+          <li>
+            Measure <code>PIT_CLK</code> at pin 40 on the assembled board.
+            Confirm a clean 10 MHz edge and confirm the clock runs before reset
+            releases.
+          </li>
+        </ul>
+      </section>
+
+      <section id="signals">
+        <h2>16. Internal Signal Reference</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            PI/T subsystem signals
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Signal</th>
+              <th scope="col">Source</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>PIT_CS_n</code></td>
+              <td><code>U_OR_DTACK</code> gate 2</td>
+              <td><code>U_PIT</code> pin 41.</td>
+            </tr>
+            <tr>
+              <td><code>PIT_CLK</code></td>
+              <td><code>U_IO_CLK_BUF</code> pin 16</td>
+              <td><code>U_PIT</code> pin 40.</td>
+            </tr>
+            <tr>
+              <td><code>PIT_DTACK_n</code></td>
+              <td><code>U_PIT</code> pin 42</td>
+              <td>
+                <code>U_DTACK_B</code> gate 1 pin 4 and
+                <code>R_PIT_DTACK</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PIT_PIRQ_n</code></td>
+              <td><code>U_PIT</code> pin 35</td>
+              <td>
+                <code>U_IPL_ENC</code> <code>/I4</code> and
+                <code>R_PIT_PIRQ</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>PIT_TIRQ_n</code></td>
+              <td><code>U_PIT</code> pin 33</td>
+              <td>
+                <code>U_IPL_ENC</code> <code>/I5</code> and
+                <code>R_PIT_TIRQ</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>I2C_SCL</code></td>
+              <td><code>U_PIT</code> pin 30</td>
+              <td>
+                <code>J_PIT_I2C</code> pin 2 and <code>R_I2C_SCL</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>I2C_SDA</code></td>
+              <td><code>U_PIT</code> pin 31</td>
+              <td>
+                <code>J_PIT_I2C</code> pin 3 and <code>R_I2C_SDA</code>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>IO9_n</code>, <code>LDS_n</code>, <code>PERIPH_RESET_n</code>,
+          <code>IACK_L4_n</code>, and <code>IACK_L5_n</code> are defined in
+          <a href="bus-and-decode.html#internal-signal-reference"
+            >Bus and Address Decode</a
+          >,
+          <a href="clock-and-reset.html">Clock and Reset</a>, and
+          <a href="interrupts.html#internal-signal-reference">Interrupts</a>.
+        </p>
+      </section>
+
+      <section id="sources">
+        <h2>17. Sources</h2>
+        <ul>
+          <li>
+            Motorola,
+            <a href="datasheets/mc68230.pdf"
+              ><cite
+                >MC68230 Parallel Interface/Timer (PI/T) Advance
+                Information</cite
+              ></a
+            >. Bus interface, register model, port modes, timer operation, and
+            interrupt and acknowledge behavior. Section 6.4 supplies the DC
+            characteristics, 6.5 the clock timing, 6.6 the numbered AC
+            specifications, and 7.1 the pin assignment.
+          </li>
+          <li>
+            Motorola,
+            <a href="datasheets/M68000UM.pdf"
+              ><cite>M68000 User's Manual</cite></a
+            >. Read and write cycle states, wait-state insertion, CPU-space
+            addressing during interrupt acknowledge, and the vector table.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/sn74f32.pdf"><cite>SN74F32</cite></a> and
+            <a href="datasheets/sn74f21.pdf"><cite>SN74F21</cite></a> data
+            sheets. Chip-select gate and completion-tree delays.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/cd74act244.pdf"><cite>CD74ACT244</cite></a> data
+            sheet. Clock buffer input capacitance and propagation delay.
+          </li>
+          <li>
+            Littelfuse,
+            <a
+              href="https://www.littelfuse.com/assetdocs/littelfuse_ptc_radial_leaded_rxef_datasheet?assetguid=e9a7b6b3-79ce-478c-a39a-0a70ee48ccec"
+              ><cite>RXEF Series Radial Leaded PPTC Datasheet</cite></a
+            >. Header fuse hold current at 20 C and 70 C.
+          </li>
+          <li>
+            NXP,
+            <a href="https://www.nxp.com/docs/en/user-guide/UM10204.pdf"
+              ><cite>I2C-bus specification and user manual, UM10204</cite></a
+            >. Standard-mode rise time, bus capacitance limit, and the absence
+            of a minimum clock rate.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

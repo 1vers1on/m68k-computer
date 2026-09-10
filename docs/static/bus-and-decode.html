@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Bus and Address Decode, Revision 1.0</title>
+    <title>68EC000 Computer - Bus and Address Decode, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -11,7 +11,7 @@
       <h1>Bus and Address Decode</h1>
 
       <p>
-        This document defines the revision 1.0 motherboard bus and address
+        This document defines the revision 1.1 motherboard bus and address
         decoder. It covers normal-cycle qualification, memory and I/O selects,
         the boot overlay, firmware ROM selection, system-register writes,
         bus-cycle termination, timeout behavior, and expansion-bus boundaries.
@@ -20,12 +20,22 @@
         <a href="index.html">Return to the main page</a>.
       </p>
 
+      <p>
+        Revision 1.1 gives I/O slot 9 to the
+        <a href="pit.html">MC68230 PI/T</a>. It adds the
+        <code>PIT_CS_n</code> gate, adds <code>PIT_DTACK_n</code> to the
+        completion tree, and moves the bus-timeout counter onto the buffered
+        <code>TIMEOUT_CLK</code> so the processor clock net keeps its load
+        budget. Every other decode, equation, and package assignment carries
+        over from revision 1.0 unchanged.
+      </p>
+
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.0 pre-layout design</dd>
+        <dd>Revision 1.1 pre-layout design</dd>
 
         <dt>Memory map</dt>
-        <dd><a href="memory-map.html">Frozen revision 1.0</a></dd>
+        <dd><a href="memory-map.html">Frozen revision 1.2</a></dd>
 
         <dt>CPU</dt>
         <dd>MC68EC000FN10</dd>
@@ -1447,7 +1457,7 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
               <td><code>/Y1</code></td>
               <td><code>IO9_n</code></td>
               <td><code>$F20000-$F3FFFF</code></td>
-              <td>Reserved</td>
+              <td>MC68230 PI/T</td>
             </tr>
             <tr>
               <td><code>/Y2</code></td>
@@ -1489,8 +1499,36 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
         </table>
 
         <p>
-          <code>IO9_n..IO14_n</code> remain on the motherboard and have no
-          connector destination under memory-map revision 1.0.
+          <code>IO10_n..IO14_n</code> remain on the motherboard and have no
+          connector destination under memory-map revision 1.2.
+          <code>IO9_n</code> leaves the decoder for the
+          <a href="pit.html#bus-interface">PI/T chip-select gate</a>.
+        </p>
+
+        <h3>PI/T Chip Select</h3>
+
+        <p>
+          The <a href="pit.html">MC68230 PI/T</a> has no separate data-strobe
+          input, so its chip select carries the byte-lane strobe. Gate 2 of
+          <code>U_OR_DTACK</code>, an <code>SN74F32N</code>, combines the slot
+          select with <code>LDS_n</code>.
+        </p>
+
+        <pre><code>PIT_CS_n = IO9_n OR LDS_n</code></pre>
+
+        <p>
+          <code>IO9_n</code> already carries the address decode and the normal
+          bus-cycle qualification, so <code>PIT_CS_n</code> is low only for a
+          lower-byte access to slot 9 during a normal cycle. An upper-byte-only
+          access leaves it high and reaches the bus timeout. The gate is FAST
+          because <code>PIT_CS_n</code> begins the PI/T acknowledgement release
+          path.
+        </p>
+
+        <p>
+          The other fixed-device slots feed a device or an adapter that supplies
+          its own byte-lane qualification, so no other slot select needs a gate
+          here.
         </p>
 
         <p>
@@ -3280,6 +3318,13 @@ SYSREG0_n..SYSREG7_n = 1</code></pre>
             </tr>
 
             <tr>
+              <td>MC68230 PI/T</td>
+              <td><code>PIT_CS_n</code></td>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>The device itself</td>
+            </tr>
+
+            <tr>
               <td>Firmware EEPROM</td>
               <td><code>ROM_CYCLE_n</code></td>
               <td><code>ROM_DTACK_n</code></td>
@@ -3312,6 +3357,7 @@ OPL3_DTACK_n
 VGA_DTACK_n
 MIDI_DTACK_n
 RTC_DTACK_n
+PIT_DTACK_n
 EXP_DTACK_n</code></pre>
 
         <p>
@@ -3324,8 +3370,8 @@ EXP_DTACK_n</code></pre>
         <h3>Final /DTACK Combination</h3>
 
         <p>
-          Two <code>SN74F21N</code> packages combine the ten completion signals
-          through four-input AND gates. No device outputs are connected
+          Two <code>SN74F21N</code> packages combine the eleven completion
+          signals through four-input AND gates. No device outputs are connected
           together. The <code>SN74F21N</code> is a period-correct 5 V TTL dual
           four-input AND in a 14-pin PDIP; its TI data sheet dates from 1987 and
           was revised in 1993. FAST rather than HCT is required here so that the
@@ -3347,7 +3393,9 @@ DTACK_GROUP1_n =
     FDC_DTACK_n AND OPL3_DTACK_n
     AND VGA_DTACK_n AND MIDI_DTACK_n
 
-DTACK_GROUP2_n = RTC_DTACK_n AND EXP_DTACK_n AND 1 AND 1
+DTACK_GROUP2_n =
+    RTC_DTACK_n AND PIT_DTACK_n
+    AND EXP_DTACK_n AND 1
 
 DTACK_RAW_n =
     DTACK_GROUP0_n AND DTACK_GROUP1_n
@@ -3357,6 +3405,8 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
         <p>
           The MC68901 <code>MFP_DTACK_n</code> input in group 0 terminates both
           ordinary MFP register cycles and level-6 interrupt-acknowledge cycles.
+          <code>PIT_DTACK_n</code> in group 2 does the same for MC68230
+          register cycles and for the level-4 and level-5 acknowledge cycles.
           The completion tree remains active during CPU space, while the normal
           bus timeout does not run there.
         </p>
@@ -3396,8 +3446,8 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
             <tr>
               <td><code>U_DTACK_B</code> gate 1</td>
               <td>
-                1: <code>RTC_DTACK_n</code>; 2: <code>EXP_DTACK_n</code>; 4 and
-                5: +5 V
+                1: <code>RTC_DTACK_n</code>; 2: <code>EXP_DTACK_n</code>; 4:
+                <code>PIT_DTACK_n</code>; 5: +5 V
               </td>
               <td>6</td>
               <td><code>DTACK_GROUP2_n</code></td>
@@ -3416,8 +3466,8 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
 
         <p>
           Pin 7 of each package connects to ground and pin 14 connects to +5 V.
-          The three unused gate inputs shown as logic one connect to +5 V: pins
-          4 and 5 on <code>U_DTACK_B</code> gate 1 and pin 13 on gate 2.
+          The two unused gate inputs shown as logic one connect to +5 V: pin 5
+          on <code>U_DTACK_B</code> gate 1 and pin 13 on gate 2.
           <code>EXP_DTACK_n</code> has a 10 kohm pull-up at the motherboard and
           the expansion card may only pull it low. The timeout circuit masks
           <code>DTACK_RAW_n</code> after a bus error and drives the CPU
@@ -3426,11 +3476,13 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
 
         <p>
           The final <code>DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code> mask is
-          one gate of <code>U_OR_DTACK</code>, an <code>SN74F32N</code>. It is a
+          gate 1 of <code>U_OR_DTACK</code>, an <code>SN74F32N</code>. It is a
           dedicated FAST-family OR package rather than a gate of the
           <code>SN74HCT32N</code> bank, so the release edge is not slowed by the
           slower HCT part. <code>SN74F32N</code> is period-correct, 5 V, and
-          available in PDIP.
+          available in PDIP. Gate 2 of the same package forms
+          <code>PIT_CS_n</code>, which sits on the PI/T release path and needs
+          the same FAST edge.
         </p>
 
         <h3>Acknowledgement Release Path</h3>
@@ -3655,8 +3707,14 @@ TIMEOUT_BERR_n = 0
 
         <p>
           <code>U_TIMEOUT</code>, a <code>CD74HCT4040E</code> counter, counts
-          falling edges of the 10 MHz clock while a normal cycle is active. Its
-          master reset connects to <code>NORMAL_MISC_n</code>.
+          falling edges of <code>TIMEOUT_CLK</code> while a normal cycle is
+          active. Its master reset connects to <code>NORMAL_MISC_n</code>.
+          <code>TIMEOUT_CLK</code> is a buffered 10 MHz copy of
+          <code>CPU_CLK_10</code> from <code>U_IO_CLK_BUF</code>, defined in
+          <a href="clock-and-reset.html#io-clock-buffer">Clock and Reset</a>.
+          The counter took <code>CPU_CLK_10</code> directly under revision 1.0;
+          the buffered branch frees the processor clock net for the PI/T clock
+          buffer without changing the count or the timeout duration.
         </p>
 
         <pre><code>TIMEOUT_ACTIVE = U_TIMEOUT Q10
@@ -3692,7 +3750,7 @@ DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
             <tr>
               <td>10</td>
               <td><code>CP</code></td>
-              <td>10 MHz <code>CLK</code></td>
+              <td><code>TIMEOUT_CLK</code></td>
             </tr>
             <tr>
               <td>11</td>
@@ -3833,6 +3891,14 @@ NORMAL_CYCLE_n  = 0 OR 1
               </td>
             </tr>
             <tr>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>
+                <code>U_DTACK_B</code> gate 1 pin 4. The direct MC68230
+                acknowledgement terminates register cycles and the vectored
+                level-4 and level-5 cycles.
+              </td>
+            </tr>
+            <tr>
               <td><code>INT_BERR_n</code></td>
               <td>
                 <code>U_AND</code> gate 4, combined with
@@ -3931,6 +3997,12 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td><code>RTC_DTACK_n</code></td>
             </tr>
             <tr>
+              <td>MC68230 PI/T</td>
+              <td><a href="pit.html">PI/T</a></td>
+              <td><code>PIT_CS_n</code>, from <code>IO9_n</code></td>
+              <td><code>PIT_DTACK_n</code></td>
+            </tr>
+            <tr>
               <td>Expansion slots</td>
               <td><a href="expansion.html">Expansion interface</a></td>
               <td>
@@ -3944,8 +4016,9 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td><a href="interrupts.html">Interrupts</a></td>
               <td>CPU-space interrupt-acknowledge cycle</td>
               <td>
-                <code>/AVEC</code>, or <code>MFP_DTACK_n</code> with an MFP
-                vector, or <code>INT_BERR_n</code> for a spurious acknowledge
+                <code>/AVEC</code>, <code>MFP_DTACK_n</code> with an MFP vector,
+                <code>PIT_DTACK_n</code> with a PI/T vector, or
+                <code>INT_BERR_n</code> for a spurious acknowledge
               </td>
             </tr>
           </tbody>
@@ -4153,11 +4226,13 @@ NORMAL_CYCLE_n  = 0 OR 1
         <h3>SN74F32N Gate Map</h3>
 
         <p>
-          <code>U_OR_DTACK</code> uses gate 1 only: input pins 1 and 2 carry
-          <code>DTACK_RAW_n</code> and <code>TIMEOUT_ACTIVE</code>, and output
-          pin 3 is <code>DTACK_n</code> to the processor <code>/DTACK</code>
-          pin. Gates 2 through 4 are unused; their input pins 4, 5, 9, 10, 12,
-          and 13 connect to ground and their output pins 6, 8, and 11 remain
+          <code>U_OR_DTACK</code> uses two gates. Gate 1 input pins 1 and 2
+          carry <code>DTACK_RAW_n</code> and <code>TIMEOUT_ACTIVE</code>, and
+          output pin 3 is <code>DTACK_n</code> to the processor
+          <code>/DTACK</code> pin. Gate 2 input pins 4 and 5 carry
+          <code>IO9_n</code> and <code>LDS_n</code>, and output pin 6 is
+          <code>PIT_CS_n</code>. Gates 3 and 4 are unused; their input pins 9,
+          10, 12, and 13 connect to ground and their output pins 8 and 11 remain
           open. Pin 7 is ground and pin 14 is +5 V.
         </p>
 
@@ -4785,6 +4860,21 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td>246 ns + 30 ns + 25 ns</td>
               <td>301 ns</td>
               <td>Verified longest qualification route</td>
+            </tr>
+            <tr>
+              <td><code>AS_n -&gt; IOx_n</code></td>
+              <td>30 ns + 42 ns + 30 ns + 42 ns</td>
+              <td>144 ns</td>
+              <td>Verified strobe-qualification route</td>
+            </tr>
+            <tr>
+              <td><code>AS_n -&gt; PIT_CS_n</code></td>
+              <td>144 ns + 6.3 ns</td>
+              <td>150.3 ns</td>
+              <td>
+                Verified; the <code>SN74F32N</code> stage uses
+                <code>tPHL</code>
+              </td>
             </tr>
             <tr>
               <td><code>A23..A21 -&gt; IOx_n</code></td>
@@ -5757,6 +5847,17 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               </td>
               <td><code>expansion.html</code></td>
             </tr>
+            <tr>
+              <td>MC68230 PI/T</td>
+              <td>
+                The device connects to <code>D7..D0</code>,
+                <code>A5..A1</code>, and <code>R/W</code> with no buffer, so
+                each of those CPU nets gains 15 pF and 10 uA.
+                <code>U_OR_DTACK</code> gate 2 drives one MC68230 input and
+                nothing else.
+              </td>
+              <td><code>pit.html</code></td>
+            </tr>
           </tbody>
         </table>
       </section>
@@ -5938,7 +6039,7 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               </td>
               <td>Low</td>
               <td>Corresponding <code>REGIONx_n OR NORMAL_EXP_n</code></td>
-              <td>No consumer in revision 1.0</td>
+              <td>No consumer in revision 1.1</td>
             </tr>
             <tr>
               <td><code>IO0_n..IO7_n</code></td>
@@ -5961,7 +6062,20 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               </td>
               <td>Low</td>
               <td><code>U_IO_HIGH /Y0../Y7</code></td>
-              <td>RTC, six reserved slots, and permanent firmware ROM</td>
+              <td>
+                RTC, PI/T, five reserved slots, and permanent firmware ROM
+              </td>
+            </tr>
+            <tr>
+              <td><code>PIT_CS_n</code></td>
+              <td>
+                Lower-byte select for the MC68230 PI/T in slot 9.
+              </td>
+              <td>Low</td>
+              <td>
+                <code>IO9_n OR LDS_n</code> in <code>U_OR_DTACK</code> gate 2
+              </td>
+              <td>MC68230 <code>/CS</code> pin</td>
             </tr>
             <tr>
               <td><code>SYSREG0_n..SYSREG7_n</code></td>
@@ -6229,6 +6343,17 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               <td><code>DTACK_n</code> combination logic</td>
             </tr>
             <tr>
+              <td><code>PIT_DTACK_n</code></td>
+              <td>
+                A PI/T register or vectored acknowledge transaction completed.
+              </td>
+              <td>Low</td>
+              <td>
+                MC68230 <code>/DTACK</code> pin, with a 4.7 kohm pull-up
+              </td>
+              <td><code>DTACK_n</code> combination logic</td>
+            </tr>
+            <tr>
               <td><code>EXP_DTACK_n</code></td>
               <td>An expansion transaction completed.</td>
               <td>Low</td>
@@ -6258,6 +6383,20 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
                 <code>U_OR_DTACK</code> (SN74F32N)
               </td>
               <td>Processor <code>/DTACK</code> input</td>
+            </tr>
+            <tr>
+              <td><code>TIMEOUT_CLK</code></td>
+              <td>
+                Buffered 10 MHz counting clock for the bus-timeout counter.
+              </td>
+              <td>Rising and falling edges</td>
+              <td>
+                <code>U_IO_CLK_BUF</code> pin 14; see
+                <a href="clock-and-reset.html#io-clock-buffer"
+                  >Clock and Reset</a
+                >
+              </td>
+              <td><code>U_TIMEOUT</code> pin 10</td>
             </tr>
             <tr>
               <td><code>TIMEOUT_ACTIVE</code></td>

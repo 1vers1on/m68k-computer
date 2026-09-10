@@ -16,12 +16,13 @@ A 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 | Serial and input | MC68901 MFP with RS-232 on a DE-9 DTE connector and a bidirectional PS/2 keyboard port       |
 | MIDI             | MC6850 ACIA at 31.25 kbit/s with isolated MIDI IN, MIDI OUT, and hardware THRU               |
 | Timekeeping      | DS1285 RTC with battery-backed clock, calendar, alarms, interrupts, and 50 bytes of CMOS RAM |
+| Parallel I/O     | MC68230 PI/T with a bit-banged 5 V I2C bus, a 34-pin user I/O header, and a 24-bit timer     |
 | Debugging        | Write-only byte register driving a two-digit hexadecimal seven-segment display               |
 | Expansion        | Two front-loading 3U Eurocard slots with DIN 41612 connectors                                |
 
 ## Documentation
 
-Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, peripherals, video, audio, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
+Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, peripherals, video, audio, parallel I/O, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
 
 ## Repository layout
 

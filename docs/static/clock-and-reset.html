@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Clock and Reset, Revision 1.0</title>
+    <title>68EC000 Computer - Clock and Reset, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -16,10 +16,19 @@
         <a href="index.html">Return to the main page</a>.
       </p>
 
+      <p>
+        Revision 1.1 adds <code>U_IO_CLK_BUF</code>, the I/O clock buffer that
+        supplies <code>PIT_CLK</code> to the
+        <a href="pit.html">MC68230 PI/T</a> and <code>TIMEOUT_CLK</code> to the
+        bus-timeout counter. The counter moves off <code>CPU_CLK_10</code> onto
+        the buffered branch, so the processor clock net keeps the same known
+        load it carried in revision 1.0.
+      </p>
+
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; loaded clock waveforms, reset edges,
+          Revision 1.1 pre-layout design; loaded clock waveforms, reset edges,
           and supply-ramp behavior remain to be measured on the assembled board
         </dd>
 
@@ -109,8 +118,8 @@
               <td><code>CPU_CLK_10</code></td>
               <td>Divider output</td>
               <td>
-                10 MHz clock for the MC68EC000, bus-timeout counter, and DRAM
-                clock buffer.
+                10 MHz clock for the MC68EC000, the DRAM clock buffer, and the
+                I/O clock buffer.
               </td>
               <td>Divider selected</td>
             </tr>
@@ -259,12 +268,53 @@
                 <code>R_CPU_CLK</code>
               </td>
               <td>
-                MC68EC000 <code>CLK</code>; <code>U_TIMEOUT</code> CD74HCT4040E
-                <code>CP</code> input; <code>U_DRAM_CLK_BUF</code> pin 13
+                MC68EC000 <code>CLK</code>; <code>U_DRAM_CLK_BUF</code> pin 13;
+                <code>U_IO_CLK_BUF</code> pin 2
               </td>
               <td>
                 Free-running processor and bus-timing clock derived from
                 <code>MASTER_CLK_40</code> by division by four.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>IO_CLK_ROOT</code></td>
+              <td>10 MHz clock</td>
+              <td><code>U_IO_CLK_BUF</code> pin 18</td>
+              <td><code>U_IO_CLK_BUF</code> pins 4 and 6</td>
+              <td>
+                Internal root of the I/O clock buffer. It exists so that
+                <code>CPU_CLK_10</code> carries one buffer input instead of one
+                per branch, and it is not routed to any other consumer.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>PIT_CLK</code></td>
+              <td>10 MHz clock</td>
+              <td><code>U_IO_CLK_BUF</code> pin 16</td>
+              <td>MC68230 <code>CLK</code>, <code>U_PIT</code> pin 40</td>
+              <td>
+                Free-running clock for the
+                <a href="pit.html#clock-reset">PI/T</a>. The MC68230 contains
+                dynamic logic, so this net is never gated off.
+              </td>
+            </tr>
+
+            <tr>
+              <td><code>TIMEOUT_CLK</code></td>
+              <td>10 MHz clock</td>
+              <td><code>U_IO_CLK_BUF</code> pin 14</td>
+              <td>
+                <code>U_TIMEOUT</code> CD74HCT4040E <code>CP</code> input, pin
+                10
+              </td>
+              <td>
+                Counting clock for the
+                <a href="bus-and-decode.html#bus-error-and-timeout"
+                  >bus-timeout counter</a
+                >. It replaces the direct <code>CPU_CLK_10</code> connection
+                used in revision 1.0.
               </td>
             </tr>
 
@@ -406,11 +456,14 @@ MC68EC000 RESET instruction
                                             |
                                             +-- MC68EC000 CLK
                                             |
-                                            +-- timeout counter CLK
-                                            |
                                             +-- DRAM clock buffer
+                                            |       |
+                                            |       +-- startup/refresh counters
+                                            |
+                                            +-- I/O clock buffer
                                                     |
-                                                    +-- startup/refresh counters</code></pre>
+                                                    +-- PIT_CLK
+                                                    +-- TIMEOUT_CLK</code></pre>
 
         <h3>Signal-Use Rules</h3>
 
@@ -1035,28 +1088,39 @@ U_CPU_CLK second stage (2Q, pin 9)
     |
     +-- MC68EC000 CLK
     |
-    +-- U_TIMEOUT CD74HCT4040E CP (pin 10)
-    |
     +-- U_DRAM_CLK_BUF 10 MHz input
+    |       |
+    |       +-- DRAM_CLK_10
+    |               |
+    |               +-- U_STARTUP_DIV CD74HCT4040E CP (pin 10)
+    |               +-- U_REFRESH_DIV CD74HCT4040E CP (pin 10)
+    |               +-- U_DRAM_CLK_BUF pin 15 -&gt; ROM_CLK (firmware ROM)
+    |               +-- U_DRAM_CLK_BUF pin 17 -&gt; INT_CLK (interrupt logic,
+    |                                                     MFP divider, RTC)
+    |
+    +-- U_IO_CLK_BUF pin 2
             |
-            +-- DRAM_CLK_10
+            +-- IO_CLK_ROOT
                     |
-                    +-- U_STARTUP_DIV CD74HCT4040E CP (pin 10)
-                    +-- U_REFRESH_DIV CD74HCT4040E CP (pin 10)
-                    +-- U_DRAM_CLK_BUF pin 15 -&gt; ROM_CLK  (firmware ROM)
-                    +-- U_DRAM_CLK_BUF pin 17 -&gt; INT_CLK  (interrupt logic,
-                                                           MFP divider, RTC)</code></pre>
+                    +-- pin 4 -&gt; PIT_CLK     (MC68230 PI/T)
+                    +-- pin 6 -&gt; TIMEOUT_CLK (bus timeout)</code></pre>
 
         <p>
           The DRAM controller uses a <code>CD74ACT244E</code> clock buffer. Its
           20 MHz output feeds four matched controller branches. Its 10 MHz
           output feeds the two DRAM divider counters and two further channels of
           the same buffer, which produce <code>ROM_CLK</code> and
-          <code>INT_CLK</code>. Every subsystem clock derived from the 10 MHz
-          net therefore leaves the buffer rather than the divider, so the CPU
-          and timeout paths keep the motherboard clock to themselves. The
-          channel assignment is in
+          <code>INT_CLK</code>. The channel assignment is in
           <a href="dram.html#clock-distribution">dram.html</a>.
+        </p>
+
+        <p>
+          A second <code>CD74ACT244E</code>, <code>U_IO_CLK_BUF</code>, serves
+          the I/O side. It produces <code>PIT_CLK</code> and
+          <code>TIMEOUT_CLK</code> and holds five spare channels for later I/O
+          slots. Every subsystem clock derived from the 10 MHz net leaves a
+          buffer rather than the divider, and <code>CPU_CLK_10</code> drives
+          three inputs and nothing else.
         </p>
 
         <h3>MASTER_CLK_40 Loading</h3>
@@ -1184,9 +1248,16 @@ U_CPU_CLK second stage (2Q, pin 9)
 
         <p>
           <code>CPU_CLK_10</code> is the principal distributed clock produced by
-          the divider. It has three consumers: the MC68EC000 CPU, the
-          CD74HCT4040 used by the bus-timeout circuit, and one input of the DRAM
-          <code>CD74ACT244E</code> clock buffer.
+          the divider. It has three consumers: the MC68EC000 CPU, one input of
+          the DRAM <code>CD74ACT244E</code> clock buffer, and one input of the
+          I/O <code>CD74ACT244E</code> clock buffer.
+        </p>
+
+        <p>
+          Revision 1.0 gave the third place to the bus-timeout
+          <code>CD74HCT4040</code>. Revision 1.1 moves that counter behind
+          <code>U_IO_CLK_BUF</code> and spends the freed 10 pF on the buffer
+          input, so the known device total below is unchanged.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -1213,13 +1284,13 @@ U_CPU_CLK second stage (2Q, pin 9)
             </tr>
 
             <tr>
-              <td><code>U_TIMEOUT</code> CD74HCT4040 clock input</td>
+              <td><code>U_DRAM_CLK_BUF</code> CD74ACT244 input</td>
               <td>10 pF</td>
-              <td>CD74HCT4040 datasheet, section 5.6</td>
+              <td>CD74ACT244 datasheet, section 5.6</td>
             </tr>
 
             <tr>
-              <td><code>U_DRAM_CLK_BUF</code> CD74ACT244 input</td>
+              <td><code>U_IO_CLK_BUF</code> CD74ACT244 input</td>
               <td>10 pF</td>
               <td>CD74ACT244 datasheet, section 5.6</td>
             </tr>
@@ -1278,6 +1349,132 @@ C_trace + C_pads + C_socket + C_adapter + C_probe &lt;= 10 pF</code></pre>
           lengths. The assembled-board waveform is the acceptance result.
         </p>
 
+        <h3 id="io-clock-buffer">I/O Clock Buffer</h3>
+
+        <p>
+          <code>U_IO_CLK_BUF</code> is a <code>CD74ACT244E</code> octal buffer
+          in a 20-pin DIP. It presents one input to <code>CPU_CLK_10</code>,
+          re-buffers that copy as <code>IO_CLK_ROOT</code>, and drives each I/O
+          clock from its own channel. Ground output-enable pins 1 and 19.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_IO_CLK_BUF channel assignment
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Input pin</th>
+              <th scope="col">Output pin</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Consumer</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td>2</td>
+              <td>18</td>
+              <td><code>IO_CLK_ROOT</code></td>
+              <td>Pins 4 and 6 of this package</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>16</td>
+              <td><code>PIT_CLK</code></td>
+              <td>MC68230 <code>CLK</code>, <code>U_PIT</code> pin 40</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>14</td>
+              <td><code>TIMEOUT_CLK</code></td>
+              <td><code>U_TIMEOUT</code> pin 10</td>
+            </tr>
+            <tr>
+              <td>8, 11, 13, 15, 17</td>
+              <td>12, 9, 7, 5, 3</td>
+              <td>Spare</td>
+              <td>
+                Inputs tied to ground and outputs left open. Any future I/O
+                consumer takes one of these channels and is added to this table.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          Pin 10 is ground and pin 20 is +5 V. The package gets a 100 nF ceramic
+          bypass capacitor and a 1 uF capacitor in parallel at its supply pins,
+          matching <code>U_DRAM_CLK_BUF</code>.
+        </p>
+
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            IO_CLK_ROOT capacitive load
+          </caption>
+
+          <thead>
+            <tr>
+              <th scope="col">Load</th>
+              <th scope="col">Maximum capacitance</th>
+              <th scope="col">Source</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td><code>U_IO_CLK_BUF</code> pin 4</td>
+              <td>10 pF</td>
+              <td>CD74ACT244 datasheet, section 5.6</td>
+            </tr>
+            <tr>
+              <td><code>U_IO_CLK_BUF</code> pin 6</td>
+              <td>10 pF</td>
+              <td>CD74ACT244 datasheet, section 5.6</td>
+            </tr>
+            <tr>
+              <td>Known device load total</td>
+              <td>20 pF maximum</td>
+              <td>10 pF + 10 pF</td>
+            </tr>
+            <tr>
+              <td>PCB trace, socket, and pad capacitance</td>
+              <td>Within the 30 pF remaining budget</td>
+              <td>
+                The routing is internal to one package, so the trace
+                contribution is short. Verify from the assembled waveform.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          <code>PIT_CLK</code> and <code>TIMEOUT_CLK</code> each drive one
+          receiver against the same 50 pF timing-analysis target. The MC68230
+          clock input is 15 pF maximum, leaving 35 pF for routing; the
+          CD74HCT4040 clock input is 10 pF maximum, leaving 40 pF. The
+          <a href="pit.html#layout">PI/T layout checks</a> hold the routed
+          <code>PIT_CLK</code> branch inside its figure.
+        </p>
+        <p>
+          The MC68230 requires rise and fall times at or below 10 ns and at
+          least 45 ns in each half period. A <code>CD74ACT244E</code> output
+          driving a single 15 pF input meets both with room to spare, and the
+          buffer passes the divider's 50 percent duty cycle through unchanged.
+        </p>
+
+        <p>
+          Two buffer stages separate <code>PIT_CLK</code> and
+          <code>TIMEOUT_CLK</code> from <code>CPU_CLK_10</code>, so both lag the
+          processor clock by the two <code>CD74ACT244E</code> propagation delays
+          and keep its period, duty cycle, and edge count. The timeout counter
+          counts edges and is indifferent to the lag. The MC68230 handshakes
+          every bus cycle with <code>/DTACK</code>, and
+          <a href="pit.html#timing">its timing section</a> works the lag through
+          in both directions.
+        </p>
+
         <h3>DC Fanout</h3>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -1313,9 +1510,9 @@ C_trace + C_pads + C_socket + C_adapter + C_probe &lt;= 10 pF</code></pre>
               <td>DC load fits; keep each feedback trace local</td>
             </tr>
             <tr>
-              <td>F74 2Q to CPU CLK, timeout CP, and ACT244 input</td>
+              <td>F74 2Q to CPU CLK and two ACT244 inputs</td>
               <td>
-                2.5 uA CPU leakage + 1 uA counter + 1 uA ACT input = 4.5 uA
+                2.5 uA CPU leakage + 1 uA ACT input + 1 uA ACT input = 4.5 uA
                 screening total
               </td>
               <td>1 mA / 20 mA</td>
@@ -1326,12 +1523,12 @@ C_trace + C_pads + C_socket + C_adapter + C_probe &lt;= 10 pF</code></pre>
 
         <p>
           Sources are SN74F74 page 2-3, SG-615PH page 1, M68000UM section 10.13,
-          CD74HCT4040 section 5.5, and CD74ACT244 section 5.5. The CPU specifies
-          input leakage at 5.25 V; the logic inputs specify leakage at their
-          rails. These are DC checks under the cited conditions, not estimates
-          of transient charging current. The counter uses the same 2.0 V high
-          and 0.8 V low thresholds as the CPU, giving 0.5 V high and 0.3 V low
-          margins from the F74's 2.5 V / 0.5 V output limits at VCC = 4.5 V.
+          and CD74ACT244 section 5.5. The CPU specifies input leakage at 5.25 V;
+          the logic inputs specify leakage at their rails. These are DC checks
+          under the cited conditions, not estimates of transient charging
+          current. Both ACT244 inputs use the same 2.0 V high and 0.8 V low
+          thresholds as the CPU, giving 0.5 V high and 0.3 V low margins from
+          the F74's 2.5 V / 0.5 V output limits at VCC = 4.5 V.
         </p>
 
         <h3>Routing Rules</h3>
@@ -1413,12 +1610,24 @@ C_trace + C_pads + C_socket + C_adapter + C_probe &lt;= 10 pF</code></pre>
             <tr>
               <td><code>CPU_CLK_10</code></td>
               <td>
-                MC68EC000, CD74HCT4040 timeout counter, and
-                <code>U_DRAM_CLK_BUF</code>, which rebuffers it as
+                MC68EC000, <code>U_DRAM_CLK_BUF</code>, which rebuffers it as
                 <code>DRAM_CLK_10</code>, <code>ROM_CLK</code>, and
-                <code>INT_CLK</code>
+                <code>INT_CLK</code>, and <code>U_IO_CLK_BUF</code>, which
+                rebuffers it as <code>PIT_CLK</code> and
+                <code>TIMEOUT_CLK</code>
               </td>
               <td>Motherboard-distributed CPU/bus clock</td>
+            </tr>
+
+            <tr>
+              <td><code>IO_CLK_ROOT</code></td>
+              <td>
+                <code>U_IO_CLK_BUF</code> pins 4 and 6, inside the same package
+              </td>
+              <td>
+                Package-internal only; a new I/O clock takes a spare channel
+                from this root rather than a branch of an existing one
+              </td>
             </tr>
           </tbody>
         </table>
@@ -2910,6 +3119,13 @@ CPU_RESET_n and PERIPH_RESET_n must not feed back into RESET_n.</code></pre>
           lowers the released level by at most 2.1 mV through the 1.05 kohm
           maximum pull-up. The adapter stretches every peripheral reset locally,
           so the YMF262 does not load <code>PERIPH_RESET_n</code> directly.
+        </p>
+
+        <p>
+          The <a href="pit.html#clock-reset">MC68230 reset input</a> adds at
+          most 10 uA leakage and 15 pF. Its leakage drops the released level by
+          at most 10.5 mV through the 1.05 kohm maximum pull-up, and its 2.0 V
+          TTL high threshold matches the reset driver.
         </p>
 
         <h3>CPU_RESET_n Buffer Loading</h3>
