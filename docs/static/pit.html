@@ -11,8 +11,8 @@
       <h1>MC68230 PI/T</h1>
       <p>
         This document defines the MC68230 parallel interface and timer, its
-        MC68EC000 bus connection, the bit-banged I2C port, the user I/O header,
-        and the two vectored interrupt levels it owns.
+        MC68EC000 bus connection, the bit-banged monitor DDC channel, the user
+        I/O header, and the two vectored interrupt levels it owns.
         <a href="index.html">Return to the main page</a>.
       </p>
       <dl>
@@ -39,15 +39,16 @@
         </dd>
         <dt>Timer interrupt</dt>
         <dd>Level 5, vectored, vector number <code>$54</code></dd>
-        <dt>I2C bus</dt>
+        <dt>Monitor DDC</dt>
         <dd>
-          <code>PC0</code> and <code>PC1</code> driven as open drain on a 5 V
-          four-pin header
+          <code>PC0</code> and <code>PC1</code> driven as open drain, wired to
+          the <a href="vga.html#video-output"><code>J_VGA</code></a> DDC pins as
+          a 5 V DDC2B bus
         </dd>
         <dt>User I/O</dt>
         <dd>
           Port A, port B, <code>H1..H4</code>, <code>PC2</code>, and
-          <code>PC4</code> on a 34-pin header
+          <code>PC4</code> on a 34-pin header, 3M <code>D2534-6002-AR</code>
         </dd>
       </dl>
     </header>
@@ -60,7 +61,7 @@
         <li><a href="#register-map">Register Map</a></li>
         <li><a href="#clock-reset">Clock and Reset</a></li>
         <li><a href="#port-assignment">Port Assignment</a></li>
-        <li><a href="#i2c">I2C Port</a></li>
+        <li><a href="#ddc">Monitor DDC Channel</a></li>
         <li><a href="#user-header">User I/O Header</a></li>
         <li><a href="#timer">Timer</a></li>
         <li><a href="#interrupts">Interrupts</a></li>
@@ -80,9 +81,10 @@
         <p>
           The MC68230 supplies two 8-bit parallel ports, four programmable
           handshake pins, eight dual-function port C pins, and a 24-bit timer.
-          The board uses two port C pins as a bit-banged I2C bus, routes the
-          remaining general-purpose pins to a user header, and takes the port
-          and timer interrupts on their own processor levels. This page fixes
+          The board uses two port C pins as a bit-banged DDC bus to the monitor
+          connector, routes the remaining general-purpose pins to a user header,
+          and takes the port and timer interrupts on their own processor levels.
+          This page fixes
           every motherboard connection to the device and the firmware rules
           that the wiring imposes.
         </p>
@@ -129,11 +131,11 @@ PIT_DTACK_n &lt;--- 4.7 kohm pull-up --- /DTACK
 PIT_PIRQ_n  &lt;--- 4.7 kohm pull-up --- PC5/PIRQ
 PIT_TIRQ_n  &lt;--- 4.7 kohm pull-up --- PC3/TOUT
 
-I2C_SCL &lt;------- 4.7 kohm pull-up --- PC0 ---&gt; J_PIT_I2C pin 2
-I2C_SDA &lt;------- 4.7 kohm pull-up --- PC1 ---&gt; J_PIT_I2C pin 3
+DDC_SCL &lt;------- 4.7 kohm pull-up --- PC0 ---&gt; J_VGA pin 15
+DDC_SDA &lt;------- 4.7 kohm pull-up --- PC1 ---&gt; J_VGA pin 12
 
 PA7..PA0, PB7..PB0, H1..H4, PC2, PC4 -&gt; J_PIT_USER
-F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
+F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
         <p>
           <code>PIT_DTACK_n</code> joins the motherboard completion tree at
           <code>U_DTACK_B</code> gate 1. The same net terminates register
@@ -345,7 +347,7 @@ F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
               <td><code>$F20009</code></td>
               <td><code>00100</code></td>
               <td>PCDDR</td>
-              <td>Port C direction, including the two I2C pins.</td>
+              <td>Port C direction, including the two DDC pins.</td>
             </tr>
             <tr>
               <td><code>$F2000B</code></td>
@@ -408,7 +410,7 @@ F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
               <td>PCDR</td>
               <td>
                 Port C data; input bits return the pin level, which is how
-                firmware reads the I2C lines.
+                firmware reads the DDC lines.
               </td>
             </tr>
             <tr>
@@ -577,7 +579,7 @@ F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
               <td><code>PC0</code>, <code>PC1</code></td>
               <td>Inputs</td>
               <td>
-                <code>I2C_SCL</code> and <code>I2C_SDA</code> release to their
+                <code>DDC_SCL</code> and <code>DDC_SDA</code> release to their
                 4.7 kohm pull-ups, which is the idle bus state.
               </td>
             </tr>
@@ -647,13 +649,13 @@ F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
             </tr>
             <tr>
               <td><code>PC0</code></td>
-              <td>I2C clock, driven as open drain</td>
-              <td><code>I2C_SCL</code> and <code>J_PIT_I2C</code></td>
+              <td>DDC clock, driven as open drain</td>
+              <td><code>DDC_SCL</code> to <code>J_VGA</code> pin 15</td>
             </tr>
             <tr>
               <td><code>PC1</code></td>
-              <td>I2C data, driven as open drain</td>
-              <td><code>I2C_SDA</code> and <code>J_PIT_I2C</code></td>
+              <td>DDC data, driven as open drain</td>
+              <td><code>DDC_SDA</code> to <code>J_VGA</code> pin 12</td>
             </tr>
             <tr>
               <td><code>PC2/TIN</code></td>
@@ -705,13 +707,18 @@ F_PIT_5V ----------------------------&gt; both header +5 V pins</code></pre>
         </p>
       </section>
 
-      <section id="i2c">
-        <h2>7. I2C Port</h2>
+      <section id="ddc">
+        <h2>7. Monitor DDC Channel</h2>
         <p>
-          <code>PC0</code> and <code>PC1</code> form a 5 V I2C bus that firmware
-          drives one bit at a time. The MC68230 has no open-drain port outputs,
-          so the interface produces the open-drain behavior I2C requires by
-          switching pin direction instead of pin level.
+          <code>PC0</code> and <code>PC1</code> form a 5 V bus that firmware
+          drives one bit at a time. It carries the display data channel to the
+          monitor: <code>PC0</code> is the DDC clock and <code>PC1</code> is the
+          DDC data line. The bus leaves this subsystem as <code>DDC_SCL</code>
+          and <code>DDC_SDA</code> and connects only to the DDC pins of
+          <a href="vga.html#video-output"><code>J_VGA</code></a>, so firmware
+          can read a monitor's EDID over DDC2B. The MC68230 has no open-drain
+          port outputs, so the interface produces the open-drain behavior the
+          bus requires by switching pin direction instead of pin level.
         </p>
         <pre><code>PCDR bits 1 and 0 = 0     written once during initialization
 
@@ -726,13 +733,13 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
         </p>
         <p>
           Reading PCDR returns the pin level for a pin programmed as an input,
-          which gives firmware the acknowledge bit from a slave and the released
-          level of the clock line. Waiting for <code>PC0</code> to read high
-          after releasing it implements clock-stretch tolerance.
+          which gives firmware the acknowledge bit from the monitor and the
+          released level of the clock line. Waiting for <code>PC0</code> to read
+          high after releasing it implements clock-stretch tolerance.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            I2C electrical arrangement
+            DDC channel electrical arrangement
           </caption>
           <thead>
             <tr>
@@ -746,20 +753,22 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
               <td>Bus voltage</td>
               <td>+5 V</td>
               <td>
-                Fed from <code>F_PIT_5V</code>. A 3.3 V device needs its own
-                level translation on the attached board.
+                DDC2B is a 5 V bus. The pull-ups on this page return to the
+                board +5 V rail. The separate +5 V pin the monitor draws from,
+                <code>J_VGA</code> pin 9, and its fuse are in
+                <a href="vga.html#video-output">the VGA design</a>.
               </td>
             </tr>
             <tr>
               <td>Pull-up resistors</td>
               <td>
-                <code>R_I2C_SCL</code> and <code>R_I2C_SDA</code>, 4.7 kohm to
+                <code>R_DDC_SCL</code> and <code>R_DDC_SDA</code>, 4.7 kohm to
                 +5 V
               </td>
               <td>
                 1.12 mA maximum pull-up current at 5.25 V.
                 <code>PC0</code> and <code>PC1</code> are rated to sink 2.4 mA
-                at 0.5 V, so the bus low sits under 0.5 V against an I2C
+                at 0.5 V, so the bus low sits under 0.5 V against a DDC
                 receiver threshold of 1.5 V.
               </td>
             </tr>
@@ -779,9 +788,9 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
                 The I2C standard-mode ceiling is 400 pF, but the 4.7 kohm
                 pull-ups reach the 1 microsecond rise limit near 250 pF, so
                 that is the practical cap. A sub-100 kHz firmware-paced clock
-                tolerates a slower edge in any case. Short header wiring keeps
-                the routed board contribution small; the attached cable and
-                devices consume the rest.
+                tolerates a slower edge in any case. Short board routing keeps
+                the routed contribution small; the monitor cable and its EDID
+                EEPROM consume the rest.
               </td>
             </tr>
             <tr>
@@ -789,7 +798,7 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
               <td>Set by firmware, below 100 kHz</td>
               <td>
                 Each bus edge costs at least one PI/T byte access, so the loop
-                cannot approach the standard-mode ceiling. I2C sets no minimum
+                cannot approach the standard-mode ceiling. DDC2B sets no minimum
                 clock rate, so a firmware-paced clock is legal at any speed and
                 may pause between bits.
               </td>
@@ -797,16 +806,16 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
           </tbody>
         </table>
         <p>
-          <code>J_PIT_I2C</code> is a four-pin 0.1 inch header. Pin 1 is +5 V,
-          pin 2 is <code>I2C_SCL</code>, pin 3 is <code>I2C_SDA</code>, and pin
-          4 is ground. Mark pin 1 and the signal names on the silkscreen; I2C
-          breakout boards do not agree on a pin order, so the label is what
-          keeps a cable from reversing the supply.
+          <code>DDC_SCL</code> and <code>DDC_SDA</code> land on
+          <a href="vga.html#video-output"><code>J_VGA</code></a> pins 15 and 12.
+          Pin 9 of that connector carries a fused +5 V supply for the monitor's
+          EDID EEPROM and pin 5 is the DDC ground return; both belong to the VGA
+          design.
         </p>
         <p>
           Nothing on the motherboard other than the two pull-ups connects to the
-          bus. An empty header leaves both lines high, which firmware reads as
-          an idle bus.
+          bus. With no monitor attached, or a monitor with no EDID EEPROM, both
+          lines stay high, which firmware reads as an idle bus.
         </p>
       </section>
 
@@ -816,6 +825,12 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
           <code>J_PIT_USER</code> is a 34-pin, 0.1 inch, shrouded and keyed IDC
           header. It carries 22 signals and interleaves ground pairs between the
           signal groups so that a ribbon cable has a return next to every group.
+        </p>
+        <p>
+          The recommended part is the 3M <code>D2534-6002-AR</code>, a 2-by-17
+          0.1 inch shrouded header with a center polarizing key. Any 2-by-17
+          shrouded and keyed 0.1 inch header with the same footprint and the
+          pinout below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -988,15 +1003,14 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
         <h3>Header Power</h3>
         <p>
           <code>F_PIT_5V</code>, an <code>RXEF050</code> radial resettable fuse,
-          feeds the +5 V pins of both <code>J_PIT_USER</code> and
-          <code>J_PIT_I2C</code>. It holds 0.50 A at 20 C and 0.27 A at 70 C, so
-          the two headers together supply a quarter of an amp at the top of the
-          case temperature range. The
+          feeds the +5 V pins of <code>J_PIT_USER</code>. It holds 0.50 A at
+          20 C and 0.27 A at 70 C, so the header supplies a quarter of an amp at
+          the top of the case temperature range. The
           <a href="expansion.html#power">expansion slots</a> use larger parts
           from the same RXEF series.
         </p>
         <p>
-          Neither header supplies +12 V. A shorted cable trips
+          The header does not supply +12 V. A shorted cable trips
           <code>F_PIT_5V</code> and leaves the rest of the board running.
         </p>
       </section>
@@ -1200,7 +1214,7 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
           <li>
             Write PCDR bits 1 and 0 to zero before writing PCDDR. Reset leaves
             the data registers undefined, and a stale one in either bit drives
-            an I2C line high the moment its direction bit is set.
+            a DDC line high the moment its direction bit is set.
           </li>
           <li>
             Program the ports in this order: write PGCR bits 7 and 6 to
@@ -1256,7 +1270,7 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
             count bytes twice when a coherent 24-bit value matters.
           </li>
           <li>
-            Drive the I2C lines by direction only. Set a PCDDR bit to pull its
+            Drive the DDC lines by direction only. Set a PCDDR bit to pull its
             line low and clear it to release the line. Never write a one into
             PCDR bit 0 or bit 1.
           </li>
@@ -1349,12 +1363,12 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
             <tr>
               <td>30</td>
               <td><code>PC0</code></td>
-              <td><code>I2C_SCL</code> and <code>R_I2C_SCL</code></td>
+              <td><code>DDC_SCL</code> and <code>R_DDC_SCL</code></td>
             </tr>
             <tr>
               <td>31</td>
               <td><code>PC1</code></td>
-              <td><code>I2C_SDA</code> and <code>R_I2C_SDA</code></td>
+              <td><code>DDC_SDA</code> and <code>R_DDC_SDA</code></td>
             </tr>
             <tr>
               <td>32</td>
@@ -1769,8 +1783,8 @@ watchdog limit             3.2 us</code></pre>
               </td>
             </tr>
             <tr>
-              <td><code>I2C_SCL</code>, <code>I2C_SDA</code></td>
-              <td>4.7 kohm pull-up and the header each</td>
+              <td><code>DDC_SCL</code>, <code>DDC_SDA</code></td>
+              <td>4.7 kohm pull-up and one <code>J_VGA</code> DDC pin each</td>
               <td>
                 1.12 mA against the 2.4 mA sink rating of
                 <code>PC0</code> and <code>PC1</code>, 47 percent of it.
@@ -1796,16 +1810,16 @@ watchdog limit             3.2 us</code></pre>
         </p>
         <p>
           Every pull-up on this page is 4.7 kohm and draws at most 1.12 mA at
-          5.25 V. The tightest of the three is the I2C pair at 47 percent of the
+          5.25 V. The tightest of the three is the DDC pair at 47 percent of the
           pin's rated sink current, and the device guarantees 0.5 V at the full
-          2.4 mA, so the actual low sits under that. An I2C receiver reads low
+          2.4 mA, so the actual low sits under that. A DDC receiver reads low
           below 0.3 times the supply, 1.5 V on this bus, so the level holds with
           a full volt to spare even at the guaranteed figure.
         </p>
         <p>
           Internal power dissipation is 750 mW maximum measured at 0 C, which is
           150 mA from the +5 V rail. Add that to the board supply budget
-          alongside the two header feeds behind <code>F_PIT_5V</code>.
+          alongside the user header feed behind <code>F_PIT_5V</code>.
         </p>
         <p>
           <code>U_PIT</code> gets a 100 nF ceramic bypass capacitor at each
@@ -1850,24 +1864,22 @@ watchdog limit             3.2 us</code></pre>
               <td>Timer interrupt pull-up.</td>
             </tr>
             <tr>
-              <td><code>R_I2C_SCL</code>, <code>R_I2C_SDA</code></td>
+              <td><code>R_DDC_SCL</code>, <code>R_DDC_SDA</code></td>
               <td>4.7 kohm, 0.125 W</td>
-              <td>I2C bus pull-ups.</td>
+              <td>Monitor DDC bus pull-ups to +5 V.</td>
             </tr>
             <tr>
               <td><code>J_PIT_USER</code></td>
-              <td>34-pin shrouded and keyed 0.1 inch header</td>
+              <td>
+                34-pin shrouded and keyed 0.1 inch header; 3M
+                <code>D2534-6002-AR</code>
+              </td>
               <td>Port A, port B, handshake, and spare port C pins.</td>
-            </tr>
-            <tr>
-              <td><code>J_PIT_I2C</code></td>
-              <td>4-pin 0.1 inch header</td>
-              <td>+5 V, <code>I2C_SCL</code>, <code>I2C_SDA</code>, ground.</td>
             </tr>
             <tr>
               <td><code>F_PIT_5V</code></td>
               <td>RXEF050, 0.50 A hold at 20 C and 0.27 A at 70 C</td>
-              <td>Resettable fuse for both header +5 V feeds.</td>
+              <td>Resettable fuse for the user header +5 V feed.</td>
             </tr>
           </tbody>
         </table>
@@ -1881,8 +1893,9 @@ watchdog limit             3.2 us</code></pre>
         </p>
         <p>
           <code>U_PIT</code> dissipates at most 750 mW internally, 150 mA from
-          the +5 V rail, before either header draws anything. The two headers
-          share <code>F_PIT_5V</code> and add up to 0.27 A more at 70 C.
+          the +5 V rail, before the header draws anything.
+          <code>J_PIT_USER</code> sits behind <code>F_PIT_5V</code> and adds up
+          to 0.27 A more at 70 C.
         </p>
         <p>
           The archived data sheet is 1983 advance information and lists the
@@ -1917,20 +1930,20 @@ watchdog limit             3.2 us</code></pre>
             priority encoder, matching the other open-drain interrupt lines.
           </li>
           <li>
-            Place <code>R_I2C_SCL</code> and <code>R_I2C_SDA</code> between
-            <code>U_PIT</code> and <code>J_PIT_I2C</code>. Keep both I2C traces
-            short and away from the clock nets; their capacitance counts against
-            the 400 pF bus limit.
+            Place <code>R_DDC_SCL</code> and <code>R_DDC_SDA</code> near
+            <code>U_PIT</code>. Route <code>DDC_SCL</code> and
+            <code>DDC_SDA</code> to the <code>J_VGA</code> DDC pins as a short
+            pair away from the clock and video nets; their length counts against
+            the 250 pF bus budget in section 7.
           </li>
           <li>
-            Put <code>J_PIT_USER</code> and <code>J_PIT_I2C</code> at a board
-            edge that a ribbon cable can reach with the case closed. Mark pin 1
-            on copper and silkscreen and orient the shroud key away from the
-            board interior.
+            Put <code>J_PIT_USER</code> at a board edge that a ribbon cable can
+            reach with the case closed. Mark pin 1 on copper and silkscreen and
+            orient the shroud key away from the board interior.
           </li>
           <li>
-            Route <code>F_PIT_5V</code> so that both header +5 V pins sit behind
-            it and no other load shares the fuse.
+            Route <code>F_PIT_5V</code> so that the <code>J_PIT_USER</code> +5 V
+            pins sit behind it and no other load shares the fuse.
           </li>
           <li>
             Include the <code>U_PIT</code> address, data, and control pins
@@ -2006,17 +2019,17 @@ watchdog limit             3.2 us</code></pre>
               </td>
             </tr>
             <tr>
-              <td><code>I2C_SCL</code></td>
+              <td><code>DDC_SCL</code></td>
               <td><code>U_PIT</code> pin 30</td>
               <td>
-                <code>J_PIT_I2C</code> pin 2 and <code>R_I2C_SCL</code>.
+                <code>J_VGA</code> pin 15 and <code>R_DDC_SCL</code>.
               </td>
             </tr>
             <tr>
-              <td><code>I2C_SDA</code></td>
+              <td><code>DDC_SDA</code></td>
               <td><code>U_PIT</code> pin 31</td>
               <td>
-                <code>J_PIT_I2C</code> pin 3 and <code>R_I2C_SDA</code>.
+                <code>J_VGA</code> pin 12 and <code>R_DDC_SDA</code>.
               </td>
             </tr>
           </tbody>
@@ -2077,7 +2090,8 @@ watchdog limit             3.2 us</code></pre>
             <a href="https://www.nxp.com/docs/en/user-guide/UM10204.pdf"
               ><cite>I2C-bus specification and user manual, UM10204</cite></a
             >. Standard-mode rise time, bus capacitance limit, and the absence
-            of a minimum clock rate.
+            of a minimum clock rate. DDC2B follows these standard-mode I2C
+            electricals.
           </li>
         </ul>
       </section>

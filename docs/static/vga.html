@@ -11,7 +11,8 @@
       <p>
         This document defines the Cirrus Logic CL-GD5428 video controller, its
         MC68EC000 bus adapter, 2 MiB of display memory, the configuration
-        EEPROM, the dedicated clock, reset, and the DE-15 monitor output.
+        EEPROM, the dedicated clock, reset, the DE-15 monitor output, and the
+        monitor DDC channel wired to the MC68230 PI/T.
         <a href="index.html">Return to the main page</a>.
       </p>
       <dl>
@@ -41,6 +42,11 @@
         <dd>NM93C46N, 64 x 16, driven through the controller</dd>
         <dt>Video output</dt>
         <dd>DE-15 connector, 0.69 V peak white into 75 ohms</dd>
+        <dt>Monitor DDC</dt>
+        <dd>
+          DDC2B on <code>J_VGA</code> pins 12, 15, and 9, driven by the
+          <a href="pit.html#ddc">MC68230 PI/T</a>
+        </dd>
         <dt>Interrupt</dt>
         <dd><code>VSYNC</code> to MC68901 GPIP2, vector <code>$42</code></dd>
       </dl>
@@ -94,9 +100,12 @@
           <a href="clock-and-reset.html">Clock and Reset</a> design owns
           <code>PERIPH_RESET_n</code>. The
           <a href="mfp.html#gpip">MC68901 MFP</a> owns GPIP2 and the interrupt
-          vector. This page owns the address translation, bus adapter, wait
-          handling, display memory, configuration EEPROM, dedicated clock, reset
-          polarity, and analog output.
+          vector. The <a href="pit.html#ddc">MC68230 PI/T</a> owns the DDC bus
+          <code>DDC_SCL</code> and <code>DDC_SDA</code>, its pull-ups, and the
+          firmware that reads monitor EDID. This page owns the address
+          translation, bus adapter, wait handling, display memory, configuration
+          EEPROM, dedicated clock, reset polarity, analog output, and the DDC
+          pin assignment and +5 V supply at <code>J_VGA</code>.
         </p>
         <p>
           Mode setting, palette loading, BitBLT programming, and the hardware
@@ -151,6 +160,8 @@ RED, GREEN, BLUE --&gt; 150 ohm --&gt; pi filter --&gt; DE-15 pins 1, 2, 3
 HSYNC ----------------------------------------&gt; DE-15 pin 13
 VSYNC ----------------------------------------&gt; DE-15 pin 14
                                              +-&gt; MC68901 GPIP2
+MC68230 DDC_SCL, DDC_SDA ---------------------&gt; DE-15 pins 15, 12
+F_VGA_DDC +5 V -------------------------------&gt; DE-15 pin 9
 IREF &lt;-- Q_VGA_IREF collector, 6.6 mA sink
 EECS, ESYNC*, EVIDEO*, EEDI ------------------&gt; U_VGA_CFG NM93C46N</code></pre>
         <p>
@@ -1369,8 +1380,22 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
         <h3>Monitor Connector</h3>
         <p>
           J_VGA is a DE-15 receptacle at the board edge. The CL-GD5428 has no
-          DDC engine, so the display data channel and monitor identification
-          pins are unconnected.
+          DDC engine, so the display data channel is driven instead by the
+          <a href="pit.html#ddc">MC68230 PI/T</a> bit-banged bus:
+          <code>DDC_SCL</code> on pin 15, <code>DDC_SDA</code> on pin 12, and a
+          fused +5 V supply on pin 9 for the monitor's EDID EEPROM, with pin 5
+          as the DDC ground return. Firmware reads EDID over DDC2B through the
+          PI/T.
+        </p>
+        <p>
+          <code>F_VGA_DDC</code>, an <code>RXEF020</code> radial resettable
+          fuse, feeds pin 9. That pin only powers a monitor's EDID EEPROM, a
+          few milliamps; <code>RXEF020</code> holds about 0.11 A at 70 C and
+          trips near 0.4 A, so it passes that load with wide margin and still
+          protects the trace and contact on a shorted monitor cable. It is the
+          same RXEF series the PI/T and expansion fuses use. The DDC pull-ups
+          and the bus electrical budget are in
+          <a href="pit.html#ddc">the PI/T design</a>.
         </p>
         <p>
           The recommended part is the Amphenol <code>L77HDE15SD1CH4FVGA</code>,
@@ -1406,7 +1431,7 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
               <td>Analog output</td>
             </tr>
             <tr>
-              <td>4, 9, 11, 12, 15</td>
+              <td>4, 11</td>
               <td>Not connected</td>
               <td>None</td>
             </tr>
@@ -1431,6 +1456,16 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
               <td>Return</td>
             </tr>
             <tr>
+              <td>9</td>
+              <td>+5 V through <code>F_VGA_DDC</code></td>
+              <td>Output</td>
+            </tr>
+            <tr>
+              <td>12</td>
+              <td><code>DDC_SDA</code></td>
+              <td>Bidirectional</td>
+            </tr>
+            <tr>
               <td>13</td>
               <td><code>HSYNC</code></td>
               <td>Output</td>
@@ -1439,6 +1474,11 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
               <td>14</td>
               <td><code>VSYNC</code></td>
               <td>Output</td>
+            </tr>
+            <tr>
+              <td>15</td>
+              <td><code>DDC_SCL</code></td>
+              <td>Bidirectional</td>
             </tr>
           </tbody>
         </table>
@@ -1542,6 +1582,11 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
           <li>
             Own the display-memory timing if <code>SR1F[5:0]</code> is used to
             change MCLK away from the strapped 41.16477 MHz.
+          </li>
+          <li>
+            The DE-15 DDC pins are not wired to the controller. Read monitor
+            EDID through the <a href="pit.html#ddc">MC68230 PI/T</a> DDC bus,
+            not through any CL-GD5428 register.
           </li>
         </ol>
       </section>
@@ -2317,6 +2362,14 @@ board allowance             81.5 ns</code></pre>
               <td>Monitor output at the board edge.</td>
             </tr>
             <tr>
+              <td><code>F_VGA_DDC</code></td>
+              <td>RXEF020 radial resettable fuse</td>
+              <td>
+                +5 V supply to <code>J_VGA</code> pin 9 for the monitor DDC
+                EEPROM; holds about 0.11 A at 70 C and trips near 0.4 A.
+              </td>
+            </tr>
+            <tr>
               <td><code>R_VGA_CLK</code></td>
               <td>33 ohms</td>
               <td>Oscillator source-series termination.</td>
@@ -2450,6 +2503,12 @@ board allowance             81.5 ns</code></pre>
             and label the connector.
           </li>
           <li>
+            Bring <code>DDC_SCL</code> and <code>DDC_SDA</code> from the PI/T to
+            J_VGA pins 15 and 12 as a short pair, away from the DAC outputs and
+            the dot clock. Place <code>F_VGA_DDC</code> in the pin 9 feed close
+            to the connector.
+          </li>
+          <li>
             Give each of the seven <code>VDD</code> pins its own 0.1 uF bypass
             at the pin and connect all thirteen <code>VSS</code> pins directly
             to the ground plane.
@@ -2552,6 +2611,12 @@ board allowance             81.5 ns</code></pre>
           <li>
             Display a full-screen white field and measure the analog outputs at
             the connector with a monitor attached.
+          </li>
+          <li>
+            With a monitor attached, read its EDID over the PI/T DDC bus and
+            confirm the 8-byte header and the checksum. Then short J_VGA pin 9
+            to ground, confirm <code>F_VGA_DDC</code> opens with the rest of the
+            board still running, and let it recover.
           </li>
           <li>
             Run the board for an hour at the highest mode firmware supports and
@@ -2678,6 +2743,11 @@ board allowance             81.5 ns</code></pre>
             </tr>
           </tbody>
         </table>
+        <p>
+          <code>DDC_SCL</code> and <code>DDC_SDA</code> at <code>J_VGA</code>
+          pins 15 and 12 are defined in
+          <a href="pit.html#ddc">the MC68230 PI/T design</a>.
+        </p>
       </section>
 
       <section id="sources">
