@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - DRAM, Revision 1.0</title>
+    <title>68EC000 Computer - DRAM, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,10 +13,24 @@
         from eight TMS44400DJ-70 parts.
         <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The
+        <a href="paging.html">page unit</a> now sits between the address decoder
+        and this controller: it supplies <code>RAM0_REQ_n</code> and
+        <code>RAM1_REQ_n</code>, and it supplies the upper nine column-address
+        bits, which on a user-mode cycle come from a page table rather than from
+        the processor. The controller, its sequencer, its timing, refresh, and
+        initialization carry over from revision 1.0 unchanged.
+      </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; assembled-board measurements remain
+          Revision 2.0 pre-layout design; assembled-board measurements remain
+        </dd>
+        <dt>Privilege</dt>
+        <dd>
+          User-mode cycles are translated through the page unit; supervisor
+          cycles see flat physical memory
         </dd>
         <dt>Capacity</dt>
         <dd>4 MiB in two 2 MiB banks</dd>
@@ -742,9 +756,12 @@ Bank 1:  4 x TMS44400DJ-70  $200000-$3FFFFF  RAS = RAS1_n</code></pre>
         <p>
           <code>RAS0_n</code> connects to the RAS input of all four bank 0
           parts. <code>RAS1_n</code> connects to the RAS input of all four bank
-          1 parts. The global address decoder supplies the already-qualified
-          requests <code>RAM0_REQ_n</code> and <code>RAM1_REQ_n</code>; they
-          identify the target bank but do not directly drive DRAM RAS.
+          1 parts. The <a href="paging.html">page unit</a> supplies the
+          already-qualified requests <code>RAM0_REQ_n</code> and
+          <code>RAM1_REQ_n</code>; they identify the target bank but do not
+          directly drive DRAM RAS. On a supervisor cycle they repeat the address
+          decoder's logical requests one gate later; on a user-mode cycle the
+          page table picks the bank.
         </p>
 
         <pre><code>RAM0_REQ_n  --&gt; DRAM controller --&gt; RAS0_n
@@ -800,6 +817,16 @@ RAM1_REQ_n  --&gt; DRAM controller --&gt; RAS1_n</code></pre>
         </p>
 
         <p>
+          Page protection works the same way. The page unit withholds both bank
+          requests when a user-mode cycle hits an invalid page or writes a
+          read-only one, so the controller starts no cycle and has nothing to
+          abandon. It needs no <code>FC2</code> input of its own and no fault
+          input; see <a href="paging.html#page-faults">page faults</a>. Refresh
+          is unaffected, because it runs from the refresh timer rather than from
+          a request, and CBR refresh generates its own row addresses.
+        </p>
+
+        <p>
           Both banks share the multiplexed DRAM address bus, CPU data bus, and
           byte-lane CAS signals. The separate RAS signals isolate the banks
           during CPU accesses.
@@ -845,7 +872,9 @@ RAM1_REQ_n  --&gt; DRAM controller --&gt; RAS1_n</code></pre>
             </tr>
             <tr>
               <th scope="row">Column</th>
-              <td><code>A11..A20</code></td>
+              <td>
+                <code>A11</code> and <code>PPA8..PPA0</code>
+              </td>
               <td><code>DRAM A0..A9</code></td>
               <td>
                 Falling edge of <code>CAS_U_n</code> or <code>CAS_L_n</code>
@@ -856,9 +885,20 @@ RAM1_REQ_n  --&gt; DRAM controller --&gt; RAS1_n</code></pre>
 
         <p>
           The address multiplexer must hold the row long enough for the RAS
-          edge, then change to the column before CAS falls. CPU bits above
-          <code>A20</code> select the bank and do not enter the DRAM address
-          multiplexer.
+          edge, then change to the column before CAS falls. The bank select sits
+          above the multiplexer and does not enter it.
+        </p>
+
+        <p>
+          <code>PPA8..PPA0</code> is the physical page address from the
+          <a href="paging.html">page unit</a>, carrying physical
+          <code>A20..A12</code>. On a supervisor cycle it repeats CPU
+          <code>A20..A12</code> through a buffer; on a user-mode cycle it comes
+          from the page table. Either way it is valid long before the
+          controller selects the column, 50 ns after RAS falls. The row address
+          comes from CPU <code>A1..A10</code> in both cases and is never
+          translated, which is why a 4 KiB page size costs this controller
+          nothing.
         </p>
       </section>
 
@@ -891,7 +931,11 @@ COLUMN: CPU A11..A20</code></pre>
 
         <p>
           All three parts share <code>DRAM_ADDR_COL</code>. A low selects the
-          row input; a high selects the column input.
+          row input; a high selects the column input. Nine of the ten column
+          inputs take <code>PPA8..PPA0</code> from the
+          <a href="paging.html">page unit</a> rather than CPU
+          <code>A20..A12</code>; the tenth still takes CPU
+          <code>A11</code>. Nothing else about the multiplexer changes.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -914,47 +958,47 @@ COLUMN: CPU A11..A20</code></pre>
             <tr>
               <th scope="row"><code>A1</code></th>
               <td><code>CPU A2</code></td>
-              <td><code>CPU A12</code></td>
+              <td><code>PPA0</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A2</code></th>
               <td><code>CPU A3</code></td>
-              <td><code>CPU A13</code></td>
+              <td><code>PPA1</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A3</code></th>
               <td><code>CPU A4</code></td>
-              <td><code>CPU A14</code></td>
+              <td><code>PPA2</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A4</code></th>
               <td><code>CPU A5</code></td>
-              <td><code>CPU A15</code></td>
+              <td><code>PPA3</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A5</code></th>
               <td><code>CPU A6</code></td>
-              <td><code>CPU A16</code></td>
+              <td><code>PPA4</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A6</code></th>
               <td><code>CPU A7</code></td>
-              <td><code>CPU A17</code></td>
+              <td><code>PPA5</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A7</code></th>
               <td><code>CPU A8</code></td>
-              <td><code>CPU A18</code></td>
+              <td><code>PPA6</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A8</code></th>
               <td><code>CPU A9</code></td>
-              <td><code>CPU A19</code></td>
+              <td><code>PPA7</code></td>
             </tr>
             <tr>
               <th scope="row"><code>A9</code></th>
               <td><code>CPU A10</code></td>
-              <td><code>CPU A20</code></td>
+              <td><code>PPA8</code></td>
             </tr>
           </tbody>
         </table>
@@ -4228,6 +4272,9 @@ CPU_START =
           acknowledged, so the motherboard bus timeout would end it with
           <code>BERR_n</code>. Boot firmware must run entirely from ROM,
           including its stack, until the initialization interval has elapsed.
+          That interval ends before the firmware disables the boot overlay and
+          moves its stack and vector table into physical frames 0 through
+          31, which it never maps into a user context.
           Because the initialization timer and the CPU clock come from the same
           divider tree, firmware can use a conservative CPU-cycle count for that
           delay instead of an independent wall-clock measurement.

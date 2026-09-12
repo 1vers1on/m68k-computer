@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Interrupts, Revision 1.1</title>
+    <title>68EC000 Computer - Interrupts, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,16 +14,18 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 1.1 gives levels 4 and 5 to the
-        <a href="pit.html">MC68230 PI/T</a> as vectored levels, adds
-        <code>PIT_DTACK_n</code> to the watchdog's answered term, and reduces
-        the unwired-level decode to levels 1 and 2. Levels 3, 6, and 7 and every
-        MFP routing carry over from revision 1.0 unchanged.
+        Revision 2.0 follows memory map 2.0. <code>INT_BERR_n</code> now meets
+        two other bus-error sources rather than one, in
+        <code>U_PROT_AND</code> gate 2 instead of <code>U_AND</code> gate 4.
+        Interrupt acknowledge is a CPU-space cycle with <code>FC2</code> high,
+        so supervisor protection never acts on one, and every priority,
+        acknowledge, vector, and watchdog decision carries over from revision
+        1.1 unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.1 pre-layout design; the MC68901 acknowledge latency and
+          Revision 2.0 pre-layout design; the MC68901 acknowledge latency and
           the worked termination budgets remain board measurements
         </dd>
         <dt>Scope</dt>
@@ -1176,15 +1178,17 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
         <h3>Motherboard Bus Error</h3>
         <p>
           <code>INT_BERR_n</code> is combined with the motherboard
-          <code>TIMEOUT_BERR_n</code> in
+          <code>TIMEOUT_BERR_n</code> and the protection violation
+          <code>PROT_BERR_n</code> in
           <a href="bus-and-decode.html#bus-error-and-timeout">Bus and Decode</a
-          >, in a spare gate of the CPU-space AND package:
+          >, in the second gate of <code>U_PROT_AND</code>:
         </p>
-        <pre><code>BERR_n = TIMEOUT_BERR_n AND INT_BERR_n</code></pre>
+        <pre><code>BERR_n = TIMEOUT_BERR_n AND INT_BERR_n AND PROT_BERR_n AND 1</code></pre>
         <p>
-          Either source pulls the processor <code>/BERR</code> input low. The
-          two are mutually exclusive in time because the bus timeout does not
-          run during CPU space.
+          Any source pulls the processor <code>/BERR</code> input low. The three
+          are mutually exclusive in time: the bus timeout does not run during
+          CPU space, and the protection logic needs <code>FC2</code> low, which
+          never happens during an acknowledge cycle.
         </p>
         <p>
           A spurious termination leaves <code>/HALT</code> inactive, so the
@@ -1475,9 +1479,11 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td><code>INT_BERR_n</code></td>
               <td>Bus-error path</td>
               <td>
-                ANDed with the bus-timeout error term:
-                <code>BERR_n = TIMEOUT_BERR_n AND INT_BERR_n</code>. One gate;
-                the two sources never overlap in time.
+                ANDed with the bus-timeout and protection error terms:
+                <code
+                  >BERR_n = TIMEOUT_BERR_n AND INT_BERR_n AND
+                  PROT_BERR_n</code
+                >. One gate; the three sources never overlap in time.
               </td>
             </tr>
             <tr>
@@ -1983,7 +1989,8 @@ INT_BERR_n     = UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></pre>
               <td><code>INT_BERR_n</code></td>
               <td><code>UNWIRED_IACK_n AND WDOG_TIMEOUT_n</code></td>
               <td>
-                <code>U_AND</code> gate 4 in Bus and Decode (spurious interrupt)
+                <code>U_PROT_AND</code> gate 2 in Bus and Decode (spurious
+                interrupt)
               </td>
             </tr>
             <tr>

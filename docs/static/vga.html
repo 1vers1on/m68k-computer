@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - CL-GD5428 VGA, Revision 1.0</title>
+    <title>68EC000 Computer - CL-GD5428 VGA, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -15,9 +15,21 @@
         monitor DDC channel wired to the MC68230 PI/T.
         <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The register window in I/O slot 3
+        is supervisor only with no exception, and the host-memory window is
+        supervisor only until the BIOS grants it to a user-mode program through
+        <code>SYSREG2</code>. Every circuit, strap, register address, and timing
+        figure carries over from revision 1.0 unchanged.
+      </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.0 pre-layout design</dd>
+        <dd>Revision 2.0 pre-layout design</dd>
+        <dt>Privilege</dt>
+        <dd>
+          Registers supervisor only; the host-memory window is grantable to
+          user mode
+        </dd>
         <dt>Controller</dt>
         <dd>CL-GD5428-80QC-A, 160-pin PQFP</dd>
         <dt>Host interface</dt>
@@ -351,6 +363,26 @@ VGA_CYCLE = NOT (VGA_SEL_n OR VGA_DS_n)</code></pre>
           The window is fully populated. There is no aliased region and no
           unmapped region inside it. The controller's own address decode answers
           every access the motherboard forwards.
+        </p>
+
+        <h3>Window Privilege</h3>
+        <p>
+          The motherboard closes the host-memory window to user-mode cycles by
+          default, and a BIOS write to <code>SYSREG2 / VGAGRANT</code> opens it
+          for the running program. A granted program writes pixels at full
+          bus speed; an ungranted one takes a bus error at the first access
+          and never reaches the controller. The
+          <a href="bus-and-decode.html#supervisor-protection">protection
+          section</a> gives the decode and the
+          <a href="system-control.html#vga-window-grant">grant register</a>
+          gives the write.
+        </p>
+        <p>
+          The grant covers the memory aperture only. The register window in I/O
+          slot 3 stays supervisor only, so a user-mode program cannot reprogram
+          <code>SR7</code> or <code>GRB</code> to move the aperture, change the
+          offset register, or start a BitBLT against memory it does not own. It
+          sees the framebuffer the BIOS configured and nothing else.
         </p>
         <p>
           <code>SR7</code> resets to <code>$00</code>, which configures a
@@ -1552,6 +1584,13 @@ Vpeak = 13.9 mA x 50 ohms = 0.69 V</code></pre>
             numerators and denominators, palette, and any BitBLT or hardware
             cursor state. All of it is firmware's responsibility because the
             machine has no x86 video BIOS to run.
+          </li>
+          <li>
+            Set the mode before granting the host-memory window, and close the
+            grant by writing <code>$00</code> to <code>SYSREG2</code> before
+            changing the mode again or starting another program. A program that
+            holds the grant across a mode change would write into a framebuffer
+            whose layout it no longer knows.
           </li>
           <li>
             Repeat every step above after each processor RESET instruction. The

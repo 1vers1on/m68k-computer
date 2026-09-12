@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - MC6850 MIDI, Revision 1.0</title>
+    <title>68EC000 Computer - MC6850 MIDI, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -14,10 +14,19 @@
         clock, interrupt connection, and 5-pin DIN MIDI IN, OUT, and THRU
         circuits. <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The MC6850 sits in I/O slot 5,
+        inside the protected I/O region, so its control, status, and data
+        registers answer supervisor cycles only and application code sends and
+        receives MIDI through BIOS calls. Every circuit, register address, and
+        timing figure carries over from revision 1.0 unchanged.
+      </p>
       <dl>
+        <dt>Privilege</dt>
+        <dd>Supervisor only; application code calls the BIOS</dd>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; the read-data capture margin in
+          Revision 2.0 pre-layout design; the read-data capture margin in
           section 13 is an open item
         </dd>
         <dt>ACIA</dt>

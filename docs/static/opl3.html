@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - YMF262 OPL3, Revision 1.0</title>
+    <title>68EC000 Computer - YMF262 OPL3, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,9 +13,19 @@
         bus adapter, two YAC512 converters, stereo mixer, volume control, and
         headphone output. <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The YMF262 sits in I/O slot 2,
+        inside the protected I/O region, so its four ports answer supervisor
+        cycles only and application code plays notes through BIOS calls. The
+        address and data port pair has to stay together, which is a further
+        reason to keep the sequence inside the firmware. Every circuit, register
+        address, and timing figure carries over from revision 1.0 unchanged.
+      </p>
       <dl>
+        <dt>Privilege</dt>
+        <dd>Supervisor only; application code calls the BIOS</dd>
         <dt>Document status</dt>
-        <dd>Revision 1.0 pre-layout design</dd>
+        <dd>Revision 2.0 pre-layout design</dd>
         <dt>Synthesizer</dt>
         <dd>Yamaha YMF262-M, 24-pin SOP</dd>
         <dt>Bus connection</dt>

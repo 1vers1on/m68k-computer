@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Clock and Reset, Revision 1.1</title>
+    <title>68EC000 Computer - Clock and Reset, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -17,18 +17,21 @@
       </p>
 
       <p>
-        Revision 1.1 adds <code>U_IO_CLK_BUF</code>, the I/O clock buffer that
-        supplies <code>PIT_CLK</code> to the
-        <a href="pit.html">MC68230 PI/T</a> and <code>TIMEOUT_CLK</code> to the
-        bus-timeout counter. The counter moves off <code>CPU_CLK_10</code> onto
-        the buffered branch, so the processor clock net keeps the same known
-        load it carried in revision 1.0.
+        Revision 2.0 follows memory map 2.0. <code>RESET_n</code> gains two
+        loads. Pin 13 of <code>U_OVERLAY</code> is the asynchronous clear of the
+        VGA-grant flip-flop, so a board reset closes the granted display window
+        alongside re-enabling the boot overlay. <code>U_PAGE_MMU</code> takes
+        the second, which clears the context register and the translation enable
+        bit and brings the machine up with the
+        <a href="paging.html">page unit</a> transparent. Both are CMOS and draw
+        10 uA apiece. The clock tree, the reset conditioner, and every timing
+        figure carry over from revision 1.1 unchanged.
       </p>
 
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.1 pre-layout design; loaded clock waveforms, reset edges,
+          Revision 2.0 pre-layout design; loaded clock waveforms, reset edges,
           and supply-ramp behavior remain to be measured on the assembled board
         </dd>
 
@@ -353,7 +356,9 @@
               <td>Active-low motherboard reset</td>
               <td><code>U_RESET_COND</code> pin 4, second-inverter output</td>
               <td>
-                <code>U_OVERLAY</code> pin 4, asynchronous preset;
+                <code>U_OVERLAY</code> pin 4, boot-overlay asynchronous preset;
+                <code>U_OVERLAY</code> pin 13, VGA-grant asynchronous clear;
+                <code>U_PAGE_MMU</code>, page-unit context and enable clear;
                 <code>U_RESET_DRV</code> pins 1 and 3, CPU reset and halt driver
                 inputs; four inputs of <code>U_DRAM_RESET_BUF</code>, which fan
                 reset out to the DRAM controller
@@ -3317,17 +3322,29 @@ MC68EC000 /RESET sink rating = 5.0 mA at VOL &lt;= 0.5 V</code></pre>
 
         <p>
           The conditioned <code>RESET_n</code> output connects to
-          <code>U_OVERLAY</code> pin 4, the active-low asynchronous preset. The
-          raw DS1233 output is isolated by two SN74LS14 Schmitt stages.
+          <code>U_OVERLAY</code> pin 4, the active-low asynchronous preset of
+          the boot-overlay flip-flop, and to pin 13, the active-low
+          asynchronous clear of the VGA-grant flip-flop. The raw DS1233 output
+          is isolated by two SN74LS14 Schmitt stages.
         </p>
 
         <pre><code>RESET_n
    |
    +----------------------> U_OVERLAY 1/PRE
+   |                              |
+   |                              +-- Q  = OVERLAY_EN
+   |                              |
+   |                              +-- /Q = OVERLAY_n
+   |
+   +----------------------> U_OVERLAY 2/CLR
                                   |
-                                  +-- Q  = OVERLAY_EN
-                                  |
-                                  +-- /Q = OVERLAY_n</code></pre>
+                                  +-- 2Q = VGA_GRANT</code></pre>
+
+        <p>
+          Both flip-flops therefore reach their safe state on every board reset:
+          the firmware alias is visible again and the CL-GD5428 host-memory
+          window is closed to user-mode cycles.
+        </p>
 
         <h3>Reset-State Behavior</h3>
 
@@ -3397,8 +3414,8 @@ ROM_ALIAS_n = ROM_ALIAS_ADDR_n OR NORMAL_MISC_n</code></pre>
         </p>
 
         <p>
-          The exact D-input and clocking implementation of
-          <code>U_OVERLAY</code> is owned by
+          The exact D-input and clocking implementation of both
+          <code>U_OVERLAY</code> flip-flops is owned by
           <code>bus-and-decode.html</code> and is not redefined here.
         </p>
 
@@ -3973,6 +3990,7 @@ CPU_HALT_n  transition time &lt;= 150 ns</code></pre>
                                     +-- RESET_n
                                             |
                                             +-- U_OVERLAY 1/PRE
+                                            +-- U_OVERLAY 2/CLR
                                             +-- CPU /RESET LS07 input
                                             +-- CPU /HALT LS07 input</code></pre>
 
@@ -4336,10 +4354,10 @@ RESET_RAW_n = 1
           datasheet supports slow-input operation but does not specify a
           guaranteed output rise/fall time. Its 22 ns propagation limit does not
           prove the HCT74's 500 ns input-transition requirement. Record that
-          evidence gap separately from PCB parasitics. RESET_n includes the
-          HCT74's 10 pF maximum input capacitance plus two unspecified LS07
-          input capacitances; verify the conditioned output waveform under the
-          final load.
+          evidence gap separately from PCB parasitics. RESET_n includes two
+          HCT74 inputs at 10 pF maximum each plus two unspecified LS07 input
+          capacitances; verify the conditioned output waveform under the final
+          load.
         </p>
 
         <h3>Processor Reset-Node Transition Times</h3>

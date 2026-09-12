@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Memory Map, Revision 1.2</title>
+    <title>68EC000 Computer - Memory Map, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,19 +14,40 @@
         and firmware. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        The revision 1.2 address specification is frozen. This document may be
+        The revision 2.0 address specification is frozen. This document may be
         corrected or expanded without a new revision. Any change to an address
-        range, slot assignment, or register address requires a new memory map
-        revision.
+        range, slot assignment, register address, or privilege attribute
+        requires a new memory map revision.
       </p>
       <p>
-        Revision 1.2 assigns I/O slot 9 to the MC68230 PI/T. Every other
-        address range, slot assignment, and register address carries over from
-        revision 1.1 unchanged.
+        Revision 2.0 breaks compatibility with revision 1.2 firmware. Each
+        range now carries a privilege attribute, and the hardware enforces it.
+        User-mode code cannot reach the I/O region or the firmware EEPROM, and a
+        cycle that tries ends in a bus error. Main memory goes further: every
+        user-mode cycle in <code>$000000-$3FFFFF</code> passes through a page
+        table, so a program reaches only the 4 KiB pages the BIOS mapped for it.
+        Section 2 gives the rules,
+        <a href="bus-and-decode.html#supervisor-protection">Bus and Address
+        Decode</a> gives the protection circuit, and
+        <a href="paging.html">Paging</a> gives the page unit.
+      </p>
+      <p>
+        BIOS scratch memory moves from <code>$3F0000-$3FFFFF</code> to physical
+        <code>$000000-$01FFFF</code>, which returns the top of DRAM bank 1 to
+        applications and puts the exception vectors inside BIOS territory. The
+        unimplemented regions <code>$A00000-$DFFFFF</code> become the page-table
+        aperture, I/O slot 10 becomes the page-unit control block, and
+        <code>SYSREG2</code> becomes the VGA window grant. Every other address
+        range, slot assignment, and register address carries over from revision
+        1.2 unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.2; the address specification is frozen</dd>
+        <dd>Revision 2.0; the address specification is frozen</dd>
+        <dt>Privilege model</dt>
+        <dd>
+          Supervisor-only I/O and firmware; paged main memory with 4 KiB pages
+        </dd>
         <dt>CPU</dt>
         <dd>MC68EC000FN10</dd>
         <dt>Address bus</dt>
@@ -57,7 +78,10 @@
     <nav aria-label="On this page">
       <ol>
         <li><a href="#main-memory-map">Main Memory Map</a></li>
-        <li><a href="#bios-scratch-memory">BIOS Scratch Memory</a></li>
+        <li>
+          <a href="#privilege-and-protection">Privilege and Protection</a>
+        </li>
+        <li><a href="#bios-private-memory">BIOS Private Memory</a></li>
         <li><a href="#i-o-and-firmware-map">I/O and Firmware Map</a></li>
         <li>
           <a href="#cl-gd5428-vga-byte-lanes">CL-GD5428 VGA Byte Lanes</a>
@@ -100,8 +124,11 @@
               <td>2 MiB</td>
               <td>DRAM bank 0</td>
               <td>
-                The boot ROM alias temporarily replaces the first 128 KiB after
-                reset.
+                Physical frames 0 through 31 hold the exception vectors and BIOS
+                private memory, and the BIOS never maps them into a user
+                context. The boot ROM alias replaces the first 128 KiB until the
+                firmware disables the overlay. User-mode cycles anywhere in the
+                bank are translated.
               </td>
             </tr>
             <tr>
@@ -110,8 +137,10 @@
               <td>2 MiB</td>
               <td>DRAM bank 1</td>
               <td>
-                The second 2 MiB DRAM bank. Its last 64 KiB is BIOS scratch
-                memory.
+                The second 2 MiB DRAM bank. Revision 1.2 reserved its last 64
+                KiB for the BIOS; revision 2.0 does not. User-mode cycles are
+                translated, and a logical page in either bank can map to a frame
+                in either bank.
               </td>
             </tr>
             <tr>
@@ -136,44 +165,174 @@
               <td>
                 Mapped one-to-one onto the CL-GD5428 linear display-memory
                 aperture. The board has 2 MiB of video RAM, so the window is
-                fully populated.
+                fully populated. Supervisor only until the BIOS writes
+                <code>SYSREG2</code>, which grants it to the running program.
               </td>
             </tr>
             <tr>
               <td><code>$A00000</code></td>
               <td><code>$BFFFFF</code></td>
               <td>2 MiB</td>
-              <td>Unimplemented</td>
-              <td><code>EXP_MEM5_n</code> does not reach either slot.</td>
+              <td>Page-table aperture, entries 512 through 1023</td>
+              <td>
+                <code>EXP_MEM5_n</code> selects the page unit. Entry
+                <code>N</code> appears at
+                <code>$A00000 + (N - 512) * 4096</code>. Supervisor only.
+              </td>
             </tr>
             <tr>
               <td><code>$C00000</code></td>
               <td><code>$DFFFFF</code></td>
               <td>2 MiB</td>
-              <td>Unimplemented</td>
-              <td><code>EXP_MEM6_n</code> does not reach either slot.</td>
+              <td>Page-table aperture, entries 0 through 511</td>
+              <td>
+                <code>EXP_MEM6_n</code> selects the page unit. Entry
+                <code>N</code> appears at <code>$C00000 + N * 4096</code>.
+                Supervisor only.
+              </td>
             </tr>
             <tr>
               <td><code>$E00000</code></td>
               <td><code>$FFFFFF</code></td>
               <td>2 MiB</td>
               <td>I/O and firmware</td>
-              <td>Divided into sixteen 128 KiB slots, listed below.</td>
+              <td>
+                Divided into sixteen 128 KiB slots, listed below. Supervisor
+                only, with no exception.
+              </td>
             </tr>
           </tbody>
         </table>
       </section>
 
-      <section id="bios-scratch-memory">
-        <h2>2. BIOS Scratch Memory</h2>
+      <section id="privilege-and-protection">
+        <h2>2. Privilege and Protection</h2>
         <p>
-          The last 64 KiB of DRAM bank 1 is BIOS scratch memory. Firmware uses
-          it for its stack and working state, and nothing else reads or writes
-          it.
+          Every range in the map carries a privilege attribute. The motherboard
+          reads <code>FC2</code>, which the MC68EC000 drives high for
+          supervisor cycles and low for user cycles, and refuses a user-mode
+          cycle that addresses a supervisor-only range. The refused cycle
+          reaches no device and the processor takes a bus-error exception.
+        </p>
+        <p>
+          Application code therefore reaches hardware only by calling the BIOS,
+          which runs in supervisor mode. The circuit is in
+          <a href="bus-and-decode.html#supervisor-protection">Bus and Address
+          Decode</a> and the call gate is in
+          <a href="firmware-rom.html#bios-call-gate">Firmware ROM</a>.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            BIOS scratch region
+            Privilege attribute of each range
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Start</th>
+              <th scope="col">End</th>
+              <th scope="col">Contents</th>
+              <th scope="col">User-mode access</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$000000</code></td>
+              <td><code>$3FFFFF</code></td>
+              <td>Main memory</td>
+              <td>
+                Translated. A page is readable, writable, or refused according
+                to its table entry
+              </td>
+            </tr>
+            <tr>
+              <td><code>$400000</code></td>
+              <td><code>$7FFFFF</code></td>
+              <td>Expansion slot memory windows</td>
+              <td>Allowed</td>
+            </tr>
+            <tr>
+              <td><code>$800000</code></td>
+              <td><code>$9FFFFF</code></td>
+              <td>CL-GD5428 host-memory window</td>
+              <td>Refused unless the BIOS has granted the window</td>
+            </tr>
+            <tr>
+              <td><code>$A00000</code></td>
+              <td><code>$DFFFFF</code></td>
+              <td>Page-table aperture</td>
+              <td>Refused</td>
+            </tr>
+            <tr>
+              <td><code>$E00000</code></td>
+              <td><code>$FFFFFF</code></td>
+              <td>
+                All sixteen I/O slots, the system registers, and the firmware
+                EEPROM
+              </td>
+              <td>Refused</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The two refused regions follow the bits the decoder already tests, so
+          the protection decode is two address comparisons:
+          <code>A23..A21 = 100</code> and <code>A23..A21 = 111</code>. Main
+          memory needs no comparison at all, because the page table answers for
+          every page separately. The page unit refuses user-mode access to its
+          own aperture.
+        </p>
+
+        <h3>VGA Window Grant</h3>
+        <p>
+          The display would be unusable if every pixel needed a BIOS call, so
+          the BIOS can open the host-memory window to the running program by
+          writing <code>$01</code> to <code>SYSREG2 / VGAGRANT</code> and close
+          it again by writing <code>$00</code>. A board reset closes it. The
+          CL-GD5428 control registers in I/O slot 3 stay supervisor only, so
+          display mode, pitch, and banking remain BIOS decisions.
+        </p>
+
+        <h3>Page Table</h3>
+        <p>
+          Main memory is divided into 1024 pages of 4 KiB. Each context has its
+          own table of 1024 entries, and the hardware holds 32 contexts at once,
+          so a context switch is a single register write. An entry carries a
+          physical frame number, a valid bit, and a writable bit.
+          <a href="paging.html">Paging</a> defines the format, the aperture, and
+          the control registers.
+        </p>
+        <p>
+          Supervisor cycles are never translated. The BIOS sees flat physical
+          memory, which is how it reaches the vector table, its own working
+          memory, and any frame it is about to hand to a program.
+        </p>
+
+        <h3>What Protection Does Not Cover</h3>
+        <p>
+          The page unit relocates and isolates; it cannot page on demand. The
+          MC68EC000 bus-error frame does not support instruction continuation,
+          so a faulting access cannot be repaired and retried. Every page a
+          program uses stays resident, and a fault ends the program.
+        </p>
+        <p>
+          Keeping firmware frames out of user tables is a BIOS rule rather than
+          a hardware interlock. Nothing in the hardware stops the BIOS from
+          mapping frame 0 into a user context, and doing so would hand that
+          program the exception vectors.
+        </p>
+      </section>
+
+      <section id="bios-private-memory">
+        <h2>3. BIOS Private Memory</h2>
+        <p>
+          Physical <code>$000000-$01FFFF</code>, frames 0 through 31, belongs to
+          the firmware. It holds the exception vector table, the supervisor
+          stack, and BIOS working state. User-mode code reaches it only if the
+          BIOS maps one of those frames into a context, which the BIOS must
+          never do.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            BIOS private region
           </caption>
           <thead>
             <tr>
@@ -185,26 +344,43 @@
           </thead>
           <tbody>
             <tr>
-              <td><code>$3F0000</code></td>
-              <td><code>$3FFFFF</code></td>
-              <td>64 KiB</td>
-              <td>BIOS scratch memory</td>
+              <td><code>$000000</code></td>
+              <td><code>$0003FF</code></td>
+              <td>1 KiB</td>
+              <td>MC68000 exception vector table</td>
+            </tr>
+            <tr>
+              <td><code>$000400</code></td>
+              <td><code>$01FFFF</code></td>
+              <td>127 KiB</td>
+              <td>BIOS stack and working state</td>
             </tr>
           </tbody>
         </table>
         <p>
-          The range sits inside DRAM bank 1, so it shares that bank's refresh
-          and initialization rules. Firmware must start DRAM refresh and finish
-          memory initialization before it uses this range.
+          Keeping the vector table out of every user table is what makes the
+          rest of the scheme hold. A user-mode program that cannot address frame
+          0 cannot rewrite a <code>TRAP</code> vector to point at its own code,
+          so the BIOS entry points are the only way into supervisor mode.
+        </p>
+        <p>
+          The range sits inside DRAM bank 0, so it shares that bank's refresh
+          and initialization rules, and the boot ROM alias covers it until the
+          firmware disables the overlay. Firmware must start DRAM refresh,
+          finish memory initialization, disable the overlay, write its vector
+          table into RAM, and build at least one page table before it leaves
+          supervisor mode.
         </p>
       </section>
 
       <section id="i-o-and-firmware-map">
-        <h2>3. I/O and Firmware Map</h2>
+        <h2>4. I/O and Firmware Map</h2>
         <p>
           The final 2 MiB of the address space is divided into sixteen 128 KiB
           slots. A slot can contain a device, firmware, or space reserved for
-          later use.
+          later use. Every slot is supervisor only, including the two that
+          reach the expansion connectors, so the register maps below describe
+          what the BIOS sees rather than what an application may touch.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -281,8 +457,9 @@
               <td>128 KiB</td>
               <td>System control registers</td>
               <td>
-                Controls the boot ROM overlay and leaves room for future
-                motherboard controls and status registers.
+                Controls the boot ROM overlay and the VGA window grant, and
+                leaves room for future motherboard controls and status
+                registers.
               </td>
             </tr>
             <tr>
@@ -344,8 +521,13 @@
               <td><code>$F40000</code></td>
               <td><code>$F5FFFF</code></td>
               <td>128 KiB</td>
-              <td>Reserved</td>
-              <td>Available for future I/O.</td>
+              <td>Page-unit control</td>
+              <td>
+                Selects the active context at <code>$F40001 + 2C</code> and
+                turns translation off and on at <code>$F40041</code> and
+                <code>$F40043</code>. Write-only, value encoded in the address.
+                See <a href="paging.html">Paging</a>.
+              </td>
             </tr>
             <tr>
               <th scope="row">11</th>
@@ -392,7 +574,7 @@
       </section>
 
       <section id="cl-gd5428-vga-byte-lanes">
-        <h2>4. CL-GD5428 VGA Byte Lanes</h2>
+        <h2>5. CL-GD5428 VGA Byte Lanes</h2>
         <p>
           The CL-GD5428 expects little-endian byte ordering, while the MC68EC000
           uses big-endian byte ordering. The host interface crosses the 16-bit
@@ -415,7 +597,7 @@
       </section>
 
       <section id="boot-rom-overlay">
-        <h2>5. Boot ROM Overlay</h2>
+        <h2>6. Boot ROM Overlay</h2>
         <p>
           After a hardware reset, the firmware EEPROM also appears at the bottom
           of the address space so the CPU can read its reset vectors. Disabling
@@ -462,13 +644,21 @@
           permanent high mapping, such as <code>$FE0100</code>. The firmware can
           then disable the low alias without hiding the code it is running.
         </p>
+        <p>
+          Disabling the overlay reveals BIOS private memory rather than
+          application memory, so the firmware writes its working vector table
+          into <code>$000000-$0003FF</code> after the switch. Both the alias and
+          the RAM behind it are supervisor only, so the exception vectors are
+          never writable from user mode.
+        </p>
       </section>
 
       <section id="system-control-registers">
-        <h2>6. System Control Registers</h2>
+        <h2>7. System Control Registers</h2>
         <p>
           The system control block uses odd addresses on the lower 8-bit data
-          lane. Only the first two registers have functions.
+          lane. Only the first three registers have functions, and the block is
+          supervisor only.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -498,8 +688,13 @@
             </tr>
             <tr>
               <td><code>$E80005</code></td>
-              <td>SYSREG2</td>
-              <td>Reserved.</td>
+              <td>SYSREG2 / VGAGRANT</td>
+              <td>
+                Write-only. <code>D0</code> high opens the CL-GD5428
+                host-memory window at <code>$800000-$9FFFFF</code> to user-mode
+                cycles; <code>D0</code> low closes it. A board reset closes it.
+                <code>D7..D1</code> are ignored.
+              </td>
             </tr>
             <tr>
               <td><code>$E80007</code></td>
@@ -529,14 +724,14 @@
           </tbody>
         </table>
         <p>
-          Lower-byte writes to SYSREG2 through SYSREG7 are acknowledged and
+          Lower-byte writes to SYSREG3 through SYSREG7 are acknowledged and
           ignored. Reads from this block and upper-byte-only accesses end in a
-          bus error.
+          bus error, and so does any user-mode access.
         </p>
       </section>
 
       <section id="8-bit-peripheral-addressing">
-        <h2>7. 8-bit Peripheral Addressing</h2>
+        <h2>8. 8-bit Peripheral Addressing</h2>
         <p>
           The 8-bit peripherals connect to <code>D7..D0</code> and use
           <code>/LDS</code>. As a result, consecutive peripheral registers are
@@ -732,7 +927,7 @@
       </section>
 
       <section id="dram-organization">
-        <h2>8. DRAM Organization</h2>
+        <h2>9. DRAM Organization</h2>
         <p>
           Two 2 MiB banks provide 4 MiB of system DRAM. Each bank uses four 1M x
           4 devices to form the computer's 16-bit data width.

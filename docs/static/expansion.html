@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Expansion Slots, Revision 1.1</title>
+    <title>68EC000 Computer - Expansion Slots, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,15 +14,23 @@
         requirements. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 1.1 records that memory-map revision 1.2 gave I/O slot 9 to the
-        <a href="pit.html">MC68230 PI/T</a>. No connector contact, signal,
-        window, or card rule changes.
+        Revision 2.0 follows memory map 2.0. Each slot's I/O window sits in the
+        protected I/O region and answers supervisor cycles only, while its 2 MiB
+        memory window stays open to user-mode code and is not paged. Card
+        drivers therefore run as BIOS code or as supervisor-mode extensions. No
+        connector contact, signal, window, or electrical rule changes, but the
+        unimplemented regions that a future third and fourth window might have
+        used are now the page-table aperture.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.1 pre-layout design; board layout and assembled-system
+          Revision 2.0 pre-layout design; board layout and assembled-system
           checks remain
+        </dd>
+        <dt>Privilege</dt>
+        <dd>
+          I/O windows supervisor only; memory windows open to user mode
         </dd>
         <dt>Slots</dt>
         <dd>Two front-loading, power-off insertion slots</dd>
@@ -122,12 +130,35 @@
           registers or memory within its assigned window.
         </p>
         <p>
-          <code>EXP_MEM5_n</code>, <code>EXP_MEM6_n</code>, and
-          <code>IO10_n..IO14_n</code> remain reserved motherboard decode
-          outputs. They do not reach either connector, and accesses to their
-          unimplemented ranges time out under memory-map revision 1.2.
-          <code>IO9_n</code> now selects the PI/T on the motherboard and is no
-          longer available for a future connector route.
+          The two windows carry different privilege. <code>IO6_n</code> and
+          <code>IO7_n</code> come from the top I/O decoder, which the
+          motherboard closes to user-mode cycles, so a card's registers answer
+          supervisor cycles only and a user-mode access to them takes a bus
+          error.
+          <code>EXP_MEM2_n</code> and <code>EXP_MEM3_n</code> carry no privilege
+          test and no translation, so a card that presents plain memory can be
+          handed to an application directly, at a fixed address rather than
+          through its page table. Put control registers in the I/O window
+          and bulk data in the memory window; see
+          <a href="bus-and-decode.html#supervisor-protection">Supervisor
+          Protection</a>.
+        </p>
+        <p>
+          A card cannot bypass the protection, because the slots have no bus
+          mastering. A card that could drive the address bus would see no
+          <code>FC2</code> test at all, which is one more reason the interface
+          leaves <code>/BR</code> and <code>/BGACK</code> off the connector.
+        </p>
+        <p>
+          <code>EXP_MEM5_n</code> and <code>EXP_MEM6_n</code> no longer select
+          nothing. Memory-map revision 2.0 gives
+          <code>$A00000-$DFFFFF</code> to the page-table aperture in
+          <a href="paging.html">Paging</a>, so those two selects reach the page
+          unit and the address space behind them is no longer available for a
+          third and fourth expansion memory window. <code>IO9_n</code> selects
+          the PI/T and <code>IO10_n</code> the page-unit control registers, so
+          the only decode outputs still without a destination are
+          <code>IO11_n</code> through <code>IO14_n</code>.
         </p>
       </section>
       <section id="mechanical">
@@ -832,7 +863,8 @@ R_W = 0: CPU B port  --&gt; card A port</code></pre>
           The bus has no enumeration register. System configuration identifies
           the card and driver in each physical slot. Probing an empty slot
           causes a bus error, so discovery code needs a temporary bus-error
-          handler or saved configuration.
+          handler or saved configuration. Probing runs in the BIOS, which is the
+          only code that can reach the I/O windows.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -865,7 +897,11 @@ R_W = 0: CPU B port  --&gt; card A port</code></pre>
           Drivers use byte operations for 8-bit registers unless a card defines
           the unused word byte. The shared level-3 handler polls both card
           drivers, clears every reported cause, and polls again if
-          <code>EXP_IRQ_n</code> stays low.
+          <code>EXP_IRQ_n</code> stays low. Every address in the two I/O columns
+          is supervisor only, so a driver runs inside the BIOS and exposes its
+          card to applications through BIOS services. The memory column needs no
+          privilege, so a driver may hand a memory window to an application once
+          it has configured the card.
         </p>
       </section>
       <section id="example">

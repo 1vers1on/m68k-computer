@@ -18,6 +18,20 @@
       </p>
 
       <p>
+        Revision 2.0 adds hardware memory protection and paging. The motherboard
+        reads <code>FC2</code> and refuses user-mode access to every I/O
+        register and to the firmware ROM, so applications reach hardware only by
+        calling the BIOS. Main memory goes through a page table: each program
+        gets its own 4 MiB space built from 4 KiB pages, and it reaches only the
+        pages the BIOS mapped for it. The break is deliberate and no revision
+        1.x firmware runs on it. See
+        <a href="memory-map.html">Memory Map</a> for the rules,
+        <a href="bus-and-decode.html#supervisor-protection">Bus and Address
+        Decode</a> for the protection circuit, and
+        <a href="paging.html">Paging</a> for the page unit.
+      </p>
+
+      <p>
         Claude and Codex were used to help format and put my ideas into the
         design documents.
       </p>
@@ -58,6 +72,12 @@
           volume control, and 3.5 mm output
         </dd>
 
+        <dt>Memory protection</dt>
+        <dd>
+          Supervisor-only I/O and firmware in a 16V8, and 4 KiB paged main
+          memory in a MACH210 with a 32K x 16 page table
+        </dd>
+
         <dt>Parallel I/O and timer</dt>
         <dd>
           MC68230P10 PI/T driving a bit-banged monitor DDC channel, a 34-pin
@@ -85,23 +105,24 @@
           <tbody>
             <tr>
               <td><a href="memory-map.html">Memory Map</a></td>
-              <td>Revision 1.2; address specification frozen</td>
+              <td>Revision 2.0; address specification frozen</td>
               <td>
-                Address ranges, I/O slots, boot overlay, peripheral registers,
-                and DRAM organization.
+                Address ranges, privilege attributes, I/O slots, boot overlay,
+                peripheral registers, and DRAM organization.
               </td>
             </tr>
             <tr>
               <td><a href="bus-and-decode.html">Bus and Address Decode</a></td>
-              <td>Revision 1.1 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
-                Bus cycles, address decoders, boot-overlay logic, worked decode
-                examples, timing, and bus termination.
+                Bus cycles, address decoders, supervisor protection,
+                boot-overlay logic, worked decode examples, timing, and bus
+                termination.
               </td>
             </tr>
             <tr>
               <td><a href="clock-and-reset.html">Clock and Reset</a></td>
-              <td>Revision 1.1 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 10 MHz clock, the DRAM and I/O clock buffers, and active-low
                 reset generation.
@@ -117,7 +138,7 @@
             </tr>
             <tr>
               <td><a href="interrupts.html">Interrupts</a></td>
-              <td>Revision 1.1 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 Priority encoding, acknowledge decode, autovector and the MFP
                 and PI/T vectors, and spurious-interrupt handling.
@@ -125,32 +146,45 @@
             </tr>
             <tr>
               <td><a href="system-control.html">System Control</a></td>
-              <td>Revision 1.0</td>
-              <td>Boot-overlay and debug-register behavior.</td>
+              <td>Revision 2.0</td>
+              <td>
+                Boot-overlay, VGA window grant, and debug-register behavior.
+              </td>
             </tr>
             <tr>
               <td><a href="debug-display.html">Debug Display</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>Two-digit hexadecimal seven-segment display.</td>
             </tr>
             <tr>
+              <td><a href="paging.html">Paging</a></td>
+              <td>Revision 2.0 pre-layout design</td>
+              <td>
+                Page table format and storage, table aperture, control
+                registers, address translation, page faults, and the firmware
+                rules the privilege model rests on.
+              </td>
+            </tr>
+            <tr>
               <td><a href="dram.html">DRAM</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 DRAM organization, discrete controller, refresh, initialization,
-                timing, electrical checks, and assembled-board acceptance.
+                timing, electrical checks, and assembled-board acceptance. Its
+                column address and bank requests now come from the page unit.
               </td>
             </tr>
             <tr>
               <td><a href="firmware-rom.html">Firmware ROM</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
-                AT28C256 organization, read-only wiring, and completion timing.
+                AT28C256 organization, read-only wiring, completion timing, and
+                the BIOS call gate.
               </td>
             </tr>
             <tr>
               <td><a href="mfp.html">MC68901 MFP</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 Bus interface, register map, timers, interrupt routing,
                 bidirectional PS/2 keyboard, and MAX232 RS-232 port.
@@ -158,7 +192,7 @@
             </tr>
             <tr>
               <td><a href="floppy.html">Floppy Controller</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 Intel 82077AA-1 bus adapter, programmed-I/O interface, and two
                 Mitsumi D359M3D drives.
@@ -166,7 +200,7 @@
             </tr>
             <tr>
               <td><a href="vga.html">CL-GD5428 VGA</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 ISA-mode bus adapter, swapped byte lanes, linear 2 MiB aperture,
                 display memory, configuration EEPROM, dedicated clock, DE-15
@@ -175,7 +209,7 @@
             </tr>
             <tr>
               <td><a href="opl3.html">YMF262 OPL3</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 FM-synthesis bus adapter, dedicated clock, reset, two YAC512
                 converters, stereo mixing, volume control, and headphone output.
@@ -183,7 +217,7 @@
             </tr>
             <tr>
               <td><a href="midi.html">MC6850 MIDI</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 MC6850 bus adapter, register map, clocking, interrupts, and
                 isolated MIDI IN, OUT, and hardware THRU.
@@ -191,7 +225,7 @@
             </tr>
             <tr>
               <td><a href="rtc.html">DS1285 RTC</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 Multiplexed-bus adapter, register map, timing, crystal, battery,
                 reset, firmware access rules, and interrupt wiring.
@@ -199,7 +233,7 @@
             </tr>
             <tr>
               <td><a href="pit.html">MC68230 PI/T</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 Bus connection, register map, bit-banged monitor DDC channel,
                 user I/O header, 24-bit timer, and two vectored interrupt
@@ -208,7 +242,7 @@
             </tr>
             <tr>
               <td><a href="expansion.html">Expansion Slots</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 2.0 pre-layout design</td>
               <td>
                 Two front-loading DIN 41612 slots, fixed address windows,
                 buffered bus interface, pinout, power, card rules, and example
@@ -477,7 +511,35 @@
               <td>
                 DRAM timing, decode, state, and initialization logic. Two F21
                 packages form the motherboard completion-response tree, and the
-                F10 qualifies the DRAM acknowledgement with the raw bus strobes.
+                F10 qualifies the DRAM acknowledgement with the raw bus
+                strobes.
+              </td>
+            </tr>
+            <tr>
+              <td>AMD MACH210</td>
+              <td><a href="datasheets/MACH210A-7.PDF">PDF</a></td>
+              <td>
+                <code>U_PAGE_MMU</code>, the page unit's control and permission
+                logic. A MACH210-12JC in a 44-pin PLCC.
+              </td>
+            </tr>
+            <tr>
+              <td>AMD PALCE16V8 / PALCE20V8</td>
+              <td>
+                <a href="datasheets/PALCE16V8.PDF">16V8</a>,
+                <a href="datasheets/PALCE20V8.PDF">20V8</a>
+              </td>
+              <td>
+                <code>U_PROT</code>, the supervisor protection decode and the
+                combined bus error, in a PALCE16V8Q-15JC. The 20V8 is spare.
+              </td>
+            </tr>
+            <tr>
+              <td>Cypress CY7C199</td>
+              <td><a href="datasheets/CY7C199.PDF">PDF</a></td>
+              <td>
+                32K x 8 static RAM; two CY7C199-20VC hold the 32K x 16 page
+                table.
               </td>
             </tr>
             <tr>

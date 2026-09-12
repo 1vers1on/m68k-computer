@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - System Control, Revision 1.0</title>
+    <title>68EC000 Computer - System Control, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,19 +14,28 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        This block controls the boot ROM overlay and stores the debug byte. The
+        This block controls the boot ROM overlay and the VGA window grant, and
+        stores the debug byte. The
         <a href="bus-and-decode.html">bus and address decode document</a>
-        defines the decoder, write qualification, and overlay flip-flop at
-        revision 1.0. This page summarizes the register behavior and the parts
+        defines the decoder, write qualification, and both flip-flops at
+        revision 2.0. This page summarizes the register behavior and the parts
         specific to this block.
+      </p>
+      <p>
+        Revision 2.0 makes the block supervisor only and gives
+        <code>SYSREG2</code> the VGA window grant. The overlay control, the
+        debug register, and the decoder wiring carry over from revision 1.0
+        unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0; the decoder, write qualification, and overlay flip-flop
+          Revision 2.0; the decoder, write qualification, and both flip-flops
           are fixed in the
           <a href="bus-and-decode.html">bus and address decode document</a>
         </dd>
+        <dt>Privilege</dt>
+        <dd>Supervisor only; a user-mode access ends in a bus error</dd>
         <dt>Address range</dt>
         <dd><code>$E80000</code>-<code>$E9FFFF</code> (I/O slot 4)</dd>
         <dt>Data path</dt>
@@ -44,6 +53,7 @@
         <li><a href="#access-rules">Access Rules</a></li>
         <li><a href="#registers">Registers</a></li>
         <li><a href="#boot-overlay-control">Boot Overlay Control</a></li>
+        <li><a href="#vga-window-grant">VGA Window Grant</a></li>
         <li><a href="#debug-register">Debug Register</a></li>
       </ol>
     </nav>
@@ -61,12 +71,19 @@
         </p>
         <p>
           A lower-byte write to any of the eight registers is acknowledged.
-          Writes to <code>SYSREG2</code> through <code>SYSREG7</code> are
+          Writes to <code>SYSREG3</code> through <code>SYSREG7</code> are
           acknowledged and ignored. Reads from this block and upper-byte-only
           accesses are not acknowledged and end in a bus error at the timeout.
           The <a href="bus-and-decode.html">bus and address decode document</a>
           gives the decoder connections and the
           <code>SYSREG_DTACK_n</code> equations.
+        </p>
+        <p>
+          The slot sits inside the protected I/O region, so only supervisor code
+          reaches it. A user-mode access to any address in the slot leaves
+          <code>IO4_n</code> high and takes an immediate bus error; see
+          <a href="bus-and-decode.html#supervisor-protection">Supervisor
+          Protection</a>.
         </p>
       </section>
       <section id="registers">
@@ -99,8 +116,12 @@
             </tr>
             <tr>
               <td><code>$E80005</code></td>
-              <td>SYSREG2</td>
-              <td>Reserved.</td>
+              <td>SYSREG2 / VGAGRANT</td>
+              <td>
+                Write-only. <code>D0</code> high opens the CL-GD5428
+                host-memory window to user-mode cycles; <code>D0</code> low
+                closes it. <code>D7..D1</code> are ignored.
+              </td>
             </tr>
             <tr>
               <td><code>$E80007</code></td>
@@ -163,8 +184,33 @@
           bring-up sequence that ends with it.
         </p>
       </section>
+      <section id="vga-window-grant">
+        <h2>4. VGA Window Grant</h2>
+        <p>
+          The CL-GD5428 host-memory window at <code>$800000-$9FFFFF</code> is
+          supervisor only by default, which would force every pixel through a
+          BIOS call. A write to <code>SYSREG2 / VGAGRANT</code> with
+          <code>D0</code> set opens the window to the running user-mode program,
+          and a write with <code>D0</code> clear closes it again.
+        </p>
+        <pre><code>GRANT_WRITE_n = SYSREG2_n OR R/W
+GRANT_CLK     = NOT GRANT_WRITE_n</code></pre>
+        <p>
+          The second flip-flop of <code>U_OVERLAY</code> stores
+          <code>D0</code> on the rising edge of <code>GRANT_CLK</code>.
+          <code>RESET_n</code> drives its clear, so a board reset closes the
+          window. Unlike the overlay bit, this one is not one-way: the BIOS
+          opens and closes it as it starts and stops programs.
+        </p>
+        <p>
+          The grant covers the memory aperture only. The CL-GD5428 control
+          registers in I/O slot 3 stay supervisor only, so display mode, pitch,
+          and memory banking remain BIOS decisions and a program cannot point
+          the controller at memory it does not own.
+        </p>
+      </section>
       <section id="debug-register">
-        <h2>4. Debug Register</h2>
+        <h2>5. Debug Register</h2>
         <p>
           A write to <code>SYSREG1 / DEBUG</code> stores <code>D7..D0</code> in
           <code>U_DEBUG</code>, an <code>SN74HCT574N</code> with its output
@@ -180,7 +226,9 @@ DEBUG_CLK     = NOT DEBUG_WRITE_n</code></pre>
           on <code>DEBUG_Q7..DEBUG_Q0</code>. Its two nibbles feed the
           <a href="debug-display.html">debug display circuit</a>, which converts
           each to a hexadecimal digit. The register is write-only; a read ends
-          in a bus error like the rest of the block.
+          in a bus error like the rest of the block. Application code reaches
+          the display through a BIOS call rather than by writing this
+          register.
         </p>
       </section>
     </main>

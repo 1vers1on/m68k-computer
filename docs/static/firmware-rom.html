@@ -2,22 +2,33 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Firmware ROM, Revision 1.0</title>
+    <title>68EC000 Computer - Firmware ROM, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
     <header>
       <h1>Firmware ROM</h1>
       <p>
-        Firmware storage and read-cycle timing.
+        Firmware storage, read-cycle timing, and the BIOS call gate.
         <a href="index.html">Return to the main page</a>.
+      </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The firmware EEPROM and its boot
+        alias are both supervisor only, so application code reads neither. This
+        document gains section 13, which defines the <code>TRAP</code> entry
+        that application code uses instead, and the argument checks that entry
+        needs now that callers run in a translated address space. The EEPROM
+        wiring, read timing, and completion logic carry over from revision 1.0
+        unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; assembled-board measurements and
+          Revision 2.0 pre-layout design; assembled-board measurements and
           firmware-image checks remain
         </dd>
+        <dt>Privilege</dt>
+        <dd>Supervisor only, in both mappings</dd>
         <dt>Capacity</dt>
         <dd>128 KiB, 16-bit wide, always read-only</dd>
         <dt>Parts</dt>
@@ -58,6 +69,7 @@
         <li>
           <a href="#boot-vector-verification">Boot-Vector Verification</a>
         </li>
+        <li><a href="#bios-call-gate">BIOS Call Gate</a></li>
         <li>
           <a href="#electrical-compatibility-and-fanout"
             >Electrical Compatibility and Fanout</a
@@ -1631,8 +1643,199 @@ ROM1_LO[i] = F[0x10001 + 2*i]
         </p>
       </section>
 
+      <section id="bios-call-gate">
+        <h2>13. BIOS Call Gate</h2>
+        <p>
+          The motherboard closes the I/O region and the firmware EEPROM to
+          user-mode cycles, and the <a href="paging.html">page unit</a> gives
+          each program its own view of main memory. An application reaches
+          hardware by executing <code>TRAP #0</code>, which the processor takes
+          as an exception: it saves the status register, switches to supervisor
+          mode, and vectors through <code>$000080</code> into BIOS code. The
+          protection circuit is in
+          <a href="bus-and-decode.html#supervisor-protection">Bus and Address
+          Decode</a>.
+        </p>
+
+        <h3>Call Convention</h3>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            TRAP #0 register use
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Register</th>
+              <th scope="col">On entry</th>
+              <th scope="col">On return</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>D0.W</code></td>
+              <td>Service number</td>
+              <td>Result code; negative values are errors</td>
+            </tr>
+            <tr>
+              <td><code>D1</code>, <code>D2</code></td>
+              <td>Scalar arguments</td>
+              <td>Undefined</td>
+            </tr>
+            <tr>
+              <td><code>A0</code>, <code>A1</code></td>
+              <td>Buffer pointers</td>
+              <td>Undefined</td>
+            </tr>
+            <tr>
+              <td><code>D3..D7</code>, <code>A2..A6</code></td>
+              <td>Caller state</td>
+              <td>Preserved</td>
+            </tr>
+            <tr>
+              <td><code>A7</code></td>
+              <td>User stack pointer</td>
+              <td>Unchanged</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The handler runs on the supervisor stack inside BIOS private memory,
+          so a call costs the caller no user stack beyond the instruction
+          itself. It returns with <code>RTE</code>, which restores the saved
+          status register and drops the processor back to user mode.
+        </p>
+
+        <h3>Argument Checking</h3>
+        <p>
+          The caller is untrusted. The handler runs in supervisor mode, where
+          the protection hardware permits everything, so it has to check every
+          argument itself before it acts.
+        </p>
+        <ul>
+          <li>
+            Reject a service number outside the implemented range.
+          </li>
+          <li>
+            Translate every pointer in software before touching it. A caller's
+            pointer is a logical address in its own context, and the handler
+            runs untranslated, so the two mean different memory. Walk the
+            caller's page table, reject the call if any page the buffer covers
+            has <code>V</code> clear, and reject a write to a page with
+            <code>W</code> clear.
+          </li>
+          <li>
+            Check every page a buffer spans, not just its first. A 4 KiB page
+            boundary can fall anywhere inside it.
+          </li>
+          <li>
+            Copy arguments into BIOS memory before validating them, so the
+            values cannot change between the check and the use.
+          </li>
+        </ul>
+
+        <p>
+          The page unit does not check on the BIOS's behalf. Supervisor cycles
+          bypass translation, so a handler that dereferences a caller's pointer
+          directly reads whatever physical address that number happens to name,
+          which is a hole the size of memory. Rule two is the one that closes
+          it.
+        </p>
+
+        <h3>Vector Table</h3>
+        <p>
+          The firmware writes the vector table into physical
+          <code>$000000-$0003FF</code> after it disables the boot overlay and
+          before it leaves supervisor mode. That memory is physical frame 0, and
+          the BIOS never maps frame 0 into a user context, so an application
+          cannot redirect a vector and enter supervisor mode with its own
+          code.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Vectors the protection scheme depends on
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Vector</th>
+              <th scope="col">Address</th>
+              <th scope="col">Handler duty</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2, bus error</td>
+              <td><code>$000008</code></td>
+              <td>
+                Classify the fault and terminate the program. See below.
+              </td>
+            </tr>
+            <tr>
+              <td>3, address error</td>
+              <td><code>$00000C</code></td>
+              <td>Terminate the program.</td>
+            </tr>
+            <tr>
+              <td>8, privilege violation</td>
+              <td><code>$000020</code></td>
+              <td>
+                Terminate the program. A user-mode
+                <code>MOVE to SR</code> or <code>STOP</code> lands here.
+              </td>
+            </tr>
+            <tr>
+              <td>32, TRAP #0</td>
+              <td><code>$000080</code></td>
+              <td>BIOS service dispatch.</td>
+            </tr>
+            <tr>
+              <td>33 through 47, TRAP #1 through #15</td>
+              <td><code>$000084-$0000BC</code></td>
+              <td>
+                Unassigned. Point them at the terminate path rather than
+                leaving them uninitialised.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Bus-Error Handling</h3>
+        <p>
+          A protection violation, a page fault, and an access to an unmapped
+          address all arrive as vector 2. The MC68EC000 bus-error frame does not
+          support instruction continuation, so the handler cannot resume the
+          faulting instruction in any of the three cases; it reports the fault
+          and terminates the program. That is also why the page unit cannot page
+          on demand.
+        </p>
+        <p>
+          To tell them apart, compare the stacked fault address against the
+          <a href="memory-map.html">map</a> and read the supervisor bit in the
+          stacked status register. With that bit clear, a fault in
+          <code>$800000-$9FFFFF</code> or <code>$E00000-$FFFFFF</code> is a
+          protection violation; one in <code>$000000-$3FFFFF</code> is a page
+          fault whose cause the caller's table entry gives exactly; and one in
+          <code>$A00000-$DFFFFF</code> is a program reaching for the page-table
+          aperture, which <code>U_PAGE_MMU</code> refuses on its own. Anything
+          else is an unanswered cycle, which the 51.2 microsecond bus timeout
+          produced. Hardware carries no status bit for this, because the ranges
+          are fixed and the table is readable.
+        </p>
+        <p>
+          A bus error taken while the processor is already in supervisor mode
+          means the BIOS itself addressed something that does not answer. Treat
+          it as a firmware fault: write a code to the debug display at
+          <code>$E80003</code> and halt rather than continue.
+        </p>
+        <p>
+          Sources: <a href="datasheets/M68000UM.pdf">M68000 User's Manual,
+          section 6 (exception processing)</a>,
+          <a href="memory-map.html">Memory Map</a>, and
+          <a href="bus-and-decode.html#supervisor-protection">Bus and Address
+          Decode</a>.
+        </p>
+      </section>
+
       <section id="electrical-compatibility-and-fanout">
-        <h2>13. Electrical Compatibility and Fanout</h2>
+        <h2>14. Electrical Compatibility and Fanout</h2>
         <p>
           Use the motherboard's regulated 5 V +/-5% rail. This lies within the
           EEPROM and HCT/AHCT 4.5-5.5 V operating ranges. All interfaces here
@@ -1809,7 +2012,7 @@ ROM1_LO[i] = F[0x10001 + 2*i]
       </section>
 
       <section id="decoupling-pcb-notes">
-        <h2>14. Decoupling / PCB Notes</h2>
+        <h2>15. Decoupling / PCB Notes</h2>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Local power and layout connections
@@ -1900,7 +2103,7 @@ ROM1_LO[i] = F[0x10001 + 2*i]
       </section>
 
       <section id="internal-signal-reference">
-        <h2>15. Internal Signal Reference</h2>
+        <h2>16. Internal Signal Reference</h2>
         <p>
           Aliases below identify the same wire. Q1-Q4 are active-high stored
           states; their names do not indicate CPU wait-state numbers.

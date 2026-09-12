@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Debug Display, Revision 1.0</title>
+    <title>68EC000 Computer - Debug Display, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -12,10 +12,20 @@
         Motherboard hexadecimal display logic for the stored debug byte.
         <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The display follows
+        <code>U_DEBUG</code>, which the CPU loads by writing
+        <code>SYSREG1</code> in I/O slot 4. That slot is inside the protected
+        I/O region, so the byte on the digits comes from firmware or from a BIOS
+        call rather than from a user-mode write. Every circuit, register
+        address, and timing figure carries over from revision 1.0 unchanged.
+      </p>
       <dl>
+        <dt>Privilege</dt>
+        <dd>Written through supervisor-only SYSREG1</dd>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; brightness and package temperature
+          Revision 2.0 pre-layout design; brightness and package temperature
           remain assembled-board checks
         </dd>
         <dt>Decoder</dt>

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - DS1285 RTC, Revision 1.0</title>
+    <title>68EC000 Computer - DS1285 RTC, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -14,9 +14,19 @@
         adapter, battery and crystal connections, and interrupt wiring.
         <a href="index.html">Return to the main page</a>.
       </p>
+      <p>
+        Revision 2.0 follows memory map 2.0. The DS1285 sits in I/O slot 8,
+        inside the protected I/O region, so its registers and its battery-backed
+        CMOS RAM answer supervisor cycles only. The BIOS owns the index and data
+        sequence, which also keeps one program from leaving the device mid
+        access. Every circuit, register address, and timing figure carries over
+        from revision 1.0 unchanged.
+      </p>
       <dl>
+        <dt>Privilege</dt>
+        <dd>Supervisor only; application code calls the BIOS</dd>
         <dt>Document status</dt>
-        <dd>Revision 1.0 pre-layout design</dd>
+        <dd>Revision 2.0 pre-layout design</dd>
         <dt>RTC</dt>
         <dd>Dallas DS1285, 24-pin plastic DIP</dd>
         <dt>Bus connection</dt>
