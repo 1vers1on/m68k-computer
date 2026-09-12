@@ -60,3 +60,6 @@ nbproject/
 .tags
 tags
 TAGS
+
+__pycache__/
+*.py[cod]

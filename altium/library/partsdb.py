@@ -6,19 +6,29 @@ Runs on Windows, macOS and Linux. Only needs the Python standard library
 (tkinter + sqlite3). Point Altium's DbLib at the same .db file over the
 SQLite ODBC driver; this app maintains the views that Altium reads.
 
+Symbol and footprint libraries sitting beside this file are picked up on
+startup, so the library fields offer the real component names, and the ten
+symbols and footprints you used last stay at the top of those lists.
+
     python3 partsdb.py [path/to/parts.db]
+    python3 partsdb.py --libs          # list the libraries found, no GUI
     python3 partsdb.py --selftest      # no GUI, checks the db/parse logic
 """
 
 import os
 import re
 import sqlite3
+import struct
 import sys
 from datetime import date
 from pathlib import Path
 
 APP_NAME = "Parts"
 CONFIG = Path.home() / ".partsdb_path"
+SCRIPT_DIR = Path(__file__).resolve().parent
+RECENT_LIMIT = 10
+MUTED = "#555"
+WARN = "#a00"
 
 
 # --------------------------------------------------------------------------
@@ -92,6 +102,245 @@ def format_value(v, kind):
         if abs(v) >= 10 ** exp or exp == -12:
             return f"{v / 10 ** exp:g} {prefix}{unit}"
     return f"{v:g} {unit}"
+
+
+# --------------------------------------------------------------------------
+# altium library discovery
+# --------------------------------------------------------------------------
+
+LIB_KINDS = {
+    "symbol": (".schlib", "library_ref", "library_path"),
+    "footprint": (".pcblib", "footprint_ref", "footprint_path"),
+}
+
+REF_KIND = {ref: kind for kind, (_, ref, _) in LIB_KINDS.items()}
+PATH_KIND = {path: kind for kind, (_, _, path) in LIB_KINDS.items()}
+LIB_FIELDS = set(REF_KIND) | set(PATH_KIND)
+
+SKIP_DIRS = {"history", "__pycache__", "project outputs"}
+RESERVED_STORAGES = {"fileheader", "filerecordheader", "fileversioninfo",
+                     "sectionkeys", "storage", "library", "additional",
+                     "root entry"}
+
+CFB_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+CFB_MAXREGSECT = 0xFFFFFFFA
+
+
+class CompoundFile:
+    """Reader for the OLE container an Altium library is stored in."""
+
+    def __init__(self, path):
+        self.raw = Path(path).read_bytes()
+        if self.raw[:8] != CFB_SIGNATURE:
+            raise ValueError("not a compound file")
+        self.ssize = 1 << struct.unpack_from("<H", self.raw, 30)[0]
+        self.msize = 1 << struct.unpack_from("<H", self.raw, 32)[0]
+        self.cutoff = struct.unpack_from("<I", self.raw, 56)[0]
+        fat_count, dir_start = struct.unpack_from("<II", self.raw, 44)
+        mini_start, mini_count = struct.unpack_from("<II", self.raw, 60)
+        difat_start, difat_count = struct.unpack_from("<II", self.raw, 68)
+        difat = list(struct.unpack_from("<109I", self.raw, 76))
+        sector = difat_start
+        for _ in range(difat_count):
+            block = self._sector(sector)
+            if len(block) < self.ssize:
+                break
+            difat += struct.unpack_from("<%dI" % (self.ssize // 4 - 1), block)
+            sector = struct.unpack_from("<I", block, self.ssize - 4)[0]
+        self.fat = []
+        for sector in difat[:fat_count]:
+            block = self._sector(sector)
+            if len(block) < self.ssize:
+                break
+            self.fat += struct.unpack_from("<%dI" % (self.ssize // 4), block)
+        self.entries = self._directory(dir_start)
+        self.minifat = []
+        if mini_count:
+            block = self._chain(mini_start)
+            self.minifat = list(
+                struct.unpack_from("<%dI" % (len(block) // 4), block))
+        self.ministream = (self._chain(self.entries[0][5])
+                           if self.entries else b"")
+
+    def _sector(self, index):
+        if index >= CFB_MAXREGSECT:
+            return b""
+        start = 512 + index * self.ssize
+        return self.raw[start:start + self.ssize]
+
+    def _chain(self, start):
+        out, seen, index = [], set(), start
+        while (index < CFB_MAXREGSECT and index < len(self.fat)
+               and index not in seen):
+            seen.add(index)
+            out.append(self._sector(index))
+            index = self.fat[index]
+        return b"".join(out)
+
+    def _mini_chain(self, start, size):
+        out, seen, index = [], set(), start
+        while (index < CFB_MAXREGSECT and index < len(self.minifat)
+               and index not in seen):
+            seen.add(index)
+            out.append(
+                self.ministream[index * self.msize:(index + 1) * self.msize])
+            index = self.minifat[index]
+        return b"".join(out)[:size]
+
+    def _directory(self, start):
+        data = self._chain(start)
+        out = []
+        for i in range(len(data) // 128):
+            at = i * 128
+            length = min(struct.unpack_from("<H", data, at + 64)[0], 64)
+            name = data[at:at + max(0, length - 2)].decode("utf-16-le",
+                                                           "replace")
+            left, right, child = struct.unpack_from("<III", data, at + 68)
+            sector, size = struct.unpack_from("<IQ", data, at + 116)
+            out.append((name, data[at + 66], left, right, child, sector, size))
+        return out
+
+    def children(self, index=0):
+        if index >= len(self.entries):
+            return []
+        out, stack = [], [self.entries[index][4]]
+        while stack:
+            i = stack.pop()
+            if i >= len(self.entries):
+                continue
+            entry = self.entries[i]
+            out.append((i, entry))
+            stack += [entry[2], entry[3]]
+        return out
+
+    def find(self, *names):
+        index = 0
+        for name in names:
+            for i, entry in self.children(index):
+                if entry[0].lower() == name.lower():
+                    index = i
+                    break
+            else:
+                return None
+        return index
+
+    def read(self, *names):
+        index = self.find(*names)
+        if index is None:
+            return b""
+        sector, size = self.entries[index][5], self.entries[index][6]
+        if size < self.cutoff:
+            return self._mini_chain(sector, size)
+        return self._chain(sector)[:size]
+
+
+def _dedupe(names):
+    out, seen = [], set()
+    for name in names:
+        name = (name or "").strip().strip("\x00")
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
+def library_names(path, kind):
+    """Every component name in a .SchLib or .PcbLib. [] if unreadable.
+
+    Read from the library index rather than the container's own directory,
+    because the container truncates a name at 31 characters and a truncated
+    footprint reference would not resolve in Altium.
+    """
+    try:
+        cfb = CompoundFile(path)
+        if kind == "symbol":
+            text = cfb.read("FileHeader").decode("latin-1")
+            names = re.findall(r"\|LibRef\d+=([^|\x00]*)", text)
+        else:
+            text = cfb.read("Library", "ComponentParamsTOC",
+                            "Data").decode("latin-1")
+            names = []
+            for record in text.split("\r\n"):
+                head, found, rest = record.partition("Name=")
+                if found and len(head) <= 8:
+                    names.append(rest.split("|")[0])
+        if not names:
+            names = [entry[0] for _, entry in cfb.children()
+                     if entry[1] == 1
+                     and entry[0].lower() not in RESERVED_STORAGES]
+    except Exception:
+        return []
+    return sorted(_dedupe(names), key=str.lower)
+
+
+def scan_libraries(base=None):
+    """{'symbol': {relative path: [names]}, 'footprint': {...}}"""
+    base = Path(base) if base else SCRIPT_DIR
+    found = {kind: {} for kind in LIB_KINDS}
+    if not base.is_dir():
+        return found
+    for root, dirs, files in os.walk(str(base)):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".")
+                         and d.lower() not in SKIP_DIRS)
+        for name in sorted(files):
+            suffix = Path(name).suffix.lower()
+            for kind, (ext, _, _) in LIB_KINDS.items():
+                if suffix == ext:
+                    full = Path(root) / name
+                    found[kind][str(full.relative_to(base))] = library_names(
+                        full, kind)
+    return found
+
+
+def _norm(path):
+    return str(path or "").strip().replace("/", "\\").lower()
+
+
+def match_library(libs, path):
+    """The scanned library a stored path points at, or ''.
+
+    Falls back to the file name, so a path written relative to somewhere
+    else - the way Altium usually stores it - still resolves.
+    """
+    want = _norm(path)
+    if not want:
+        return ""
+    for rel in libs:
+        if _norm(rel) == want:
+            return rel
+    tail = want.rsplit("\\", 1)[-1]
+    for rel in libs:
+        if _norm(rel).rsplit("\\", 1)[-1] == tail:
+            return rel
+    return ""
+
+
+def find_library(libs, ref):
+    """The scanned library holding a component, or ''."""
+    want = (ref or "").strip().lower()
+    if not want:
+        return ""
+    for rel, names in libs.items():
+        if any(name.lower() == want for name in names):
+            return rel
+    return ""
+
+
+def lib_status(libs, ref, path):
+    """('ok' | 'missing' | 'elsewhere' | '', library file name)"""
+    ref = (ref or "").strip()
+    if not ref or not libs:
+        return "", ""
+    rel = match_library(libs, path)
+    if rel and libs[rel]:
+        if any(name.lower() == ref.lower() for name in libs[rel]):
+            return "ok", Path(rel).name
+        return "missing", Path(rel).name
+    if not rel:
+        home = find_library(libs, ref)
+        if home:
+            return "elsewhere", Path(home).name
+    return "", Path(rel).name if rel else ""
 
 
 # --------------------------------------------------------------------------
@@ -189,10 +438,10 @@ TYPES = {
 
 # fields every part has, beyond the auto-managed ones
 COMMON_FIELDS = [
-    ("library_ref", "Symbol", None),
     ("library_path", "Symbol library", None),
-    ("footprint_ref", "Footprint", None),
+    ("library_ref", "Symbol", None),
     ("footprint_path", "Footprint library", None),
+    ("footprint_ref", "Footprint", None),
     ("mfr", "Manufacturer", None),
     ("mpn", "Manufacturer PN", None),
     ("supplier", "Supplier", ["Digi-Key", "Mouser", "LCSC", "Arrow", "Newark", ""]),
@@ -277,6 +526,14 @@ def build_schema(con):
           prefix TEXT PRIMARY KEY,
           last   INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS recent (
+          kind    TEXT NOT NULL,
+          ref     TEXT NOT NULL COLLATE NOCASE,
+          path    TEXT NOT NULL COLLATE NOCASE,
+          seq     INTEGER NOT NULL,
+          used_at TEXT NOT NULL,
+          PRIMARY KEY (kind, ref, path)
+        );
     """)
     for table, cols in EXT_SCHEMA.items():
         con.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
@@ -284,7 +541,20 @@ def build_schema(con):
               REFERENCES parts(part_number) ON DELETE CASCADE ON UPDATE CASCADE,
             {cols});""")
     rebuild_views(con)
+    seed_recent(con)
     con.commit()
+
+
+def seed_recent(con):
+    """Prime an empty recently used list from the parts already on file."""
+    if con.execute("SELECT 1 FROM recent LIMIT 1").fetchone():
+        return
+    for kind, (_, ref_col, path_col) in LIB_KINDS.items():
+        for row in con.execute(
+                f"SELECT {ref_col} AS ref, {path_col} AS path FROM parts "
+                f"WHERE IFNULL({ref_col}, '') <> '' "
+                "ORDER BY date_added, rowid").fetchall():
+            touch_recent(con, kind, row["ref"], row["path"])
 
 
 def rebuild_views(con):
@@ -354,6 +624,43 @@ def next_part_number(con, prefix):
     return pn
 
 
+def touch_recent(con, kind, ref, path):
+    """Move a symbol or footprint to the head of its recently used list.
+
+    Keyed case insensitively on the pair, so the same library entry never
+    appears twice however it was typed.
+    """
+    ref = (ref or "").strip()
+    if not ref:
+        return
+    seq = con.execute(
+        "SELECT IFNULL(MAX(seq), 0) + 1 FROM recent").fetchone()[0]
+    con.execute("INSERT INTO recent (kind, ref, path, seq, used_at) "
+                "VALUES (?, ?, ?, ?, datetime('now')) "
+                "ON CONFLICT(kind, ref, path) DO UPDATE SET "
+                "seq = excluded.seq, used_at = excluded.used_at",
+                (kind, ref, (path or "").strip(), seq))
+    con.execute("DELETE FROM recent WHERE kind = ? AND seq NOT IN "
+                "(SELECT seq FROM recent WHERE kind = ? "
+                "ORDER BY seq DESC LIMIT ?)", (kind, kind, RECENT_LIMIT))
+
+
+def recent_libs(con, kind):
+    """[(ref, path)] for a kind, most recently used first."""
+    return [(r["ref"], r["path"]) for r in con.execute(
+        "SELECT ref, path FROM recent WHERE kind = ? ORDER BY seq DESC "
+        "LIMIT ?", (kind, RECENT_LIMIT)).fetchall()]
+
+
+def last_libraries(con, type_name):
+    """The libraries the newest part of a type was built from."""
+    row = con.execute(
+        "SELECT library_ref, library_path, footprint_ref, footprint_path "
+        "FROM parts WHERE part_type = ? ORDER BY part_number DESC LIMIT 1",
+        (type_name,)).fetchone()
+    return {k: (row[k] or "") for k in row.keys()} if row else {}
+
+
 def save_part(con, type_name, data):
     """data: dict of every form field plus part_number ('' for a new part)."""
     spec = TYPES[type_name]
@@ -394,6 +701,8 @@ def save_part(con, type_name, data):
 
         _upsert(con, "parts", row, skip_update=("part_number", "date_added"))
         _upsert(con, spec["table"], ext, skip_update=("part_number",))
+        for kind, (_, ref_col, path_col) in LIB_KINDS.items():
+            touch_recent(con, kind, row.get(ref_col), row.get(path_col))
     return pn
 
 
@@ -408,7 +717,8 @@ def _upsert(con, table, row, skip_update=()):
     sets = [f"{c}=excluded.{c}" for c in cols if c not in skip_update]
     sql = (f"INSERT INTO {table} ({','.join(cols)}) "
            f"VALUES ({','.join('?' * len(cols))}) "
-           f"ON CONFLICT(part_number) DO UPDATE SET {', '.join(sets)}")
+           f"ON CONFLICT(part_number) "
+           + (f"DO UPDATE SET {', '.join(sets)}" if sets else "DO NOTHING"))
     con.execute(sql, [row[c] for c in cols])
 
 
@@ -482,8 +792,7 @@ def run_gui(db_path):
                 self.canvas.bind_all(seq, self._wheel, add="+")
 
         def _wheel(self, event):
-            if not str(self.canvas.winfo_containing(
-                    event.x_root, event.y_root)).startswith(str(self.canvas)):
+            if not self._over_canvas(event):
                 return
             if event.num == 4:
                 self.canvas.yview_scroll(-1, "units")
@@ -493,6 +802,26 @@ def run_gui(db_path):
                 self.canvas.yview_scroll(
                     -1 if event.delta > 0 else 1, "units")
 
+        def _over_canvas(self, event):
+            """Is the pointer over this frame, rather than an open list?
+
+            Asks Tcl for the window path instead of going through
+            winfo_containing, which raises on a combobox popdown: that
+            window belongs to Tk alone and has no Python widget to hand
+            back. A popdown is its own toplevel and is nested under the
+            combobox that owns it, so the toplevel is what tells the two
+            apart - and while one is open it scrolls itself.
+            """
+            under = self.canvas.tk.call(
+                "winfo", "containing", event.x_root, event.y_root)
+            if not under:
+                return False
+            if self.canvas.tk.call("winfo", "toplevel", under) != str(
+                    self.winfo_toplevel()):
+                return False
+            mine = str(self.canvas)
+            return under == mine or under.startswith(mine + ".")
+
     class PartPanel(ttk.Frame):
         def __init__(self, master, app, type_name):
             super().__init__(master, padding=8)
@@ -500,6 +829,8 @@ def run_gui(db_path):
             self.type_name = type_name
             self.spec = TYPES[type_name]
             self.vars = {}
+            self.widgets = {}
+            self.notes = {}
             self.current = None
             self.last_saved = {}
 
@@ -554,7 +885,7 @@ def run_gui(db_path):
             if self.spec["primary"]:
                 col, label, kind, _ = self.spec["primary"]
                 r = self._add_field(f, r, col, label, None)
-                self.readout = ttk.Label(f, text="", foreground="#555")
+                self.readout = ttk.Label(f, text="", foreground=MUTED)
                 self.readout.grid(row=r, column=1, sticky="w", pady=(0, 4))
                 r += 1
                 self.vars[col].trace_add("write", self._update_readout)
@@ -571,6 +902,11 @@ def run_gui(db_path):
 
             for col, label, choices in COMMON_FIELDS:
                 r = self._add_field(f, r, col, label, choices)
+                if col in REF_KIND:
+                    note = ttk.Label(f, text="", foreground=MUTED)
+                    note.grid(row=r, column=1, sticky="w", pady=(0, 4))
+                    self.notes[REF_KIND[col]] = note
+                    r += 1
 
             btns = ttk.Frame(f)
             btns.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(12, 0))
@@ -583,6 +919,10 @@ def run_gui(db_path):
             ttk.Button(btns, text="Delete",
                        command=self.delete).pack(side="right")
 
+            for col in LIB_FIELDS:
+                self.vars[col].trace_add(
+                    "write", lambda *_, c=col: self._lib_changed(c))
+            self.refresh_libraries()
             self.new()
             self.refresh()
 
@@ -591,12 +931,17 @@ def run_gui(db_path):
                                                padx=(0, 8), pady=2)
             var = tk.StringVar()
             self.vars[col] = var
-            if choices:
+            if col in LIB_FIELDS:
+                w = ttk.Combobox(parent, textvariable=var, values=())
+                w.bind("<<ComboboxSelected>>",
+                       lambda e, c=col: self._lib_picked(c))
+            elif choices:
                 w = ttk.Combobox(parent, textvariable=var, values=choices)
             else:
                 w = ttk.Entry(parent, textvariable=var)
             w.grid(row=row, column=1, sticky="ew", pady=2)
             w.bind("<Return>", lambda e: self.save())
+            self.widgets[col] = w
             return row + 1
 
         def _update_readout(self, *_):
@@ -604,13 +949,94 @@ def run_gui(db_path):
             v = parse_value(self.vars[col].get(), self.value_kind)
             raw = self.vars[col].get().strip()
             if not raw:
-                self.readout.config(text="", foreground="#555")
+                self.readout.config(text="", foreground=MUTED)
             elif v is None:
                 self.readout.config(text="cannot read that value",
-                                    foreground="#a00")
+                                    foreground=WARN)
             else:
                 self.readout.config(text="= " + format_value(v, self.value_kind),
-                                    foreground="#555")
+                                    foreground=MUTED)
+
+        # -- libraries -------------------------------------------------
+        def refresh_libraries(self):
+            for kind, (_, ref_col, path_col) in LIB_KINDS.items():
+                libs = self.app.libraries[kind]
+                paths = list(libs)
+                for _, path in recent_libs(self.app.con, kind):
+                    if path and not match_library(libs, path):
+                        paths.append(path)
+                self.widgets[path_col].configure(values=_dedupe(paths))
+                self._refresh_refs(kind)
+                self._update_note(kind)
+
+        def _refresh_refs(self, kind):
+            _, ref_col, path_col = LIB_KINDS[kind]
+            libs = self.app.libraries[kind]
+            chosen = match_library(libs, self.vars[path_col].get())
+            names = [ref for ref, path in recent_libs(self.app.con, kind)
+                     if not chosen or match_library(libs, path) == chosen]
+            if chosen:
+                names += libs[chosen]
+            else:
+                for pool in libs.values():
+                    names += pool
+            self.widgets[ref_col].configure(values=_dedupe(names))
+
+        def _home_for(self, kind, ref):
+            ref = (ref or "").strip()
+            if not ref:
+                return ""
+            for known, path in recent_libs(self.app.con, kind):
+                if path and known.lower() == ref.lower():
+                    return path
+            return find_library(self.app.libraries[kind], ref)
+
+        def _lib_picked(self, col):
+            kind = REF_KIND.get(col) or PATH_KIND[col]
+            _, ref_col, path_col = LIB_KINDS[kind]
+            if col == ref_col:
+                if lib_status(self.app.libraries[kind],
+                              self.vars[ref_col].get(),
+                              self.vars[path_col].get())[0] != "ok":
+                    home = self._home_for(kind, self.vars[ref_col].get())
+                    if home:
+                        self.vars[path_col].set(home)
+            self._refresh_refs(kind)
+            self._update_note(kind)
+
+        def _lib_changed(self, col):
+            kind = REF_KIND.get(col) or PATH_KIND[col]
+            if col in PATH_KIND:
+                self._refresh_refs(kind)
+            self._update_note(kind)
+
+        def _update_note(self, kind):
+            note = self.notes.get(kind)
+            if note is None:
+                return
+            _, ref_col, path_col = LIB_KINDS[kind]
+            state, name = lib_status(self.app.libraries[kind],
+                                     self.vars[ref_col].get(),
+                                     self.vars[path_col].get())
+            note.config(text={"ok": "in " + name,
+                              "missing": "not in " + name,
+                              "elsewhere": "found in " + name}.get(state, ""),
+                        foreground=WARN if state == "missing" else MUTED)
+
+        def _apply_lib_defaults(self):
+            prior = last_libraries(self.app.con, self.type_name)
+            for kind, (_, ref_col, path_col) in LIB_KINDS.items():
+                if not self.vars[ref_col].get().strip():
+                    self.vars[ref_col].set(prior.get(ref_col) or "")
+                if not self.vars[path_col].get().strip():
+                    libs = self.app.libraries[kind]
+                    path = (prior.get(path_col)
+                            or self._home_for(kind, self.vars[ref_col].get()))
+                    if not path and len(libs) == 1:
+                        path = next(iter(libs))
+                    self.vars[path_col].set(path)
+                self._refresh_refs(kind)
+                self._update_note(kind)
 
         # -- data ------------------------------------------------------
         def refresh(self):
@@ -640,6 +1066,7 @@ def run_gui(db_path):
             self.tree.selection_remove(self.tree.selection())
             for k, var in self.vars.items():
                 var.set(self.last_saved.get(k, "") if k in STICKY else "")
+            self._apply_lib_defaults()
             if not self.vars["status"].get():
                 self.vars["status"].set("Active")
             self.pn_label.config(text="New part")
@@ -671,8 +1098,19 @@ def run_gui(db_path):
                     APP_NAME, "Manufacturer PN is needed to save this part.")
                 return
 
+            for kind, (_, ref_col, path_col) in LIB_KINDS.items():
+                state, name = lib_status(self.app.libraries[kind],
+                                         data.get(ref_col), data.get(path_col))
+                if state == "missing" and not messagebox.askyesno(
+                        APP_NAME,
+                        f"'{data[ref_col].strip()}' is not in {name}, so "
+                        "Altium will not be able to place this part.\n\n"
+                        "Save it anyway?"):
+                    return
+
             pn = save_part(self.app.con, self.type_name, data)
             self.last_saved = dict(data)
+            self.app.refresh_recents()
             self.refresh()
             self.current = pn
             self.pn_label.config(text=pn)
@@ -703,6 +1141,7 @@ def run_gui(db_path):
             self.minsize(900, 500)
             self.db_path = path
             self.con = connect(path)
+            self.libraries = scan_libraries()
 
             style = ttk.Style(self)
             if sys.platform.startswith("linux") and "clam" in style.theme_names():
@@ -712,6 +1151,8 @@ def run_gui(db_path):
             menu = tk.Menu(self)
             filemenu = tk.Menu(menu, tearoff=0)
             filemenu.add_command(label="Open database...", command=self.open_db)
+            filemenu.add_command(label="Rescan libraries", accelerator="F5",
+                                 command=self.rescan)
             filemenu.add_command(label="Copy Altium connection string",
                                  command=self.copy_conn)
             filemenu.add_separator()
@@ -730,10 +1171,29 @@ def run_gui(db_path):
             self.statusbar = ttk.Label(self, anchor="w", padding=(8, 3),
                                        relief="sunken")
             self.statusbar.pack(fill="x")
-            self.status(f"{Path(path).name} ready")
+            self.bind("<F5>", lambda e: self.rescan())
+            self.status(f"{Path(path).name} ready - {self.library_summary()}")
 
         def status(self, text):
             self.statusbar.config(text=text)
+
+        def library_summary(self):
+            files = sum(len(libs) for libs in self.libraries.values())
+            items = sum(len(names) for libs in self.libraries.values()
+                        for names in libs.values())
+            if not files:
+                return f"no libraries found in {SCRIPT_DIR.name}"
+            return (f"{files} librar{'y' if files == 1 else 'ies'}, "
+                    f"{items} entr{'y' if items == 1 else 'ies'}")
+
+        def rescan(self):
+            self.libraries = scan_libraries()
+            self.refresh_recents()
+            self.status(f"Rescanned - {self.library_summary()}")
+
+        def refresh_recents(self):
+            for panel in self.panels.values():
+                panel.refresh_libraries()
 
         def copy_conn(self):
             self.clipboard_clear()
@@ -832,6 +1292,67 @@ def selftest():
     d = save_part(con, "Diodes", {"diode_type": "Schottky", "mpn": "1N5819",
                                   "vrrm": "40V", "if_max": "1A"})
     assert load_part(con, "Diodes", d)["value"] == "1N5819"
+
+    assert recent_libs(con, "symbol") == [("RES", "Symbols\\Passives.SchLib")]
+    assert recent_libs(con, "footprint") == [("AXIAL-0.4",
+                                              "Footprints\\THT.PcbLib")]
+    for i in range(RECENT_LIMIT + 2):
+        save_part(con, "Capacitors", {
+            "capacitance": "100n", "library_ref": "CAP",
+            "library_path": "Symbols\\Passives.SchLib",
+            "footprint_ref": f"C-{i:02d}",
+            "footprint_path": "Footprints\\SMT.PcbLib"})
+    seen = recent_libs(con, "footprint")
+    assert len(seen) == RECENT_LIMIT, len(seen)
+    assert seen[0] == (f"C-{RECENT_LIMIT + 1:02d}", "Footprints\\SMT.PcbLib")
+    assert len(set(seen)) == len(seen)
+    assert [ref for ref, _ in recent_libs(con, "symbol")] == ["CAP", "RES"]
+
+    save_part(con, "Capacitors", {"capacitance": "1n", "library_ref": "cap",
+                                  "library_path": "symbols\\passives.schlib"})
+    assert [ref for ref, _ in recent_libs(con, "symbol")] == ["CAP", "RES"]
+    assert last_libraries(con, "Resistors")["library_ref"] == ""
+    assert last_libraries(con, "Capacitors")["library_ref"] == "cap"
+
+    libs = {"m68k.SchLib": ["CAP", "MC68230P10", "RES"]}
+    assert lib_status(libs, "RES", "m68k.SchLib") == ("ok", "m68k.SchLib")
+    assert lib_status(libs, "res", "Symbols\\m68k.SchLib")[0] == "ok"
+    assert lib_status(libs, "NOPE", "m68k.SchLib") == ("missing",
+                                                       "m68k.SchLib")
+    assert lib_status(libs, "CAP", "") == ("elsewhere", "m68k.SchLib")
+    assert lib_status(libs, "", "m68k.SchLib") == ("", "")
+    assert lib_status({}, "RES", "m68k.SchLib") == ("", "")
+    assert find_library(libs, "mc68230p10") == "m68k.SchLib"
+    assert find_library(libs, "nope") == ""
+    assert _dedupe(["RES", "res", "", None, "CAP"]) == ["RES", "CAP"]
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "symbols").mkdir()
+        (root / "History").mkdir()
+        (root / "symbols" / "Broken.SchLib").write_bytes(b"not a library")
+        (root / "Board.PcbLib").write_bytes(b"")
+        (root / "History" / "Old.SchLib").write_bytes(b"")
+        found = scan_libraries(root)
+        broken = str(Path("symbols") / "Broken.SchLib")
+        assert list(found["symbol"]) == [broken]
+        assert list(found["footprint"]) == ["Board.PcbLib"]
+        assert not any(found["symbol"].values())
+    for kind, found in scan_libraries().items():
+        for rel, names in found.items():
+            assert isinstance(names, list), rel
+
+    fresh = connect(":memory:")
+    save_part(fresh, "Resistors", {"resistance": "1k", "library_ref": "RES",
+                                   "library_path": "m68k.SchLib"})
+    save_part(fresh, "Diodes", {"mpn": "1N4148", "library_ref": "DIODE",
+                                "library_path": "m68k.SchLib"})
+    fresh.execute("DELETE FROM recent")
+    seed_recent(fresh)
+    assert [r for r, _ in recent_libs(fresh, "symbol")] == ["DIODE", "RES"]
+    seed_recent(fresh)
+    assert len(recent_libs(fresh, "symbol")) == 2
     print("selftest ok")
 
 
@@ -839,6 +1360,14 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if "--selftest" in sys.argv:
         selftest()
+        return
+    if "--libs" in sys.argv:
+        for kind, found in scan_libraries().items():
+            for rel, names in found.items():
+                print(f"{rel} - {len(names)} {kind}"
+                      f"{'' if len(names) == 1 else 's'}")
+                for name in names:
+                    print(f"    {name}")
         return
     if args:
         path = args[0]
