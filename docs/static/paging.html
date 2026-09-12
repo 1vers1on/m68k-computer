@@ -22,9 +22,11 @@
         Supervisor cycles bypass translation entirely and see flat physical
         memory, so the BIOS reaches all 4 MiB and can load tables while a
         program is stopped.
-        <a href="bus-and-decode.html#supervisor-protection">Supervisor
-        Protection</a> covers the I/O region and the firmware ROM; this document
-        covers main memory.
+        <a href="bus-and-decode.html#supervisor-protection"
+          >Supervisor Protection</a
+        >
+        covers the I/O region and the firmware ROM; this document covers main
+        memory.
       </p>
 
       <dl>
@@ -41,9 +43,7 @@
         <dd>4 KiB</dd>
 
         <dt>Logical space</dt>
-        <dd>
-          <code>$000000-$3FFFFF</code> per context, 1024 pages
-        </dd>
+        <dd><code>$000000-$3FFFFF</code> per context, 1024 pages</dd>
 
         <dt>Physical pool</dt>
         <dd>4 MiB of DRAM, 1024 frames</dd>
@@ -283,20 +283,18 @@ SRAM A14..A10 &lt;-- context register, U_PAGE_MMU</code></pre>
 
         <p>
           This is the piece that keeps the unit small. During a translated cycle
-          CPU <code>A21..A12</code> is the logical page number. During a
-          table access CPU <code>A21..A12</code> is the entry number, because
-          the aperture is placed where those lines are free to carry it. One
-          wiring serves both, so the unit needs no address multiplexer, no
-          buffers on the index, and no CPLD pins to carry it. The lookup also
-          starts the instant the processor drives the address, with nothing
-          ahead of it.
+          CPU <code>A21..A12</code> is the logical page number. During a table
+          access CPU <code>A21..A12</code> is the entry number, because the
+          aperture is placed where those lines are free to carry it. One wiring
+          serves both, so the unit needs no address multiplexer, no buffers on
+          the index, and no CPLD pins to carry it. The lookup also starts the
+          instant the processor drives the address, with nothing ahead of it.
         </p>
 
         <p>
-          <code>/CE</code> on both chips connects to ground, so the lookup
-          runs on every address the processor drives and the entry is waiting at
-          the output stage before anything asks for it.
-          <code>TBL_OE_n</code> in
+          <code>/CE</code> on both chips connects to ground, so the lookup runs
+          on every address the processor drives and the entry is waiting at the
+          output stage before anything asks for it. <code>TBL_OE_n</code> in
           <a href="#physical-address-bus">section 7</a> decides whether that
           entry reaches the bus. Gating <code>/CE</code> would save current at
           the cost of <code>tACE</code> on every lookup, and the lookup is the
@@ -323,12 +321,12 @@ SRAM A14..A10 &lt;-- context register, U_PAGE_MMU</code></pre>
         <h2>5. Table Aperture</h2>
 
         <p>
-          Memory map revision 1.2 left <code>$A00000-$DFFFFF</code>
-          unimplemented, and <code>EXP_MEM5_n</code> and
-          <code>EXP_MEM6_n</code> were decoded but reached nothing. Revision 2.0
-          gives those 4 MiB to the page table, which is the only place on the
-          board where CPU <code>A21..A12</code> is free to carry an entry
-          number.
+          Memory map revision 1.2 left
+          <code>$A00000-$DFFFFF</code> unimplemented, and
+          <code>EXP_MEM5_n</code> and <code>EXP_MEM6_n</code> were decoded but
+          reached nothing. Revision 2.0 gives those 4 MiB to the page table,
+          which is the only place on the board where CPU
+          <code>A21..A12</code> is free to carry an entry number.
         </p>
 
         <h3>Entry Addresses</h3>
@@ -378,13 +376,13 @@ SRAM A14..A10 &lt;-- context register, U_PAGE_MMU</code></pre>
 
         <ul>
           <li>
-            Word accesses read and write a whole entry. Byte accesses reach
-            one chip each: <code>UDS_n</code> gates the upper chip and
-            <code>LDS_n</code> the lower. The upper byte carries
-            <code>V</code>, <code>W</code>, and the top two bits of the frame
-            number, so changing a permission bit means reading that byte,
-            altering it, and writing it back. The lower byte holds
-            <code>PPN7..PPN0</code> and nothing else.
+            Word accesses read and write a whole entry. Byte accesses reach one
+            chip each: <code>UDS_n</code> gates the upper chip and
+            <code>LDS_n</code> the lower. The upper byte carries <code>V</code>,
+            <code>W</code>, and the top two bits of the frame number, so
+            changing a permission bit means reading that byte, altering it, and
+            writing it back. The lower byte holds <code>PPN7..PPN0</code> and
+            nothing else.
           </li>
           <li>
             The aperture addresses the current context only. To build another
@@ -538,20 +536,19 @@ SRAM A14..A10 &lt;-- context register, U_PAGE_MMU</code></pre>
 
         <p>
           <code>U_PAGE_MMU</code> drives the top two bits itself rather than
-          through a second buffer, because it already needs
-          <code>A21</code> for the untranslated bank select. Its
-          <code>PPA9</code> output shares one I/O pin with the
-          <code>PPN9</code> input it reads back from the table: the macrocell
-          drives the pin while the table is quiet and reads the same net while
-          the table holds it.
+          through a second buffer, because it already needs <code>A21</code> for
+          the untranslated bank select. Its <code>PPA9</code> output shares one
+          I/O pin with the <code>PPN9</code> input it reads back from the table:
+          the macrocell drives the pin while the table is quiet and reads the
+          same net while the table holds it.
         </p>
 
         <h3>Bus Enables</h3>
 
         <p>
-          <code>U_PAGE_MMU</code> produces the bus enables, and two terms
-          settle them. <code>TBL_DRIVE</code> marks a user-mode cycle with
-          translation turned on, whatever address the processor is driving.
+          <code>U_PAGE_MMU</code> produces the bus enables, and two terms settle
+          them. <code>TBL_DRIVE</code> marks a user-mode cycle with translation
+          turned on, whatever address the processor is driving.
           <code>APERTURE</code> marks a cycle that has reached the table through
           the two decoded regions.
         </p>
@@ -600,8 +597,8 @@ CPU A10..A1 --&gt; row inputs, DRAM A9..A0, unchanged
 PPA9       --&gt; bank select inside U_PAGE_MMU</code></pre>
 
         <p>
-          The multiplexer itself does not change. Nine of its ten column
-          inputs simply take the page unit's output where they used to take CPU
+          The multiplexer itself does not change. Nine of its ten column inputs
+          simply take the page unit's output where they used to take CPU
           <code>A20..A12</code>. The <a href="dram.html">DRAM document</a> keeps
           ownership of the multiplexer and the strobe timing.
         </p>
@@ -627,8 +624,8 @@ RAM1_REQ_n  = NOT (LRAM_REQ AND PERMIT AND PHYS_BANK1)</code></pre>
 
         <p>
           A supervisor cycle sets <code>TRANSLATE</code> low, so
-          <code>PERMIT</code> is true and the bank follows CPU
-          <code>A21</code>. The result is the revision 1.1 behavior exactly:
+          <code>PERMIT</code> is true and the bank follows CPU <code>A21</code>.
+          The result is the revision 1.1 behavior exactly:
           <code>LRAM0_REQ_n</code> becomes <code>RAM0_REQ_n</code> and
           <code>LRAM1_REQ_n</code> becomes <code>RAM1_REQ_n</code>, one gate
           delay later.
@@ -729,9 +726,9 @@ worst case               159 ns after AS_n</code></pre>
         </p>
 
         <p>
-          <code>TBL_OE_n</code> falls out of <code>FC2</code> and the enable
-          bit rather than out of the decoder, so the table outputs are already
-          live when the processor drives the address. <code>V</code> and
+          <code>TBL_OE_n</code> falls out of <code>FC2</code> and the enable bit
+          rather than out of the decoder, so the table outputs are already live
+          when the processor drives the address. <code>V</code> and
           <code>W</code> are valid 20 ns later and are never the late input.
         </p>
 
@@ -909,7 +906,8 @@ PAGE_DTACK_n     = 0</code></pre>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            <code>U_PAGE_MMU</code> inputs
+            <code>U_PAGE_MMU</code>
+            inputs
           </caption>
           <thead>
             <tr>
@@ -982,7 +980,8 @@ PAGE_DTACK_n     = 0</code></pre>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            <code>U_PAGE_MMU</code> outputs
+            <code>U_PAGE_MMU</code>
+            outputs
           </caption>
           <thead>
             <tr>
@@ -1009,9 +1008,7 @@ PAGE_DTACK_n     = 0</code></pre>
               </td>
             </tr>
             <tr>
-              <td>
-                SRAM <code>/WE_H</code>, <code>/WE_L</code>
-              </td>
+              <td>SRAM <code>/WE_H</code>, <code>/WE_L</code></td>
               <td>2</td>
               <td>Byte-selected table writes.</td>
             </tr>
@@ -1027,8 +1024,10 @@ PAGE_DTACK_n     = 0</code></pre>
                 Direction for both transceivers, a buffered copy of
                 <code>R/W</code>. Driving it from the MACH keeps two loads off
                 the processor's <code>R/W</code> net, which
-                <a href="bus-and-decode.html#capacitive-loading">runs close to
-                its limit</a> at revision 2.0.
+                <a href="bus-and-decode.html#capacitive-loading"
+                  >runs close to its limit</a
+                >
+                at revision 2.0.
               </td>
             </tr>
             <tr>
@@ -1048,9 +1047,7 @@ PAGE_DTACK_n     = 0</code></pre>
               </td>
             </tr>
             <tr>
-              <td>
-                <code>RAM0_REQ_n</code>, <code>RAM1_REQ_n</code>
-              </td>
+              <td><code>RAM0_REQ_n</code>, <code>RAM1_REQ_n</code></td>
               <td>2</td>
               <td>Physical bank requests to the DRAM controller.</td>
             </tr>
@@ -1078,11 +1075,11 @@ PAGE_DTACK_n     = 0</code></pre>
         </p>
 
         <p>
-          Every package here is socketed and carries a 100 nF capacitor and a
-          1 uF capacitor in parallel across its supply pins, beside the socket,
-          as elsewhere on the board. The MACH210 and the two SRAMs switch
-          harder than the 74-series parts around them, so give each its own
-          pair rather than sharing.
+          Every package here is socketed and carries a 100 nF capacitor and a 1
+          uF capacitor in parallel across its supply pins, beside the socket, as
+          elsewhere on the board. The MACH210 and the two SRAMs switch harder
+          than the 74-series parts around them, so give each its own pair rather
+          than sharing.
         </p>
       </section>
 
@@ -1139,9 +1136,7 @@ PAGE_DTACK_n     = 0</code></pre>
               <td>Write cycle time and write pulse width</td>
               <td><code>tWC</code> / <code>tPWE</code></td>
               <td>20 ns / 15 ns</td>
-              <td>
-                <a href="datasheets/CY7C199.PDF">CY7C199</a>, write cycle
-              </td>
+              <td><a href="datasheets/CY7C199.PDF">CY7C199</a>, write cycle</td>
             </tr>
             <tr>
               <td>MACH210-12</td>
@@ -1162,8 +1157,10 @@ PAGE_DTACK_n     = 0</code></pre>
             </tr>
             <tr>
               <td>SN74HCT245</td>
-              <td><code>A</code> to <code>B</code> or <code>B</code> to
-                <code>A</code></td>
+              <td>
+                <code>A</code> to <code>B</code> or <code>B</code> to
+                <code>A</code>
+              </td>
               <td><code>tpd</code></td>
               <td>42 ns</td>
               <td>SN74HCT245, switching characteristics</td>
@@ -1191,14 +1188,10 @@ PAGE_DTACK_n     = 0</code></pre>
               <td>PTE valid on <code>PPA9..PPA0</code></td>
               <td>CY7C199 <code>tAA</code></td>
               <td>20 ns</td>
-              <td>
-                Column select, 50 ns after RAS falls
-              </td>
+              <td>Column select, 50 ns after RAS falls</td>
             </tr>
             <tr>
-              <td>
-                <code>PPA9..PPA0</code> on an untranslated cycle
-              </td>
+              <td><code>PPA9..PPA0</code> on an untranslated cycle</td>
               <td>SN74HCT244 <code>tpd</code></td>
               <td>42 ns</td>
               <td>Same</td>
@@ -1210,25 +1203,19 @@ PAGE_DTACK_n     = 0</code></pre>
               <td>Request capture</td>
             </tr>
             <tr>
-              <td>
-                <code>RAM0_REQ_n</code> from the address path
-              </td>
+              <td><code>RAM0_REQ_n</code> from the address path</td>
               <td>45 ns + 30 ns + 30 ns + 12 ns</td>
               <td>117 ns</td>
               <td>Request capture</td>
             </tr>
             <tr>
-              <td>
-                <code>RAM0_REQ_n</code> from the strobe path
-              </td>
+              <td><code>RAM0_REQ_n</code> from the strobe path</td>
               <td>AS_n + 30 ns + 42 ns + 30 ns + 30 ns + 12 ns</td>
               <td>144 ns after <code>AS_n</code></td>
               <td>Request capture</td>
             </tr>
             <tr>
-              <td>
-                <code>RAM1_REQ_n</code> from the strobe path
-              </td>
+              <td><code>RAM1_REQ_n</code> from the strobe path</td>
               <td>AS_n + 30 ns + 42 ns + 30 ns + 12 ns</td>
               <td>114 ns after <code>AS_n</code></td>
               <td>Request capture</td>
@@ -1309,9 +1296,7 @@ PAGE_DTACK_n     = 0</code></pre>
               <td>MACH210-12</td>
               <td><code>VOH</code> / <code>VOL</code></td>
               <td>2.40 V / 0.50 V</td>
-              <td>
-                <code>IOH = -3.2 mA</code>; <code>IOL = 16 mA</code>
-              </td>
+              <td><code>IOH = -3.2 mA</code>; <code>IOL = 16 mA</code></td>
             </tr>
             <tr>
               <td>MACH210-12</td>
@@ -1335,9 +1320,7 @@ PAGE_DTACK_n     = 0</code></pre>
               <td>CY7C199-20</td>
               <td><code>VOH</code> / <code>VOL</code></td>
               <td>2.40 V / 0.40 V</td>
-              <td>
-                <code>IOH = -4.0 mA</code>; <code>IOL = 8.0 mA</code>
-              </td>
+              <td><code>IOH = -4.0 mA</code>; <code>IOL = 8.0 mA</code></td>
             </tr>
             <tr>
               <td>CY7C199-20</td>
@@ -1489,8 +1472,10 @@ PAGE_DTACK_n     = 0</code></pre>
               <td>10 pF</td>
             </tr>
             <tr>
-              <td><code>IO10_n</code>, <code>EXP_MEM5_n</code>,
-                <code>EXP_MEM6_n</code></td>
+              <td>
+                <code>IO10_n</code>, <code>EXP_MEM5_n</code>,
+                <code>EXP_MEM6_n</code>
+              </td>
               <td>1 MACH input each</td>
               <td>10 uA</td>
               <td>6 pF</td>
@@ -1505,10 +1490,12 @@ PAGE_DTACK_n     = 0</code></pre>
           each, on top of whatever the decoder and the DRAM multiplexer already
           present. The
           <a href="bus-and-decode.html#electrical-compatibility-and-fanout">
-          motherboard load audit</a> keeps CPU nets at or below 100 pF against
-          the processor's 130 pF limit, and these figures belong in it. The
-          SRAM datasheet gives no input capacitance, so 8 pF per input is
-          assumed here and has to be confirmed.
+            motherboard load audit</a
+          >
+          keeps CPU nets at or below 100 pF against the processor's 130 pF
+          limit, and these figures belong in it. The SRAM datasheet gives no
+          input capacitance, so 8 pF per input is assumed here and has to be
+          confirmed.
         </p>
 
         <p>
@@ -1519,8 +1506,10 @@ PAGE_DTACK_n     = 0</code></pre>
           <code>XCVR_DIR</code> from the MACH for that reason; wiring them to
           <code>R/W</code> instead would add 20 pF and leave nothing for the
           board. The
-          <a href="bus-and-decode.html#capacitive-loading">revision 2.0 load
-          audit</a> carries the figure as an open item.
+          <a href="bus-and-decode.html#capacitive-loading"
+            >revision 2.0 load audit</a
+          >
+          carries the figure as an open item.
         </p>
       </section>
 
@@ -1570,12 +1559,14 @@ PAGE_DTACK_n     = 0</code></pre>
           rail against this, and <code>U_PROT</code> adds 55 mA of its own. An
           earlier draft of this section took an 85 mA credit for the five FAST
           packages that the
-          <a href="bus-and-decode.html#protection-decode">first revision 2.0
-          protection draft</a> would have used; those packages never reached a
-          board, so the credit was not real. The honest planning figure for the
-          whole revision 2.0 change is about 480 mA of headline maximum and
-          appreciably less in practice, because both SRAM figures assume a 50
-          MHz cycle rate this bus never reaches. Take it to the
+          <a href="bus-and-decode.html#protection-decode"
+            >first revision 2.0 protection draft</a
+          >
+          would have used; those packages never reached a board, so the credit
+          was not real. The honest planning figure for the whole revision 2.0
+          change is about 480 mA of headline maximum and appreciably less in
+          practice, because both SRAM figures assume a 50 MHz cycle rate this
+          bus never reaches. Take it to the
           <a href="power-control.html">power control</a> budget before layout
           rather than after.
         </p>
@@ -1612,17 +1603,19 @@ PAGE_DTACK_n     = 0</code></pre>
             it to a program.
           </li>
           <li>
-            <strong>Turn translation on before the first user-mode
-            instruction, and leave it on.</strong> With the enable bit clear the
-            page unit passes everything through and main memory has no
-            protection. Supervisor cycles never consult the table, so the bit
-            costs the BIOS nothing and there is no reason to clear it again.
+            <strong
+              >Turn translation on before the first user-mode instruction, and
+              leave it on.</strong
+            >
+            With the enable bit clear the page unit passes everything through
+            and main memory has no protection. Supervisor cycles never consult
+            the table, so the bit costs the BIOS nothing and there is no reason
+            to clear it again.
           </li>
           <li>
             <strong>Do not share a writable page between contexts</strong>
             unless both programs are meant to see each other's writes. Shared
-            read-only pages are safe and are what the <code>W</code> bit is
-            for.
+            read-only pages are safe and are what the <code>W</code> bit is for.
           </li>
           <li>
             <strong>Close the VGA grant when the program stops.</strong> The
@@ -1630,12 +1623,14 @@ PAGE_DTACK_n     = 0</code></pre>
             not follow a context switch.
           </li>
           <li>
-            <strong>Check BIOS call arguments against the caller's table, not
-            against a fixed range.</strong> A pointer that a program passes to
-            the BIOS is a logical address in its own context, and the BIOS runs
-            untranslated. Translate it in software before touching it, and
-            reject it if the entry is invalid or the call would write a page
-            with <code>W</code> clear.
+            <strong
+              >Check BIOS call arguments against the caller's table, not against
+              a fixed range.</strong
+            >
+            A pointer that a program passes to the BIOS is a logical address in
+            its own context, and the BIOS runs untranslated. Translate it in
+            software before touching it, and reject it if the entry is invalid
+            or the call would write a page with <code>W</code> clear.
           </li>
         </ol>
 
@@ -1786,7 +1781,9 @@ PAGE_DTACK_n     = 0</code></pre>
             </tr>
             <tr>
               <td><code>XCVR_DIR</code></td>
-              <td>Transceiver direction, a buffered copy of <code>R/W</code>.</td>
+              <td>
+                Transceiver direction, a buffered copy of <code>R/W</code>.
+              </td>
               <td>High for a read</td>
               <td><code>U_PAGE_MMU</code></td>
               <td><code>U_PAGE_XCVR_H</code> and <code>_L</code></td>

@@ -95,9 +95,8 @@
           The board uses two port C pins as a bit-banged DDC bus to the monitor
           connector, routes the remaining general-purpose pins to a user header,
           and takes the port and timer interrupts on their own processor levels.
-          This page fixes
-          every motherboard connection to the device and the firmware rules
-          that the wiring imposes.
+          This page fixes every motherboard connection to the device and the
+          firmware rules that the wiring imposes.
         </p>
         <p>
           The <a href="memory-map.html">Memory Map</a> owns the slot assignment.
@@ -211,8 +210,7 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
               <td><code>/DTACK</code></td>
               <td><code>PIT_DTACK_n</code></td>
               <td>
-                Terminates register cycles and both vectored acknowledge
-                cycles.
+                Terminates register cycles and both vectored acknowledge cycles.
               </td>
             </tr>
             <tr>
@@ -230,8 +228,8 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
 
         <h3>Chip Select</h3>
         <p>
-          The MC68230 has no separate data-strobe input, so the byte-lane
-          strobe belongs in the chip-select equation. Gate 2 of
+          The MC68230 has no separate data-strobe input, so the byte-lane strobe
+          belongs in the chip-select equation. Gate 2 of
           <code>U_OR_DTACK</code>, a spare <code>SN74F32N</code> OR gate in the
           <a href="bus-and-decode.html#glue-logic-package-assignments"
             >motherboard glue logic</a
@@ -243,8 +241,8 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
           bus-cycle qualification, so <code>PIT_CS_n</code> satisfies the
           MC68230 requirement that address strobe, a data strobe, and the
           address bits all appear in the chip select. The gate is FAST rather
-          than HCT because <code>PIT_CS_n</code> also starts the
-          acknowledgement release path measured in section 13.
+          than HCT because <code>PIT_CS_n</code> also starts the acknowledgement
+          release path measured in section 13.
         </p>
         <p>
           <code>IO9_n</code> is inactive during CPU space, so
@@ -288,12 +286,12 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
 
         <h3>Bus Cycle Recovery</h3>
         <p>
-          The MC68230 recognizes a new chip select three <code>PIT_CLK</code>
-          periods after the clock edge on which it asserted <code>/DTACK</code>
-          for the previous cycle. A chip select that arrives inside that window
-          does not produce an error: the device postpones the new cycle, and
-          with it <code>/DTACK</code>, until its internal operations finish.
-          The processor waits.
+          The MC68230 recognizes a new chip select three
+          <code>PIT_CLK</code> periods after the clock edge on which it asserted
+          <code>/DTACK</code> for the previous cycle. A chip select that arrives
+          inside that window does not produce an error: the device postpones the
+          new cycle, and with it <code>/DTACK</code>, until its internal
+          operations finish. The processor waits.
         </p>
         <p>
           Three <code>PIT_CLK</code> periods are 300 ns. The longest
@@ -374,8 +372,7 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
               <td><code>00110</code></td>
               <td>PACR</td>
               <td>
-                Port A submode, H2 control, and the H1 and H2 interrupt
-                enables.
+                Port A submode, H2 control, and the H1 and H2 interrupt enables.
               </td>
             </tr>
             <tr>
@@ -383,8 +380,7 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
               <td><code>00111</code></td>
               <td>PBCR</td>
               <td>
-                Port B submode, H4 control, and the H3 and H4 interrupt
-                enables.
+                Port B submode, H4 control, and the H3 and H4 interrupt enables.
               </td>
             </tr>
             <tr>
@@ -724,12 +720,13 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
           <code>PC0</code> and <code>PC1</code> form a 5 V bus that firmware
           drives one bit at a time. It carries the display data channel to the
           monitor: <code>PC0</code> is the DDC clock and <code>PC1</code> is the
-          DDC data line. The bus leaves this subsystem as <code>DDC_SCL</code>
-          and <code>DDC_SDA</code> and connects only to the DDC pins of
-          <a href="vga.html#video-output"><code>J_VGA</code></a>, so firmware
-          can read a monitor's EDID over DDC2B. The MC68230 has no open-drain
-          port outputs, so the interface produces the open-drain behavior the
-          bus requires by switching pin direction instead of pin level.
+          DDC data line. The bus leaves this subsystem as
+          <code>DDC_SCL</code> and <code>DDC_SDA</code> and connects only to the
+          DDC pins of <a href="vga.html#video-output"><code>J_VGA</code></a
+          >, so firmware can read a monitor's EDID over DDC2B. The MC68230 has
+          no open-drain port outputs, so the interface produces the open-drain
+          behavior the bus requires by switching pin direction instead of pin
+          level.
         </p>
         <pre><code>PCDR bits 1 and 0 = 0     written once during initialization
 
@@ -779,8 +776,8 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
               <td>
                 1.12 mA maximum pull-up current at 5.25 V.
                 <code>PC0</code> and <code>PC1</code> are rated to sink 2.4 mA
-                at 0.5 V, so the bus low sits under 0.5 V against a DDC
-                receiver threshold of 1.5 V.
+                at 0.5 V, so the bus low sits under 0.5 V against a DDC receiver
+                threshold of 1.5 V.
               </td>
             </tr>
             <tr>
@@ -788,8 +785,8 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
               <td>About 0.4 microseconds at 100 pF of bus capacitance</td>
               <td>
                 0.8473 x 4.7 kohm x 100 pF, inside the 1 microsecond
-                standard-mode limit. The same product reaches 1 microsecond
-                near 250 pF.
+                standard-mode limit. The same product reaches 1 microsecond near
+                250 pF.
               </td>
             </tr>
             <tr>
@@ -797,8 +794,8 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
               <td>About 250 pF with the fitted pull-ups</td>
               <td>
                 The I2C standard-mode ceiling is 400 pF, but the 4.7 kohm
-                pull-ups reach the 1 microsecond rise limit near 250 pF, so
-                that is the practical cap. A sub-100 kHz firmware-paced clock
+                pull-ups reach the 1 microsecond rise limit near 250 pF, so that
+                is the practical cap. A sub-100 kHz firmware-paced clock
                 tolerates a slower edge in any case. Short board routing keeps
                 the routed contribution small; the monitor cable and its EDID
                 EEPROM consume the rest.
@@ -838,10 +835,10 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
           signal groups so that a ribbon cable has a return next to every group.
         </p>
         <p>
-          The recommended part is the Amphenol ICC <code>75869-106LF</code>, a 2-by-17
-          0.1 inch shrouded header with a center polarizing key. Any 2-by-17
-          shrouded and keyed 0.1 inch header with the same footprint and the
-          pinout below is acceptable.
+          The recommended part is the Amphenol ICC <code>75869-106LF</code>, a
+          2-by-17 0.1 inch shrouded header with a center polarizing key. Any
+          2-by-17 shrouded and keyed 0.1 inch header with the same footprint and
+          the pinout below is acceptable.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1014,8 +1011,8 @@ PCDR bit read  -&gt; the pin level, whatever drives it</code></pre>
         <h3>Header Power</h3>
         <p>
           <code>F_PIT_5V</code>, an <code>RXEF050</code> radial resettable fuse,
-          feeds the +5 V pins of <code>J_PIT_USER</code>. It holds 0.50 A at
-          20 C and 0.27 A at 70 C, so the header supplies a quarter of an amp at
+          feeds the +5 V pins of <code>J_PIT_USER</code>. It holds 0.50 A at 20
+          C and 0.27 A at 70 C, so the header supplies a quarter of an amp at
           the top of the case temperature range. The
           <a href="expansion.html#power">expansion slots</a> use larger parts
           from the same RXEF series.
@@ -1109,8 +1106,10 @@ longest period   = 2^24 x 3.2 us        = 53.687 s
           <code>R_PIT_TIRQ</code> and <code>R_PIT_PIRQ</code>. Each pin reaches
           its new state within 225 ns of the clock edge that caused it,
           specifications 39 and 44, which the two-stage
-          <a href="interrupts.html#ipl-generation"><code>/IPL</code>
-          synchronizer</a> then samples.
+          <a href="interrupts.html#ipl-generation"
+            ><code>/IPL</code> synchronizer</a
+          >
+          then samples.
         </p>
         <p>
           The timer sits above the ports so a periodic source cannot be held off
@@ -1125,7 +1124,8 @@ longest period   = 2^24 x 3.2 us        = 53.687 s
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            Port interrupt vector numbers with PIVR set to <code>$50</code>
+            Port interrupt vector numbers with PIVR set to
+            <code>$50</code>
           </caption>
           <thead>
             <tr>
@@ -1163,10 +1163,11 @@ longest period   = 2^24 x 3.2 us        = 53.687 s
           </tbody>
         </table>
         <p>
-          The timer vector <code>$54</code> lies at
-          <code>$000150</code>. The five PI/T vectors sit above the MFP block at
-          <code>$40</code>-<code>$4F</code> and inside the M68000 user vector
-          range, which starts at 64.
+          The timer vector <code>$54</code> lies at <code>$000150</code>. The
+          five PI/T vectors sit above the MFP block at <code>$40</code>-<code
+            >$4F</code
+          >
+          and inside the M68000 user vector range, which starts at 64.
         </p>
 
         <h3>Acknowledge Behavior</h3>
@@ -1182,13 +1183,12 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
           The PI/T ignores RS1 through RS5 during an acknowledge cycle. Mask
           sets GG7 and KD1 carry an erratum in which an acknowledge corrupts
           PIVR or TIVR if the register selects happen to address one of them.
-          During a CPU-space cycle the processor drives every address line
-          above <code>A3</code> high and puts the level on
-          <code>A3..A1</code>, so <code>RS5..RS1</code> read
-          <code>11100</code> for level 4 and <code>11101</code> for level 5.
-          Both fall in the null block, and neither is the PIVR select
-          <code>00101</code> or the TIVR select <code>10001</code>. The erratum
-          cannot reach this board.
+          During a CPU-space cycle the processor drives every address line above
+          <code>A3</code> high and puts the level on <code>A3..A1</code>, so
+          <code>RS5..RS1</code> read <code>11100</code> for level 4 and
+          <code>11101</code> for level 5. Both fall in the null block, and
+          neither is the PIVR select <code>00101</code> or the TIVR select
+          <code>10001</code>. The erratum cannot reach this board.
         </p>
 
         <h3>Unanswered Acknowledge Cycles</h3>
@@ -1202,10 +1202,10 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
         <p>
           The motherboard bus timeout does not run during CPU space, so the
           <a href="interrupts.html#spurious">phantom acknowledge watchdog</a>
-          terminates those cycles. It fires 3.2 microseconds after an
-          unanswered acknowledge begins, more than six times the PI/T's longest
-          legitimate acknowledge response of under 500 ns. The processor takes
-          the spurious-interrupt exception, vector 24.
+          terminates those cycles. It fires 3.2 microseconds after an unanswered
+          acknowledge begins, more than six times the PI/T's longest legitimate
+          acknowledge response of under 500 ns. The processor takes the
+          spurious-interrupt exception, vector 24.
         </p>
         <p>
           <code>PIT_DTACK_n</code> joins <code>MFP_DTACK_n</code> and
@@ -1224,8 +1224,8 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
         <ol>
           <li>
             Write PCDR bits 1 and 0 to zero before writing PCDDR. Reset leaves
-            the data registers undefined, and a stale one in either bit drives
-            a DDC line high the moment its direction bit is set.
+            the data registers undefined, and a stale one in either bit drives a
+            DDC line high the moment its direction bit is set.
           </li>
           <li>
             Program the ports in this order: write PGCR bits 7 and 6 to
@@ -1626,8 +1626,8 @@ PI/T byte access           7 to 8 CPU clock periods, 700 to 800 ns</code></pre>
           ns for the same reason.
         </p>
         <p>
-          Consecutive PI/T accesses do not reach the 300 ns recovery window.
-          The device asserts <code>/DTACK</code> at least 250 ns before
+          Consecutive PI/T accesses do not reach the 300 ns recovery window. The
+          device asserts <code>/DTACK</code> at least 250 ns before
           <code>AS_n</code> negates, the processor spends two more clock states
           before it asserts <code>AS_n</code> again, and the slot decode then
           takes another 150.3 ns. At least 500 ns separate one
@@ -1638,10 +1638,10 @@ PI/T byte access           7 to 8 CPU clock periods, 700 to 800 ns</code></pre>
         <h3>Acknowledgement Release, Register Cycle</h3>
         <p>
           MC68EC000 specification 28 allows 110 ns from strobe negation to
-          <code>/DTACK</code> release. On a register cycle <code>LDS_n</code>
-          rises at the end of S7 and reaches <code>U_OR_DTACK</code> gate 2 with
-          no logic in between, so it, rather than the slow slot decode, releases
-          <code>PIT_CS_n</code>.
+          <code>/DTACK</code> release. On a register cycle
+          <code>LDS_n</code> rises at the end of S7 and reaches
+          <code>U_OR_DTACK</code> gate 2 with no logic in between, so it, rather
+          than the slow slot decode, releases <code>PIT_CS_n</code>.
         </p>
         <pre><code>U_OR_DTACK gate 2 SN74F32, tPLH   6.6 ns
 MC68230 /CS high to /DTACK high  45.0 ns   PI/T 10
@@ -1692,11 +1692,12 @@ MC68EC000 limit, from AS_n negation     110.0 ns</code></pre>
         </p>
         <p>
           <a href="interrupts.html#acknowledge-timing">Interrupts</a> section 14
-          tracks the fix, chosen at schematic capture: bring <code>IACK_n</code>
-          forward with fewer gates, give <code>U_IACK_DEC</code> a FAST or AC
-          part, or route the PI/T a dedicated fast acknowledge strobe. Typical
-          delays at room temperature are far shorter, so the assembled-board
-          measurement decides whether any change is needed.
+          tracks the fix, chosen at schematic capture: bring
+          <code>IACK_n</code> forward with fewer gates, give
+          <code>U_IACK_DEC</code> a FAST or AC part, or route the PI/T a
+          dedicated fast acknowledge strobe. Typical delays at room temperature
+          are far shorter, so the assembled-board measurement decides whether
+          any change is needed.
         </p>
         <p>
           The MC68901 level-6 acknowledge shares <code>U_IACK_DEC</code> and
@@ -1914,8 +1915,8 @@ watchdog limit             3.2 us</code></pre>
           <code>MC68230G10</code>. Production plastic parts carry a P suffix.
           <code>MC68230P10</code> is the 10 MHz plastic DIP specified here and
           in the <a href="memory-map.html">Memory Map</a>; confirm the suffix
-          against the sourced part. The RXEF series and the CD74ACT244
-          both predate 1994.
+          against the sourced part. The RXEF series and the CD74ACT244 both
+          predate 1994.
         </p>
       </section>
 
@@ -1930,10 +1931,10 @@ watchdog limit             3.2 us</code></pre>
           </li>
           <li>
             Keep <code>PIT_CS_n</code> and <code>PIT_DTACK_n</code> short and
-            free of stubs. Measure the routed register-cycle release path at
-            the CPU <code>/DTACK</code> pin and keep the board contribution
-            below 41.2 ns. The acknowledge-cycle release path in section 13 is
-            tighter and depends on the interrupt-decoder fix.
+            free of stubs. Measure the routed register-cycle release path at the
+            CPU <code>/DTACK</code> pin and keep the board contribution below
+            41.2 ns. The acknowledge-cycle release path in section 13 is tighter
+            and depends on the interrupt-decoder fix.
           </li>
           <li>
             Place <code>R_PIT_DTACK</code> beside <code>U_PIT</code> pin 42.
@@ -1957,8 +1958,8 @@ watchdog limit             3.2 us</code></pre>
             pins sit behind it and no other load shares the fuse.
           </li>
           <li>
-            Include the <code>U_PIT</code> address, data, and control pins
-            in the CPU bus capacitance totals in
+            Include the <code>U_PIT</code> address, data, and control pins in
+            the CPU bus capacitance totals in
             <a href="bus-and-decode.html">Bus and Address Decode</a> after
             routing.
           </li>
@@ -1966,8 +1967,8 @@ watchdog limit             3.2 us</code></pre>
             Include the <code>PIT_CLK</code> branch in the
             <code>U_IO_CLK_BUF</code> load check in
             <a href="clock-and-reset.html#io-clock-buffer">Clock and Reset</a>.
-            The routed branch must stay inside the
-            <code>CD74ACT244E</code> 50 pF timing-analysis load.
+            The routed branch must stay inside the <code>CD74ACT244E</code> 50
+            pF timing-analysis load.
           </li>
           <li>
             Place each 100 nF capacitor at its supply pins and the 1 uF
@@ -2032,16 +2033,12 @@ watchdog limit             3.2 us</code></pre>
             <tr>
               <td><code>DDC_SCL</code></td>
               <td><code>U_PIT</code> pin 30</td>
-              <td>
-                <code>J_VGA</code> pin 15 and <code>R_DDC_SCL</code>.
-              </td>
+              <td><code>J_VGA</code> pin 15 and <code>R_DDC_SCL</code>.</td>
             </tr>
             <tr>
               <td><code>DDC_SDA</code></td>
               <td><code>U_PIT</code> pin 31</td>
-              <td>
-                <code>J_VGA</code> pin 12 and <code>R_DDC_SDA</code>.
-              </td>
+              <td><code>J_VGA</code> pin 12 and <code>R_DDC_SDA</code>.</td>
             </tr>
           </tbody>
         </table>
@@ -2050,8 +2047,7 @@ watchdog limit             3.2 us</code></pre>
           <code>IACK_L4_n</code>, and <code>IACK_L5_n</code> are defined in
           <a href="bus-and-decode.html#internal-signal-reference"
             >Bus and Address Decode</a
-          >,
-          <a href="clock-and-reset.html">Clock and Reset</a>, and
+          >, <a href="clock-and-reset.html">Clock and Reset</a>, and
           <a href="interrupts.html#internal-signal-reference">Interrupts</a>.
         </p>
       </section>

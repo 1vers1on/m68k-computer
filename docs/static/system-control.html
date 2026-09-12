@@ -82,8 +82,9 @@
           The slot sits inside the protected I/O region, so only supervisor code
           reaches it. A user-mode access to any address in the slot leaves
           <code>IO4_n</code> high and takes an immediate bus error; see
-          <a href="bus-and-decode.html#supervisor-protection">Supervisor
-          Protection</a>.
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Supervisor Protection</a
+          >.
         </p>
       </section>
       <section id="registers">
@@ -118,9 +119,9 @@
               <td><code>$E80005</code></td>
               <td>SYSREG2 / VGAGRANT</td>
               <td>
-                Write-only. <code>D0</code> high opens the CL-GD5428
-                host-memory window to user-mode cycles; <code>D0</code> low
-                closes it. <code>D7..D1</code> are ignored.
+                Write-only. <code>D0</code> high opens the CL-GD5428 host-memory
+                window to user-mode cycles; <code>D0</code> low closes it.
+                <code>D7..D1</code> are ignored.
               </td>
             </tr>
             <tr>
@@ -227,8 +228,7 @@ DEBUG_CLK     = NOT DEBUG_WRITE_n</code></pre>
           <a href="debug-display.html">debug display circuit</a>, which converts
           each to a hexadecimal digit. The register is write-only; a read ends
           in a bus error like the rest of the block. Application code reaches
-          the display through a BIOS call rather than by writing this
-          register.
+          the display through a BIOS call rather than by writing this register.
         </p>
       </section>
     </main>

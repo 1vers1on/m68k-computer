@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Memory Map, Revision 2.0</title>
+    <title>68EC000 Computer - Memory Map, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,36 +14,43 @@
         and firmware. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        The revision 2.0 address specification is frozen. This document may be
+        The revision 2.1 address specification is frozen. This document may be
         corrected or expanded without a new revision. Any change to an address
         range, slot assignment, register address, or privilege attribute
         requires a new memory map revision.
       </p>
       <p>
-        Revision 2.0 breaks compatibility with revision 1.2 firmware. Each
-        range now carries a privilege attribute, and the hardware enforces it.
-        User-mode code cannot reach the I/O region or the firmware EEPROM, and a
-        cycle that tries ends in a bus error. Main memory goes further: every
-        user-mode cycle in <code>$000000-$3FFFFF</code> passes through a page
-        table, so a program reaches only the 4 KiB pages the BIOS mapped for it.
-        Section 2 gives the rules,
-        <a href="bus-and-decode.html#supervisor-protection">Bus and Address
-        Decode</a> gives the protection circuit, and
-        <a href="paging.html">Paging</a> gives the page unit.
+        Revision 2.1 extends revision 2.0 by assigning I/O slot 11 to the IDE
+        interface and processor interrupt level 2 to its interrupt request.
+        Revision 2.0 firmware remains compatible but cannot use IDE until it
+        installs the new register and interrupt support. Revision 2.0 introduced
+        the privilege model. Each range now carries a privilege attribute, and
+        the hardware enforces it. User-mode code cannot reach the I/O region or
+        the firmware EEPROM, and a cycle that tries ends in a bus error. Main
+        memory goes further: every user-mode cycle in
+        <code>$000000-$3FFFFF</code> passes through a page table, so a program
+        reaches only the 4 KiB pages the BIOS mapped for it. Section 2 gives the
+        rules,
+        <a href="bus-and-decode.html#supervisor-protection"
+          >Bus and Address Decode</a
+        >
+        gives the protection circuit, and <a href="paging.html">Paging</a> gives
+        the page unit.
       </p>
       <p>
         BIOS scratch memory moves from <code>$3F0000-$3FFFFF</code> to physical
         <code>$000000-$01FFFF</code>, which returns the top of DRAM bank 1 to
         applications and puts the exception vectors inside BIOS territory. The
         unimplemented regions <code>$A00000-$DFFFFF</code> become the page-table
-        aperture, I/O slot 10 becomes the page-unit control block, and
-        <code>SYSREG2</code> becomes the VGA window grant. Every other address
+        aperture, I/O slot 10 holds the page-unit control block, and
+        <code>SYSREG2</code> holds the VGA window grant. Revision 2.1 assigns
+        I/O slot 11 to a two-device parallel ATA interface. Every other address
         range, slot assignment, and register address carries over from revision
-        1.2 unchanged.
+        2.0 unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 2.0; the address specification is frozen</dd>
+        <dd>Revision 2.1; the address specification is frozen</dd>
         <dt>Privilege model</dt>
         <dd>
           Supervisor-only I/O and firmware; paged main memory with 4 KiB pages
@@ -70,6 +77,8 @@
         </dd>
         <dt>Floppy controller</dt>
         <dd>Intel 82077AA-1 with two Mitsumi D359M3D drives</dd>
+        <dt>IDE interface</dt>
+        <dd>Two-device, 16-bit parallel ATA, PIO mode 0</dd>
         <dt>Parallel interface and timer</dt>
         <dd>MC68230P10 PI/T</dd>
       </dl>
@@ -93,6 +102,7 @@
         <li>
           <a href="#8-bit-peripheral-addressing">8-bit Peripheral Addressing</a>
         </li>
+        <li><a href="#ide-register-addressing">IDE Register Addressing</a></li>
         <li><a href="#dram-organization">DRAM Organization</a></li>
       </ol>
     </nav>
@@ -209,16 +219,18 @@
         <h2>2. Privilege and Protection</h2>
         <p>
           Every range in the map carries a privilege attribute. The motherboard
-          reads <code>FC2</code>, which the MC68EC000 drives high for
-          supervisor cycles and low for user cycles, and refuses a user-mode
-          cycle that addresses a supervisor-only range. The refused cycle
-          reaches no device and the processor takes a bus-error exception.
+          reads <code>FC2</code>, which the MC68EC000 drives high for supervisor
+          cycles and low for user cycles, and refuses a user-mode cycle that
+          addresses a supervisor-only range. The refused cycle reaches no device
+          and the processor takes a bus-error exception.
         </p>
         <p>
           Application code therefore reaches hardware only by calling the BIOS,
           which runs in supervisor mode. The circuit is in
-          <a href="bus-and-decode.html#supervisor-protection">Bus and Address
-          Decode</a> and the call gate is in
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Bus and Address Decode</a
+          >
+          and the call gate is in
           <a href="firmware-rom.html#bios-call-gate">Firmware ROM</a>.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
@@ -378,9 +390,9 @@
         <p>
           The final 2 MiB of the address space is divided into sixteen 128 KiB
           slots. A slot can contain a device, firmware, or space reserved for
-          later use. Every slot is supervisor only, including the two that
-          reach the expansion connectors, so the register maps below describe
-          what the BIOS sees rather than what an application may touch.
+          later use. Every slot is supervisor only, including the two that reach
+          the expansion connectors, so the register maps below describe what the
+          BIOS sees rather than what an application may touch.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -534,8 +546,13 @@
               <td><code>$F60000</code></td>
               <td><code>$F7FFFF</code></td>
               <td>128 KiB</td>
-              <td>Reserved</td>
-              <td>Available for future I/O.</td>
+              <td>Parallel ATA IDE interface</td>
+              <td>
+                Provides one 40-pin cable for two ATA or ATAPI devices. The
+                command block starts at <code>$F60000</code>, and the control
+                block starts at <code>$F60010</code>. See
+                <a href="ide.html">IDE Interface</a>.
+              </td>
             </tr>
             <tr>
               <th scope="row">12</th>
@@ -690,9 +707,9 @@
               <td><code>$E80005</code></td>
               <td>SYSREG2 / VGAGRANT</td>
               <td>
-                Write-only. <code>D0</code> high opens the CL-GD5428
-                host-memory window at <code>$800000-$9FFFFF</code> to user-mode
-                cycles; <code>D0</code> low closes it. A board reset closes it.
+                Write-only. <code>D0</code> high opens the CL-GD5428 host-memory
+                window at <code>$800000-$9FFFFF</code> to user-mode cycles;
+                <code>D0</code> low closes it. A board reset closes it.
                 <code>D7..D1</code> are ignored.
               </td>
             </tr>
@@ -926,8 +943,27 @@
         </p>
       </section>
 
+      <section id="ide-register-addressing">
+        <h2>9. IDE Register Addressing</h2>
+        <p>
+          The IDE interface occupies I/O slot 11. CPU address lines
+          <code>A3..A1</code> drive ATA <code>DA2..DA0</code>, and
+          <code>A4</code> selects the command or control block. The data
+          register uses a 16-bit word at <code>$F60000</code>. Command-block
+          registers 1 through 7 use the lower byte at odd addresses
+          <code>$F60003-$F6000F</code>. Alternate Status and Device Control
+          share <code>$F6001D</code> in the control block.
+        </p>
+        <p>
+          Address lines <code>A16..A5</code> are not decoded, so the 32-byte
+          pattern repeats through the slot. Firmware uses the canonical first
+          copy. The <a href="ide.html#register-map">IDE register table</a> gives
+          each read and write function.
+        </p>
+      </section>
+
       <section id="dram-organization">
-        <h2>9. DRAM Organization</h2>
+        <h2>10. DRAM Organization</h2>
         <p>
           Two 2 MiB banks provide 4 MiB of system DRAM. Each bank uses four 1M x
           4 devices to form the computer's 16-bit data width.

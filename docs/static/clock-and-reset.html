@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Clock and Reset, Revision 2.0</title>
+    <title>68EC000 Computer - Clock and Reset, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -17,12 +17,14 @@
       </p>
 
       <p>
-        Revision 2.0 follows memory map 2.0. <code>RESET_n</code> gains two
-        loads. Pin 13 of <code>U_OVERLAY</code> is the asynchronous clear of the
-        VGA-grant flip-flop, so a board reset closes the granted display window
-        alongside re-enabling the boot overlay. <code>U_PAGE_MMU</code> takes
-        the second, which clears the context register and the translation enable
-        bit and brings the machine up with the
+        Revision 2.1 follows memory map 2.1. The IDE adapter adds two input
+        loads to <code>PERIPH_RESET_n</code> and buffers that reset onto the ATA
+        cable. Revision 2.0 added two loads to <code>RESET_n</code>. Pin 13 of
+        <code>U_OVERLAY</code> is the asynchronous clear of the VGA-grant
+        flip-flop, so a board reset closes the granted display window alongside
+        re-enabling the boot overlay. <code>U_PAGE_MMU</code> takes the second,
+        which clears the context register and the translation enable bit and
+        brings the machine up with the
         <a href="paging.html">page unit</a> transparent. Both are CMOS and draw
         10 uA apiece. The clock tree, the reset conditioner, and every timing
         figure carry over from revision 1.1 unchanged.
@@ -31,7 +33,7 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.0 pre-layout design; loaded clock waveforms, reset edges,
+          Revision 2.1 pre-layout design; loaded clock waveforms, reset edges,
           and supply-ramp behavior remain to be measured on the assembled board
         </dd>
 
@@ -3118,6 +3120,15 @@ CPU_RESET_n and PERIPH_RESET_n must not feed back into RESET_n.</code></pre>
         </p>
 
         <p>
+          The <a href="ide.html#interrupt-reset">IDE reset adapter</a> adds one
+          PALCE20V8 input and one CD74HCT123 input to
+          <code>PERIPH_RESET_n</code>. Their specified input leakage totals at
+          most 11 uA and lowers the released level by at most 11.6 mV through
+          the 1.05 kohm maximum pull-up. The PAL and an HCT244 channel drive the
+          ATA cable, so drive reset loads do not appear on the distribution net.
+        </p>
+
+        <p>
           The <a href="opl3.html#clock-reset">OPL3 reset adapter</a> adds one
           CD74HCT123 input and one SN74HCT08 input, totaling at most 2 uA
           leakage and about 20 pF nominal input capacitance. Their leakage
@@ -3323,9 +3334,9 @@ MC68EC000 /RESET sink rating = 5.0 mA at VOL &lt;= 0.5 V</code></pre>
         <p>
           The conditioned <code>RESET_n</code> output connects to
           <code>U_OVERLAY</code> pin 4, the active-low asynchronous preset of
-          the boot-overlay flip-flop, and to pin 13, the active-low
-          asynchronous clear of the VGA-grant flip-flop. The raw DS1233 output
-          is isolated by two SN74LS14 Schmitt stages.
+          the boot-overlay flip-flop, and to pin 13, the active-low asynchronous
+          clear of the VGA-grant flip-flop. The raw DS1233 output is isolated by
+          two SN74LS14 Schmitt stages.
         </p>
 
         <pre><code>RESET_n

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Bus and Address Decode, Revision 2.0</title>
+    <title>68EC000 Computer - Bus and Address Decode, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -11,24 +11,28 @@
       <h1>Bus and Address Decode</h1>
 
       <p>
-        This document defines the revision 2.0 motherboard bus and address
+        This document defines the revision 2.1 motherboard bus and address
         decoder. It covers normal-cycle qualification, supervisor protection,
         memory and I/O selects, the boot overlay, firmware ROM selection,
         system-register writes, bus-cycle termination, timeout behavior, and
-        expansion-bus boundaries.
-        Device-specific register maps, bus adapters, and response timing belong
-        in the linked device documents.
+        expansion-bus boundaries. Device-specific register maps, bus adapters,
+        and response timing belong in the linked device documents.
         <a href="index.html">Return to the main page</a>.
       </p>
 
       <p>
-        Revision 2.0 breaks compatibility with revision 1.1 firmware. It adds
-        the supervisor protection described in section 8, which closes the I/O
-        region and the firmware ROM to user-mode cycles and terminates a
-        user-mode access to either with <code>/BERR</code>. Application code
-        reaches hardware only through a BIOS call. Main memory is protected in
-        parallel by the page unit in <a href="paging.html">Paging</a>, which
-        translates every user-mode DRAM cycle through a page table.
+        Revision 2.1 assigns <code>IO11_n</code> to the
+        <a href="ide.html">IDE interface</a> and connects
+        <code>IDE_DTACK_n</code> to the spare fourth input of the final
+        acknowledgement-tree gate. The top I/O decoder and the first three
+        completion groups keep their revision 2.0 wiring. Revision 2.0 broke
+        compatibility with revision 1.1 firmware and added the supervisor
+        protection described in section 8, which closes the I/O region and the
+        firmware ROM to user-mode cycles and terminates a user-mode access to
+        either with <code>/BERR</code>. Application code reaches hardware only
+        through a BIOS call. Main memory is protected in parallel by the page
+        unit in <a href="paging.html">Paging</a>, which translates every
+        user-mode DRAM cycle through a page table.
       </p>
 
       <p>
@@ -36,22 +40,22 @@
         decode. <code>SYSREG2</code> becomes the VGA window grant, the second
         <code>U_OVERLAY</code> flip-flop stores that grant, and the bus-error
         gate moves from <code>U_AND</code> to <code>U_PROT</code>, which now
-        combines four sources instead of two. The CL-GD5428 window, top I/O,
-        and the ROM alias take the new <code>NORMAL_PROT_n</code> qualifier in
-        place of <code>NORMAL_MEM_n</code> or <code>NORMAL_MISC_n</code>, which
-        costs them one 30 ns gate stage. The two DRAM bank requests become
-        <code>LRAM0_REQ_n</code> and <code>LRAM1_REQ_n</code> and go to the
-        page unit rather than straight to the DRAM controller. Every other
-        decode, equation, and package assignment carries over from revision 1.1
+        combines four sources instead of two. The CL-GD5428 window, top I/O, and
+        the ROM alias take the new <code>NORMAL_PROT_n</code> qualifier in place
+        of <code>NORMAL_MEM_n</code> or <code>NORMAL_MISC_n</code>, which costs
+        them one 30 ns gate stage. The two DRAM bank requests become
+        <code>LRAM0_REQ_n</code> and <code>LRAM1_REQ_n</code> and go to the page
+        unit rather than straight to the DRAM controller. Every other decode,
+        equation, and package assignment carries over from revision 1.1
         unchanged.
       </p>
 
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 2.0 pre-layout design</dd>
+        <dd>Revision 2.1 pre-layout design</dd>
 
         <dt>Memory map</dt>
-        <dd><a href="memory-map.html">Frozen revision 2.0</a></dd>
+        <dd><a href="memory-map.html">Frozen revision 2.1</a></dd>
 
         <dt>Privilege model</dt>
         <dd>Supervisor-only I/O, firmware, and BIOS memory</dd>
@@ -731,9 +735,9 @@ NORMAL_MISC_n = NORMAL_CYCLE_n</code></pre>
 
         <p>
           The processor reports the privilege level of every bus cycle on
-          <code>FC2</code>. The motherboard reads that bit and refuses
-          user-mode access to device registers and to the firmware ROM. A
-          refused cycle reaches no device and ends in a bus error.
+          <code>FC2</code>. The motherboard reads that bit and refuses user-mode
+          access to device registers and to the firmware ROM. A refused cycle
+          reaches no device and ends in a bus error.
         </p>
 
         <p>
@@ -756,9 +760,9 @@ NORMAL_MISC_n = NORMAL_CYCLE_n</code></pre>
 
         <p>
           <code>FC2</code> is high for supervisor data, supervisor program, and
-          CPU space. It is low for both user address spaces (MC68000UM, p.
-          3-9). One bit separates the privilege levels, so the protection
-          decoder needs no other function-code term.
+          CPU space. It is low for both user address spaces (MC68000UM, p. 3-9).
+          One bit separates the privilege levels, so the protection decoder
+          needs no other function-code term.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -863,19 +867,18 @@ NORMAL_MISC_n = NORMAL_CYCLE_n</code></pre>
 
         <p>
           Main memory at <code>$000000-$3FFFFF</code> carries no privilege test
-          here. Every user-mode cycle in that range goes through the page
-          table, which answers with a physical frame or with a fault, so the
-          page unit is the only gate main memory needs. The page-table aperture
-          at <code>$A00000-$DFFFFF</code> answers supervisor cycles only, and
-          the page unit enforces that itself rather than adding a term to this
+          here. Every user-mode cycle in that range goes through the page table,
+          which answers with a physical frame or with a fault, so the page unit
+          is the only gate main memory needs. The page-table aperture at
+          <code>$A00000-$DFFFFF</code> answers supervisor cycles only, and the
+          page unit enforces that itself rather than adding a term to this
           decoder.
         </p>
 
         <p>
-          The expansion memory windows at <code>$400000-$7FFFFF</code> stay
-          open to user mode. Expansion I/O sits at
-          <code>$EC0000-$EFFFFF</code> and stays behind the wall with the rest
-          of the I/O region.
+          The expansion memory windows at <code>$400000-$7FFFFF</code> stay open
+          to user mode. Expansion I/O sits at <code>$EC0000-$EFFFFF</code> and
+          stays behind the wall with the rest of the I/O region.
         </p>
 
         <h3 id="protection-decode">Protection Decode</h3>
@@ -961,10 +964,10 @@ BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
         </table>
 
         <p>
-          <code>VIOL_ACTIVE</code> follows the address bus,
-          <code>FC2</code>, and the stored grant alone. It carries no bus-cycle
-          qualification, which is what lets it settle before the processor
-          asserts <code>AS_n</code>.
+          <code>VIOL_ACTIVE</code> follows the address bus, <code>FC2</code>,
+          and the stored grant alone. It carries no bus-cycle qualification,
+          which is what lets it settle before the processor asserts
+          <code>AS_n</code>.
         </p>
 
         <h3>Protected Cycle Qualifier</h3>
@@ -985,7 +988,8 @@ BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            Selects qualified by <code>NORMAL_PROT_n</code>
+            Selects qualified by
+            <code>NORMAL_PROT_n</code>
           </caption>
           <thead>
             <tr>
@@ -1038,9 +1042,10 @@ BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
 
         <p>
           A violation drives <code>BERR_n</code> low 15 ns after
-          <code>AS_n</code> falls, well inside the first <code>/BERR</code>
-          sampling edge, so a faulting cycle runs no longer than a normal one.
-          It releases 15 ns after <code>AS_n</code> returns high.
+          <code>AS_n</code> falls, well inside the first
+          <code>/BERR</code> sampling edge, so a faulting cycle runs no longer
+          than a normal one. It releases 15 ns after <code>AS_n</code> returns
+          high.
         </p>
 
         <p>
@@ -1147,7 +1152,8 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            <code>U_PROT</code> signal assignment
+            <code>U_PROT</code>
+            signal assignment
           </caption>
           <thead>
             <tr>
@@ -1233,9 +1239,9 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
         </p>
 
         <p>
-          The five-package FAST version of this decode took 29.6 ns and left
-          9.6 ns of settling after the strobe, which needed a bench measurement
-          to close. A single 15 ns device removes that argument.
+          The five-package FAST version of this decode took 29.6 ns and left 9.6
+          ns of settling after the strobe, which needed a bench measurement to
+          close. A single 15 ns device removes that argument.
         </p>
 
         <h3>Boot and Mode Changes</h3>
@@ -1249,8 +1255,7 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
         <ol>
           <li>
             Reset. The overlay maps the firmware into
-            <code>$000000-$01FFFF</code> and the CPU reads its vectors from
-            ROM.
+            <code>$000000-$01FFFF</code> and the CPU reads its vectors from ROM.
           </li>
           <li>
             The BIOS initialises DRAM, writes <code>SYSREG0</code> to disable
@@ -1258,8 +1263,8 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
             visible at <code>$000000</code>.
           </li>
           <li>
-            The BIOS builds a page table for the program, loads it, installs
-            its <code>TRAP</code> handler, and enters the program with an
+            The BIOS builds a page table for the program, loads it, installs its
+            <code>TRAP</code> handler, and enters the program with an
             <code>RTE</code> that clears the supervisor bit.
           </li>
           <li>
@@ -1727,8 +1732,8 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
               <td>1</td>
               <td>1</td>
               <td>
-                CL-GD5428 VGA region address present, but no valid normal
-                cycle, or a user-mode cycle without a granted window.
+                CL-GD5428 VGA region address present, but no valid normal cycle,
+                or a user-mode cycle without a granted window.
               </td>
             </tr>
 
@@ -1754,8 +1759,7 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
           <code>VGA_MEM_n</code> is the motherboard-level CL-GD5428 VGA
           memory-window select. The CL-GD5428 host interface may decode the
           address further if needed. The window is protected, so a user-mode
-          cycle reaches it only after the BIOS has set
-          <code>VGA_GRANT</code>.
+          cycle reaches it only after the BIOS has set <code>VGA_GRANT</code>.
         </p>
 
         <h3>Expansion Memory Requests</h3>
@@ -1820,8 +1824,8 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
           An OR gate combines the raw <code>REGION7_n</code> address decode with
           <code>NORMAL_PROT_n</code>. The resulting <code>TOP_IO_n</code>
           signal goes low only during a supervisor bus cycle in region 7. A
-          user-mode cycle leaves it high, so neither slot decoder enables and
-          no I/O device, system register, or firmware EEPROM sees the access.
+          user-mode cycle leaves it high, so neither slot decoder enables and no
+          I/O device, system register, or firmware EEPROM sees the access.
         </p>
 
         <pre><code>TOP_IO_n = REGION7_n OR NORMAL_PROT_n</code></pre>
@@ -2088,13 +2092,13 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
               <td><code>/Y2</code></td>
               <td><code>IO10_n</code></td>
               <td><code>$F40000-$F5FFFF</code></td>
-              <td>Reserved</td>
+              <td>Page-unit control</td>
             </tr>
             <tr>
               <td><code>/Y3</code></td>
               <td><code>IO11_n</code></td>
               <td><code>$F60000-$F7FFFF</code></td>
-              <td>Reserved</td>
+              <td>Parallel ATA IDE interface</td>
             </tr>
             <tr>
               <td><code>/Y4</code></td>
@@ -2124,9 +2128,10 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
         </table>
 
         <p>
-          <code>IO10_n..IO14_n</code> remain on the motherboard and have no
-          connector destination under memory-map revision 1.2.
-          <code>IO9_n</code> leaves the decoder for the
+          <code>IO10_n</code> selects the page unit and
+          <code>IO11_n</code> selects the IDE interface.
+          <code>IO12_n..IO14_n</code> remain on the motherboard with no
+          destination. <code>IO9_n</code> leaves the decoder for the
           <a href="pit.html#bus-interface">PI/T chip-select gate</a>.
         </p>
 
@@ -2367,10 +2372,9 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
               <td><code>SYSREG2 / VGAGRANT</code></td>
               <td><code>$E80005</code></td>
               <td>
-                Write-only. <code>D0</code> high opens the CL-GD5428
-                host-memory window to user-mode cycles;
-                <code>D0</code> low closes it. Reset clears the bit.
-                <code>D7..D1</code> are ignored.
+                Write-only. <code>D0</code> high opens the CL-GD5428 host-memory
+                window to user-mode cycles; <code>D0</code> low closes it. Reset
+                clears the bit. <code>D7..D1</code> are ignored.
               </td>
             </tr>
 
@@ -3905,8 +3909,8 @@ SYSREG0_n..SYSREG7_n = 1</code></pre>
         <h3>User-Mode Read at $E00001</h3>
 
         <p>
-          An application tries to read the MC68901 status register directly.
-          The primary decoder still activates <code>REGION7_n</code>, and the
+          An application tries to read the MC68901 status register directly. The
+          primary decoder still activates <code>REGION7_n</code>, and the
           protection logic still stops the cycle.
         </p>
 
@@ -4119,6 +4123,13 @@ VGA_MEM_n        = REGION4_n OR NORMAL_PROT_n
             </tr>
 
             <tr>
+              <td>Parallel ATA IDE</td>
+              <td><code>IO11_n</code></td>
+              <td><code>IDE_DTACK_n</code></td>
+              <td><a href="ide.html">IDE interface</a></td>
+            </tr>
+
+            <tr>
               <td>Expansion hardware</td>
               <td>Expansion-region or I/O-select signal</td>
               <td><code>EXP_DTACK_n</code></td>
@@ -4146,7 +4157,8 @@ MIDI_DTACK_n
 RTC_DTACK_n
 PIT_DTACK_n
 PAGE_DTACK_n
-EXP_DTACK_n</code></pre>
+EXP_DTACK_n
+IDE_DTACK_n</code></pre>
 
         <p>
           An unselected subsystem must keep its completion signal inactive. A
@@ -4158,7 +4170,7 @@ EXP_DTACK_n</code></pre>
         <h3>Final /DTACK Combination</h3>
 
         <p>
-          Two <code>SN74F21N</code> packages combine the twelve completion
+          Two <code>SN74F21N</code> packages combine the thirteen completion
           signals through four-input AND gates. No device outputs are connected
           together. The <code>SN74F21N</code> is a period-correct 5 V TTL dual
           four-input AND in a 14-pin PDIP; its TI data sheet dates from 1987 and
@@ -4187,16 +4199,16 @@ DTACK_GROUP2_n =
 
 DTACK_RAW_n =
     DTACK_GROUP0_n AND DTACK_GROUP1_n
-    AND DTACK_GROUP2_n AND 1
+    AND DTACK_GROUP2_n AND IDE_DTACK_n
 
 DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
         <p>
           The MC68901 <code>MFP_DTACK_n</code> input in group 0 terminates both
           ordinary MFP register cycles and level-6 interrupt-acknowledge cycles.
-          <code>PIT_DTACK_n</code> in group 2 does the same for MC68230
-          register cycles and for the level-4 and level-5 acknowledge cycles.
-          The completion tree remains active during CPU space, while the normal
-          bus timeout does not run there.
+          <code>PIT_DTACK_n</code> in group 2 does the same for MC68230 register
+          cycles and for the level-4 and level-5 acknowledge cycles. The
+          completion tree remains active during CPU space, while the normal bus
+          timeout does not run there.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -4244,7 +4256,8 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
               <td><code>U_DTACK_B</code> gate 2</td>
               <td>
                 9: <code>DTACK_GROUP0_n</code>; 10: <code>DTACK_GROUP1_n</code>;
-                12: <code>DTACK_GROUP2_n</code>; 13: +5 V
+                12: <code>DTACK_GROUP2_n</code>; 13:
+                <code>IDE_DTACK_n</code>
               </td>
               <td>8</td>
               <td><code>DTACK_RAW_n</code></td>
@@ -4254,8 +4267,8 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
 
         <p>
           Pin 7 of each package connects to ground and pin 14 connects to +5 V.
-          The one remaining unused gate input shown as logic one connects to
-          +5 V: pin 13 on <code>U_DTACK_B</code> gate 2.
+          Revision 2.1 connects <code>IDE_DTACK_n</code> to the final gate input
+          that revision 2.0 tied high: pin 13 on <code>U_DTACK_B</code> gate 2.
           <code>EXP_DTACK_n</code> has a 10 kohm pull-up at the motherboard and
           the expansion card may only pull it low. The timeout circuit masks
           <code>DTACK_RAW_n</code> after a bus error and drives the CPU
@@ -4442,12 +4455,11 @@ global release-tree logic delay     &lt;= 17.2 ns</code></pre>
         <p>
           <code>TIMEOUT_BERR_n</code> is combined with
           <code>INT_BERR_n</code> from the interrupt logic, with
-          <code>PAGE_BERR_n</code> from the
-          <a href="paging.html">page unit</a>, and with the internal protection
-          violation, all inside <code>U_PROT</code>. The result
-          <code>BERR_n</code> drives the processor's physical
-          <code>/BERR</code> input. None of the four sources asserts
-          <code>/HALT</code>.
+          <code>PAGE_BERR_n</code> from the <a href="paging.html">page unit</a>,
+          and with the internal protection violation, all inside
+          <code>U_PROT</code>. The result <code>BERR_n</code> drives the
+          processor's physical <code>/BERR</code> input. None of the four
+          sources asserts <code>/HALT</code>.
         </p>
 
         <h3>Normal Cycle Qualification</h3>
@@ -4524,11 +4536,11 @@ DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
           <code>INT_BERR_n</code> is the spurious-interrupt-acknowledge abort
           from the <a href="interrupts.html">interrupt logic</a>. It is inactive
           during normal cycles. <code>PROT_BERR</code> is the internal
-          protection violation from section 8 and
-          <code>PAGE_BERR_n</code> the page fault from the page unit, and both
-          are inactive whenever the processor runs in supervisor mode.
-          <code>U_PROT</code> combines all four sources; any one of them
-          asserts the processor <code>/BERR</code> input.
+          protection violation from section 8 and <code>PAGE_BERR_n</code> the
+          page fault from the page unit, and both are inactive whenever the
+          processor runs in supervisor mode. <code>U_PROT</code> combines all
+          four sources; any one of them asserts the processor
+          <code>/BERR</code> input.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -4703,10 +4715,9 @@ NORMAL_CYCLE_n  = 0 OR 1
             <tr>
               <td><code>INT_BERR_n</code></td>
               <td>
-                <code>U_PROT</code>, combined with
-                <code>TIMEOUT_BERR_n</code>, <code>PAGE_BERR_n</code>, and the
-                internal protection violation to form <code>BERR_n</code>.
-                See
+                <code>U_PROT</code>, combined with <code>TIMEOUT_BERR_n</code>,
+                <code>PAGE_BERR_n</code>, and the internal protection violation
+                to form <code>BERR_n</code>. See
                 <a href="#bus-error-and-timeout">Bus Error and Timeout</a>.
               </td>
             </tr>
@@ -4820,6 +4831,12 @@ NORMAL_CYCLE_n  = 0 OR 1
               </td>
             </tr>
             <tr>
+              <td>Parallel ATA IDE</td>
+              <td><a href="ide.html">IDE interface</a></td>
+              <td><code>IO11_n</code></td>
+              <td><code>IDE_DTACK_n</code></td>
+            </tr>
+            <tr>
               <td>Expansion slots</td>
               <td><a href="expansion.html">Expansion interface</a></td>
               <td>
@@ -4846,7 +4863,7 @@ NORMAL_CYCLE_n  = 0 OR 1
           selection and otherwise mirror through the slot. Slot 10 now carries
           the page-unit control registers, and <code>EXP_MEM5_n</code> and
           <code>EXP_MEM6_n</code> now carry its table aperture, so the only
-          selects without a destination are <code>IO11_n</code> through
+          selects without a destination are <code>IO12_n</code> through
           <code>IO14_n</code>. Empty expansion ranges produce no
           <code>EXP_DTACK_n</code> response, so the motherboard timeout reports
           a bus error.
@@ -5058,8 +5075,8 @@ NORMAL_CYCLE_n  = 0 OR 1
           with output pin 6; gate 2 uses input pins 9, 10, 12, and 13 with
           output pin 8. Pin 3 and pin 11 are not connected internally. Pin 7 is
           ground and pin 14 is +5 V. The pin-by-pin signal assignment is in the
-          acknowledgement-tree connections table above. Unused inputs shown as
-          logic one connect to +5 V.
+          acknowledgement-tree connections table above. Revision 2.1 uses all
+          sixteen gate inputs.
         </p>
 
         <h3>SN74F32N Gate Map</h3>
@@ -5216,22 +5233,20 @@ NORMAL_CYCLE_n  = 0 OR 1
           use the TI switching limits at <code>VCC = 4.5 V</code>,
           <code>CL = 50 pF</code>, and <code>TA = -40 C to +85 C</code>. The 4.5
           V limits are the conservative datasheet values for the permitted
-          SN74HCT supply range. <code>U_PROT</code> is a 16V8 device and its
-          15 ns figure is the commercial Q-15 maximum. The
-          <code>SN74F21N</code> and <code>SN74F32N</code> in the
-          acknowledgement path are FAST-family TTL parts; their delays below are
-          the commercial SN74F21 (<a
-            href="datasheets/sn74f21.pdf"
-            >SDFS006A</a
-          >) and SN74F32 (<a href="datasheets/sn74f32.pdf">SDFS044B</a>)
-          MIN-to-MAX-column maxima at <code>CL = 50 pF</code>,
-          <code>RL = 500 ohm</code>, and <code>VCC = 4.5 V to 5.5 V</code>. That
-          column is characterized only over <code>TA = 0 C to +70 C</code>: the
-          N-package SN74F parts do not carry the
-          <code>-40 C to +85 C</code> rating used for the SN74HCT glue; see the
-          FAST-family temperature note in section 26. Each complete-path total
-          is the sum of the applicable maximum delays; it does not include trace
-          delay, output loading above 50 pF, or input skew.
+          SN74HCT supply range. <code>U_PROT</code> is a 16V8 device and its 15
+          ns figure is the commercial Q-15 maximum. The
+          <code>SN74F21N</code> and <code>SN74F32N</code> in the acknowledgement
+          path are FAST-family TTL parts; their delays below are the commercial
+          SN74F21 (<a href="datasheets/sn74f21.pdf">SDFS006A</a>) and SN74F32
+          (<a href="datasheets/sn74f32.pdf">SDFS044B</a>) MIN-to-MAX-column
+          maxima at <code>CL = 50 pF</code>, <code>RL = 500 ohm</code>, and
+          <code>VCC = 4.5 V to 5.5 V</code>. That column is characterized only
+          over <code>TA = 0 C to +70 C</code>: the N-package SN74F parts do not
+          carry the <code>-40 C to +85 C</code> rating used for the SN74HCT
+          glue; see the FAST-family temperature note in section 26. Each
+          complete-path total is the sum of the applicable maximum delays; it
+          does not include trace delay, output loading above 50 pF, or input
+          skew.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -5705,8 +5720,8 @@ NORMAL_CYCLE_n  = 0 OR 1
         </table>
 
         <p>
-          The full <code>TIMEOUT_ACTIVE</code> to <code>BERR_n</code> path is
-          40 ns: 25 ns through the <code>SN74HCT04N</code> inverter and 15 ns
+          The full <code>TIMEOUT_ACTIVE</code> to <code>BERR_n</code> path is 40
+          ns: 25 ns through the <code>SN74HCT04N</code> inverter and 15 ns
           through <code>U_PROT</code>. The bus timeout is a 51.2 microsecond
           event, so neither stage affects when the processor sees
           <code>/BERR</code>. A protection violation reaches the same device by
@@ -5890,10 +5905,10 @@ NORMAL_CYCLE_n  = 0 OR 1
 
         <p>
           The protection routes above start at the address bus rather than at
-          <code>AS_n</code>, because the protection decode has to settle
-          before the strobe-qualified path it gates. Section 8 sets that
-          requirement against the 20 ns the processor holds the address valid
-          ahead of <code>AS_n</code>.
+          <code>AS_n</code>, because the protection decode has to settle before
+          the strobe-qualified path it gates. Section 8 sets that requirement
+          against the 20 ns the processor holds the address valid ahead of
+          <code>AS_n</code>.
         </p>
 
         <p>
@@ -6511,10 +6526,10 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
           SN74F21 or SN74F32 output, and each of those outputs sinks 20 mA, so
           the sink ratio never falls below about 33. <code>U_PROT</code> loads
           nothing heavily: its inputs draw 100 uA at worst and its outputs sink
-          24 mA. <code>AS_n</code>, <code>UDS_n</code>, and <code>LDS_n</code>
-          gain FAST loads at <code>U_DRAM_DTACK_GATE</code>; that budget is on
-          the <a href="dram.html">DRAM page</a> because those strobes are
-          decoded there.
+          24 mA. <code>AS_n</code>, <code>UDS_n</code>, and
+          <code>LDS_n</code> gain FAST loads at <code>U_DRAM_DTACK_GATE</code>;
+          that budget is on the <a href="dram.html">DRAM page</a> because those
+          strobes are decoded there.
         </p>
 
         <h3>FAST-Family Temperature Range</h3>
@@ -6536,9 +6551,8 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
           only. <code>U_PROT</code> adds one CMOS input to
           <code>A23..A21</code>, <code>FC2</code>, and <code>AS_n</code>, worth
           100 uA at worst, and the page unit adds its own loads to
-          <code>A21..A12</code> as
-          <a href="paging.html">Paging</a> records. Each named stage is one of
-          the package assignments above.
+          <code>A21..A12</code> as <a href="paging.html">Paging</a> records.
+          Each named stage is one of the package assignments above.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -6885,18 +6899,18 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
         </p>
 
         <p>
-          <code>R/W</code> is the one processor net that revision 2.0 pushes
-          past the 100 pF budget. It gains the VGA grant qualifier in
-          <code>U_OR6</code> gate 4 and the <code>U_PAGE_MMU</code> input, which
-          together take it to twelve loads and roughly 116 pF against the
-          processor's 130 pF limit. The page unit already avoids two more:
-          <code>U_PAGE_MMU</code> drives <code>XCVR_DIR</code> to its two
-          transceivers rather than letting them sit on <code>R/W</code>, as
-          <a href="paging.html#package-assignments">Paging</a> records.
-          That leaves 14 pF for trace and socket, which the board audit has to
-          measure rather than assume. If it does not close, buffer the
-          <code>R/W</code> branch that feeds the expansion connectors, which is
-          six of the twelve loads and the only group with a natural boundary.
+          Revision 2.1 keeps processor <code>R/W</code> within the 100 pF design
+          budget. The expansion interface replaces six direct loads with two
+          inputs on <code>U_EXP_RW_BUF</code>, and the IDE interface adds one
+          input on its local two-inverter direction buffer. The result is nine
+          loads and about 86 pF against the processor's 130 pF limit. The page
+          unit avoids two more: <code>U_PAGE_MMU</code> drives
+          <code>XCVR_DIR</code> to its two transceivers rather than letting them
+          sit on <code>R/W</code>, as
+          <a href="paging.html#package-assignments">Paging</a> records. That
+          leaves 14 pF below the 100 pF design budget and 44 pF below the
+          processor limit for trace, socket, and probe loading. The board audit
+          must measure the completed net.
         </p>
 
         <p>
@@ -6904,6 +6918,16 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
           expansion interface, for at most 20 pF added receiver capacitance and
           2 uA added leakage per line. Add these to the line's device-specific
           consumers when checking the complete motherboard.
+        </p>
+
+        <p>
+          The IDE interface adds one HCT244 input to <code>A1..A3</code>, one
+          PAL input to <code>A4</code>, one PAL input to each data strobe, and
+          one HCT04 input to <code>R/W</code>. Its HCT244 output feeds the
+          remaining low address decode, so the PAL does not add a second
+          processor load to <code>A1..A3</code>. The
+          <a href="ide.html#control">IDE page</a>
+          records that boundary.
         </p>
 
         <p>
@@ -6938,9 +6962,9 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
                 loading.
               </td>
               <td>
-                Each device page and the final motherboard load audit.
-                <code>R/W</code> misses this figure at revision 2.0 and is the
-                one net that does.
+                Each device page and the final motherboard load audit. Revision
+                2.1 gives <code>R/W</code> about 14 pF of margin to this design
+                limit before board and probe loading.
               </td>
             </tr>
             <tr>
@@ -6970,8 +6994,8 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
                 load per SN74F21 or SN74F32 output. Voltage and static-current
                 margins are checked in FAST-Family Compatibility above.
                 Operating temperature is limited to
-                <code>0 C to +70 C</code> for the
-                N-package parts (FAST-Family Temperature Range).
+                <code>0 C to +70 C</code> for the N-package parts (FAST-Family
+                Temperature Range).
               </td>
               <td>
                 FAST-family compatibility above; the DRAM page for the strobe
@@ -6989,11 +7013,10 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             <tr>
               <td>MC68230 PI/T</td>
               <td>
-                The device connects to <code>D7..D0</code>,
-                <code>A5..A1</code>, and <code>R/W</code> with no buffer, so
-                each of those CPU nets gains 15 pF and 10 uA.
-                <code>U_OR_DTACK</code> gate 2 drives one MC68230 input and
-                nothing else.
+                The device connects to <code>D7..D0</code>, <code>A5..A1</code>,
+                and <code>R/W</code> with no buffer, so each of those CPU nets
+                gains 15 pF and 10 uA. <code>U_OR_DTACK</code> gate 2 drives one
+                MC68230 input and nothing else.
               </td>
               <td><code>pit.html</code></td>
             </tr>
@@ -7075,8 +7098,8 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             <tr>
               <td><code>NORMAL_PROT_n</code></td>
               <td>
-                Normal-cycle qualifier for the protected selects; high through
-                a protection violation.
+                Normal-cycle qualifier for the protected selects; high through a
+                protection violation.
               </td>
               <td>Low</td>
               <td>
@@ -7216,14 +7239,13 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               <td>Low</td>
               <td><code>U_IO_HIGH /Y0../Y7</code></td>
               <td>
-                RTC, PI/T, five reserved slots, and permanent firmware ROM
+                RTC, PI/T, page control, IDE, three reserved slots, and
+                permanent firmware ROM
               </td>
             </tr>
             <tr>
               <td><code>PIT_CS_n</code></td>
-              <td>
-                Lower-byte select for the MC68230 PI/T in slot 9.
-              </td>
+              <td>Lower-byte select for the MC68230 PI/T in slot 9.</td>
               <td>Low</td>
               <td>
                 <code>IO9_n OR LDS_n</code> in <code>U_OR_DTACK</code> gate 2
@@ -7302,9 +7324,7 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             </tr>
             <tr>
               <td><code>LRAM0_REQ_n</code>, <code>LRAM1_REQ_n</code></td>
-              <td>
-                Logical DRAM bank requests, before address translation.
-              </td>
+              <td>Logical DRAM bank requests, before address translation.</td>
               <td>Low</td>
               <td>
                 <code>U_OR1</code> gate 2 and <code>U_OR3</code> gates 1 and 2
@@ -7313,9 +7333,7 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             </tr>
             <tr>
               <td><code>PAGE_DTACK_n</code></td>
-              <td>
-                A page-table or page-unit control transaction completed.
-              </td>
+              <td>A page-table or page-unit control transaction completed.</td>
               <td>Low</td>
               <td><code>U_PAGE_MMU</code></td>
               <td><code>U_DTACK_B</code> gate 1 pin 5</td>
@@ -7323,8 +7341,8 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             <tr>
               <td><code>PAGE_BERR_n</code></td>
               <td>
-                A page fault: an invalid page, a write to a read-only page, or
-                a user-mode access to the table aperture.
+                A page fault: an invalid page, a write to a read-only page, or a
+                user-mode access to the table aperture.
               </td>
               <td>Low</td>
               <td><code>U_PAGE_MMU</code></td>
@@ -7596,9 +7614,14 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
                 A PI/T register or vectored acknowledge transaction completed.
               </td>
               <td>Low</td>
-              <td>
-                MC68230 <code>/DTACK</code> pin, with a 4.7 kohm pull-up
-              </td>
+              <td>MC68230 <code>/DTACK</code> pin, with a 4.7 kohm pull-up</td>
+              <td><code>DTACK_n</code> combination logic</td>
+            </tr>
+            <tr>
+              <td><code>IDE_DTACK_n</code></td>
+              <td>An IDE PIO transaction completed.</td>
+              <td>Low</td>
+              <td><a href="ide.html">IDE interface</a></td>
               <td><code>DTACK_n</code> combination logic</td>
             </tr>
             <tr>
@@ -7732,8 +7755,8 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             >. <code>U_PROT</code> timing, DC limits, and supply current.
           </li>
           <li>
-            The <a href="paging.html">Paging</a> document owns the page unit
-            and the translated bank requests that reach the DRAM controller.
+            The <a href="paging.html">Paging</a> document owns the page unit and
+            the translated bank requests that reach the DRAM controller.
           </li>
           <li>
             Texas Instruments,
@@ -7752,7 +7775,9 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
             <a href="firmware-rom.html">Firmware ROM</a>,
             <a href="interrupts.html">Interrupts</a>,
             <a href="clock-and-reset.html">Clock and Reset</a>, and per-device
-            pages own the timing behind each request and completion signal.
+            pages own the timing behind each request and completion signal. The
+            <a href="ide.html">IDE interface</a> owns <code>IO11_n</code>, its
+            PIO timing, and <code>IDE_DTACK_n</code>.
           </li>
         </ul>
       </section>

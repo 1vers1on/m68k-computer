@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Expansion Slots, Revision 2.0</title>
+    <title>68EC000 Computer - Expansion Slots, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,7 +14,11 @@
         requirements. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.0 follows memory map 2.0. Each slot's I/O window sits in the
+        Revision 2.1 follows memory map 2.1. <code>U_EXP_RW_BUF</code> removes
+        four direct loads from processor <code>R_W</code> to make room for the
+        IDE interface. Two buffer channels create <code>EXP1_RW</code> and
+        <code>EXP2_RW</code>. Each branch drives one slot's control buffer and
+        two data-transceiver DIR inputs. Each slot's I/O window sits in the
         protected I/O region and answers supervisor cycles only, while its 2 MiB
         memory window stays open to user-mode code and is not paged. Card
         drivers therefore run as BIOS code or as supervisor-mode extensions. No
@@ -25,13 +29,11 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.0 pre-layout design; board layout and assembled-system
+          Revision 2.1 pre-layout design; board layout and assembled-system
           checks remain
         </dd>
         <dt>Privilege</dt>
-        <dd>
-          I/O windows supervisor only; memory windows open to user mode
-        </dd>
+        <dd>I/O windows supervisor only; memory windows open to user mode</dd>
         <dt>Slots</dt>
         <dd>Two front-loading, power-off insertion slots</dd>
         <dt>Connector</dt>
@@ -134,14 +136,14 @@
           <code>IO7_n</code> come from the top I/O decoder, which the
           motherboard closes to user-mode cycles, so a card's registers answer
           supervisor cycles only and a user-mode access to them takes a bus
-          error.
-          <code>EXP_MEM2_n</code> and <code>EXP_MEM3_n</code> carry no privilege
-          test and no translation, so a card that presents plain memory can be
-          handed to an application directly, at a fixed address rather than
-          through its page table. Put control registers in the I/O window
-          and bulk data in the memory window; see
-          <a href="bus-and-decode.html#supervisor-protection">Supervisor
-          Protection</a>.
+          error. <code>EXP_MEM2_n</code> and <code>EXP_MEM3_n</code> carry no
+          privilege test and no translation, so a card that presents plain
+          memory can be handed to an application directly, at a fixed address
+          rather than through its page table. Put control registers in the I/O
+          window and bulk data in the memory window; see
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Supervisor Protection</a
+          >.
         </p>
         <p>
           A card cannot bypass the protection, because the slots have no bus
@@ -151,14 +153,13 @@
         </p>
         <p>
           <code>EXP_MEM5_n</code> and <code>EXP_MEM6_n</code> no longer select
-          nothing. Memory-map revision 2.0 gives
-          <code>$A00000-$DFFFFF</code> to the page-table aperture in
-          <a href="paging.html">Paging</a>, so those two selects reach the page
-          unit and the address space behind them is no longer available for a
-          third and fourth expansion memory window. <code>IO9_n</code> selects
-          the PI/T and <code>IO10_n</code> the page-unit control registers, so
-          the only decode outputs still without a destination are
-          <code>IO11_n</code> through <code>IO14_n</code>.
+          nothing. Memory-map revision 2.0 gives <code>$A00000-$DFFFFF</code> to
+          the page-table aperture in <a href="paging.html">Paging</a>, so those
+          two selects reach the page unit and the address space behind them is
+          no longer available for a third and fourth expansion memory window.
+          <code>IO9_n</code> selects the PI/T and <code>IO10_n</code> the
+          page-unit control registers, so the only decode outputs still without
+          a destination are <code>IO11_n</code> through <code>IO14_n</code>.
         </p>
       </section>
       <section id="mechanical">
@@ -579,7 +580,7 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
               <td>Control</td>
               <td>1 through 8</td>
               <td>
-                <code>AS_n</code>, <code>R_W</code>, <code>UDS_n</code>,
+                <code>AS_n</code>, <code>EXPx_RW</code>, <code>UDS_n</code>,
                 <code>LDS_n</code>, memory select, I/O select,
                 <code>EXP_CLK_ROOT</code>, <code>PERIPH_RESET_n</code>
               </td>
@@ -597,21 +598,24 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
         <p>
           Two <code>SN74HCT245N</code> packages serve each slot. Their A ports
           face the card and their B ports face the CPU. Both DIR inputs connect
-          directly to motherboard <code>R_W</code>. A high read level selects
+          to the slot's buffered <code>EXPx_RW</code>. A high read level selects
           A-to-B; a low write level selects B-to-A.
         </p>
         <pre><code>EXP1_CYCLE_n = EXP_MEM2_n AND IO6_n
 EXP2_CYCLE_n = EXP_MEM3_n AND IO7_n
 
-R_W = 1: card A port --&gt; CPU B port
-R_W = 0: CPU B port  --&gt; card A port</code></pre>
+EXPx_RW = 1: card A port --&gt; CPU B port
+EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
         <p>
           Gates 1 and 2 of <code>U_EXP_GLUE</code>, an <code>SN74F08N</code>,
           generate the active-low enables. Each enable drives both transceivers
           for its slot. <code>R_W</code> is valid before the qualified select,
-          so direction is established before output enable. The motherboard
-          passes all 16 bits when selected; the card qualifies its own byte
-          lanes.
+          <code>U_EXP_RW_BUF</code> uses two channels of one
+          <code>SN74HCT244N</code>. Both inputs connect to processor
+          <code>R_W</code>. One output drives the three slot-1 direction inputs,
+          and the other drives the three slot-2 inputs. Direction settles before
+          output enable. The motherboard passes all 16 bits when selected; the
+          card qualifies its own byte lanes.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1161,8 +1165,8 @@ CARD_DTACK_n = open-collector copy of stage 3 /Q</code></pre>
           <tbody>
             <tr>
               <td>1, DIR</td>
-              <td><code>R_W</code></td>
-              <td><code>R_W</code></td>
+              <td><code>EXPx_RW</code></td>
+              <td><code>EXPx_RW</code></td>
             </tr>
             <tr>
               <td>19, OE_n</td>
@@ -1186,6 +1190,13 @@ CARD_DTACK_n = open-collector copy of stage 3 /Q</code></pre>
             </tr>
           </tbody>
         </table>
+        <p>
+          On <code>U_EXP_RW_BUF</code>, pins 2 and 4 take processor
+          <code>R_W</code>. Pin 18 drives <code>EXP1_RW</code>, and pin 16
+          drives <code>EXP2_RW</code>. Ground output-enable pins 1 and 19.
+          Ground unused input pins 6, 8, 11, 13, 15, and 17; leave their outputs
+          open. Pin 10 is ground and pin 20 is +5 V.
+        </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             U_EXP_GLUE SN74F08N connections
@@ -1333,7 +1344,7 @@ board allowance                     28.8 ns</code></pre>
           </thead>
           <tbody>
             <tr>
-              <td>8</td>
+              <td>9</td>
               <td>SN74HCT244N</td>
               <td>Address and control buffering</td>
             </tr>
@@ -1341,6 +1352,11 @@ board allowance                     28.8 ns</code></pre>
               <td>4</td>
               <td>SN74HCT245N</td>
               <td>Two 16-bit data paths</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74HCT244N</td>
+              <td>Two buffered expansion R/W branches</td>
             </tr>
             <tr>
               <td>1</td>
@@ -1373,7 +1389,7 @@ board allowance                     28.8 ns</code></pre>
               <td>Completion pull-ups</td>
             </tr>
             <tr>
-              <td>14 each</td>
+              <td>15 each</td>
               <td>100 nF and 1 uF ceramic</td>
               <td>Logic decoupling</td>
             </tr>

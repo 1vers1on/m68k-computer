@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Firmware ROM, Revision 2.0</title>
+    <title>68EC000 Computer - Firmware ROM, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,18 +13,20 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.0 follows memory map 2.0. The firmware EEPROM and its boot
-        alias are both supervisor only, so application code reads neither. This
-        document gains section 13, which defines the <code>TRAP</code> entry
-        that application code uses instead, and the argument checks that entry
-        needs now that callers run in a translated address space. The EEPROM
-        wiring, read timing, and completion logic carry over from revision 1.0
-        unchanged.
+        Revision 2.1 follows memory map 2.1. The vector table gains the IDE
+        level-2 autovector, and the BIOS call gate must expose storage services
+        without giving user code direct access to I/O slot 11. Revision 2.0 made
+        the firmware EEPROM and its boot alias supervisor only, so application
+        code reads neither. That revision added section 13, which defines the
+        <code>TRAP</code> entry that application code uses instead, and the
+        argument checks that entry needs now that callers run in a translated
+        address space. The EEPROM wiring, read timing, and completion logic
+        carry over from revision 1.0 unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.0 pre-layout design; assembled-board measurements and
+          Revision 2.1 pre-layout design; assembled-board measurements and
           firmware-image checks remain
         </dd>
         <dt>Privilege</dt>
@@ -1653,8 +1655,9 @@ ROM1_LO[i] = F[0x10001 + 2*i]
           as an exception: it saves the status register, switches to supervisor
           mode, and vectors through <code>$000080</code> into BIOS code. The
           protection circuit is in
-          <a href="bus-and-decode.html#supervisor-protection">Bus and Address
-          Decode</a>.
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Bus and Address Decode</a
+          >.
         </p>
 
         <h3>Call Convention</h3>
@@ -1711,9 +1714,7 @@ ROM1_LO[i] = F[0x10001 + 2*i]
           argument itself before it acts.
         </p>
         <ul>
-          <li>
-            Reject a service number outside the implemented range.
-          </li>
+          <li>Reject a service number outside the implemented range.</li>
           <li>
             Translate every pointer in software before touching it. A caller's
             pointer is a logical address in its own context, and the handler
@@ -1733,6 +1734,15 @@ ROM1_LO[i] = F[0x10001 + 2*i]
         </ul>
 
         <p>
+          IDE BIOS services enumerate ATA and ATAPI devices, report media and
+          capacity, and transfer blocks through checked caller buffers. The BIOS
+          keeps device selection, task-file commands, PIO word swapping, packet
+          commands, and timeouts inside supervisor code. The
+          <a href="ide.html#firmware">IDE firmware rules</a> define the host
+          sequence.
+        </p>
+
+        <p>
           The page unit does not check on the BIOS's behalf. Supervisor cycles
           bypass translation, so a handler that dereferences a caller's pointer
           directly reads whatever physical address that number happens to name,
@@ -1746,12 +1756,11 @@ ROM1_LO[i] = F[0x10001 + 2*i]
           <code>$000000-$0003FF</code> after it disables the boot overlay and
           before it leaves supervisor mode. That memory is physical frame 0, and
           the BIOS never maps frame 0 into a user context, so an application
-          cannot redirect a vector and enter supervisor mode with its own
-          code.
+          cannot redirect a vector and enter supervisor mode with its own code.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            Vectors the protection scheme depends on
+            BIOS vectors required by revision 2.1
           </caption>
           <thead>
             <tr>
@@ -1764,9 +1773,7 @@ ROM1_LO[i] = F[0x10001 + 2*i]
             <tr>
               <td>2, bus error</td>
               <td><code>$000008</code></td>
-              <td>
-                Classify the fault and terminate the program. See below.
-              </td>
+              <td>Classify the fault and terminate the program. See below.</td>
             </tr>
             <tr>
               <td>3, address error</td>
@@ -1782,6 +1789,14 @@ ROM1_LO[i] = F[0x10001 + 2*i]
               </td>
             </tr>
             <tr>
+              <td>26, level-2 autovector</td>
+              <td><code>$000068</code></td>
+              <td>
+                Service ATA <code>INTRQ</code> and read command-block Status to
+                clear the device request.
+              </td>
+            </tr>
+            <tr>
               <td>32, TRAP #0</td>
               <td><code>$000080</code></td>
               <td>BIOS service dispatch.</td>
@@ -1790,8 +1805,8 @@ ROM1_LO[i] = F[0x10001 + 2*i]
               <td>33 through 47, TRAP #1 through #15</td>
               <td><code>$000084-$0000BC</code></td>
               <td>
-                Unassigned. Point them at the terminate path rather than
-                leaving them uninitialised.
+                Unassigned. Point them at the terminate path rather than leaving
+                them uninitialised.
               </td>
             </tr>
           </tbody>
@@ -1826,11 +1841,13 @@ ROM1_LO[i] = F[0x10001 + 2*i]
           <code>$E80003</code> and halt rather than continue.
         </p>
         <p>
-          Sources: <a href="datasheets/M68000UM.pdf">M68000 User's Manual,
-          section 6 (exception processing)</a>,
-          <a href="memory-map.html">Memory Map</a>, and
-          <a href="bus-and-decode.html#supervisor-protection">Bus and Address
-          Decode</a>.
+          Sources:
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, section 6 (exception processing)</a
+          >, <a href="memory-map.html">Memory Map</a>, and
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Bus and Address Decode</a
+          >.
         </p>
       </section>
 

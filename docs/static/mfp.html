@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - MC68901 MFP, Revision 2.0</title>
+    <title>68EC000 Computer - MC68901 MFP, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -18,7 +18,8 @@
       </p>
 
       <p>
-        Revision 2.0 follows memory map 2.0. The MC68901 sits in I/O slot 0,
+        Revision 2.1 follows memory map 2.1 and adds the IDE timing sequencer to
+        the <code>MFP_CLK_5</code> branch. The MC68901 sits in I/O slot 0,
         inside the protected I/O region, so its registers answer supervisor
         cycles only and application code reaches the UART, the timers, and the
         keyboard through BIOS calls. Every circuit, register address, and timing
@@ -28,7 +29,7 @@
         <dt>Privilege</dt>
         <dd>Supervisor only; application code calls the BIOS</dd>
         <dt>Document status</dt>
-        <dd>Revision 2.0 pre-layout design</dd>
+        <dd>Revision 2.1 pre-layout design</dd>
         <dt>MFP</dt>
         <dd>Motorola MC68901P, 48-pin plastic DIP, 4 MHz grade</dd>
         <dt>Bus connection</dt>
@@ -390,8 +391,10 @@ MFP high and low time  = 200 ns nominal</code></pre>
           <code>MFP_CLK_5</code> also drives one SN74F04 input in the
           <a href="midi.html#clock-reset">MIDI local clock buffer</a> and one
           CD74HCT164 clock input in the
-          <a href="floppy.html#bus-interface">floppy bus adapter</a>. The MIDI
-          buffer isolates its divider and bus-adapter clocks from this net.
+          <a href="floppy.html#bus-interface">floppy bus adapter</a>, and one
+          CD74HCT164 clock input in the
+          <a href="ide.html#control">IDE interface</a>. The MIDI buffer isolates
+          its divider and bus-adapter clocks from this net.
         </p>
         <p>
           The 400 ns period lies between the MC68901's 250 ns minimum and 1000
@@ -1200,7 +1203,8 @@ TDDR = 0 represents a count of 256.</code></pre>
               <td><code>MFP_CLK_5</code></td>
               <td>
                 First divide-by-two output, second-stage clock, MIDI local
-                clock-buffer source, and floppy-response clock.
+                clock-buffer source, floppy-response clock, and IDE-response
+                clock.
               </td>
             </tr>
             <tr>
@@ -1444,7 +1448,8 @@ board allowance            32.8 ns</code></pre>
             Keep <code>MFP_CLK_2P5</code>, <code>TDO</code>, PS/2 clock, and the
             three open-drain interrupt routes short. Route
             <code>MFP_CLK_5</code> directly from U_MFP_CLK to the MIDI local
-            clock buffer and floppy response sequencer without long stubs.
+            clock buffer, floppy response sequencer, and IDE response sequencer
+            without long stubs.
           </li>
           <li>
             After routing, keep the <code>INT_CLK</code> branch at or below 50
@@ -1483,7 +1488,8 @@ board allowance            32.8 ns</code></pre>
               <td>
                 U_MFP_CLK second-stage clock,
                 <a href="midi.html#clock-reset">U_MIDI_INV</a>, and
-                <a href="floppy.html#bus-interface">U_FDC_SEQ</a>
+                <a href="floppy.html#bus-interface">U_FDC_SEQ</a>, and
+                <a href="ide.html#control">U_IDE_SEQ</a>
               </td>
             </tr>
             <tr>

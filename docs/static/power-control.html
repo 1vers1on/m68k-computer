@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Power Control, Revision 1.0</title>
+    <title>68EC000 Computer - Power Control, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -25,17 +25,28 @@
         The PCB mounts beside the power supply and motherboard power wiring.
         Only the low-current button and LED connections run to the front panel.
       </p>
+      <p>
+        Revision 1.1 adds the IDE drive-power harness to the switched load. The
+        host interface accepts different ATA devices, so the final power-supply,
+        relay, connector, and wire selection must include the nameplate and
+        spin-up current of both fitted drives. The 5 A and 3 A values below stay
+        as the base system requirement. A drive set that exceeds either value
+        needs a switch path rated for its measured peak.
+      </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.0 pre-layout design; component values and logic equations
+          Revision 1.1 pre-layout design; component values and logic equations
           are frozen, while relay inrush margin, RC timing, and assembled-board
           behavior remain to be measured
         </dd>
         <dt>Raw power inputs</dt>
         <dd>+5 V, +12 V, and ground from the internal power supply</dd>
         <dt>Switched outputs</dt>
-        <dd>+5 V and +12 V to the motherboard and expansion system</dd>
+        <dd>
+          +5 V and +12 V to the motherboard, expansion system, and IDE drive
+          harness
+        </dd>
         <dt>Nominal load requirement</dt>
         <dd>Up to approximately 5 A at +5 V and 3 A at +12 V</dd>
         <dt>Front-panel control</dt>
@@ -581,7 +592,8 @@ tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
           The relay contact rating must be based on DC current, not only an AC
           contact rating. The selected relay should also tolerate the charging
           current of the motherboard and expansion-card bypass and bulk
-          capacitors when the contacts close.
+          capacitors when the contacts close. Include the simultaneous spin-up
+          current of both IDE devices and the cable-harness connector rating.
         </p>
       </section>
 
@@ -928,9 +940,11 @@ tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
             starts with the relay released and LED off.
           </li>
           <li>
-            At 5 A on <code>+5V_SW</code> and 3 A on <code>+12V_SW</code>, relay
-            contact drop, connector heating, trace heating, MOSFET temperature,
-            and relay-coil current remain within their component ratings.
+            With the fitted IDE drives starting together, relay contact drop,
+            connector heating, trace heating, MOSFET temperature, and relay-coil
+            current remain within their component ratings. Test at 5 A on
+            <code>+5V_SW</code> and 3 A on <code>+12V_SW</code>, or at the
+            higher measured drive-set peak.
           </li>
           <li>
             Closing and opening the relay does not retrigger the state logic or

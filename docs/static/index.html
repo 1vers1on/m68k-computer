@@ -18,17 +18,23 @@
       </p>
 
       <p>
-        Revision 2.0 adds hardware memory protection and paging. The motherboard
-        reads <code>FC2</code> and refuses user-mode access to every I/O
-        register and to the firmware ROM, so applications reach hardware only by
-        calling the BIOS. Main memory goes through a page table: each program
-        gets its own 4 MiB space built from 4 KiB pages, and it reaches only the
-        pages the BIOS mapped for it. The break is deliberate and no revision
-        1.x firmware runs on it. See
+        Revision 2.1 adds a two-device parallel ATA interface in I/O slot 11 and
+        assigns its interrupt to autovectored processor level 2. The adapter
+        uses PIO mode 0 with IORDY wait extension, so firmware can identify and
+        drive ATA disks, ATAPI optical drives, and adapter-connected 2.5-inch or
+        CompactFlash devices. Revision 2.0 added hardware memory protection and
+        paging. The motherboard reads <code>FC2</code> and refuses user-mode
+        access to every I/O register and to the firmware ROM, so applications
+        reach hardware only by calling the BIOS. Main memory goes through a page
+        table: each program gets its own 4 MiB space built from 4 KiB pages, and
+        it reaches only the pages the BIOS mapped for it. The break is
+        deliberate and no revision 1.x firmware runs on it. See
         <a href="memory-map.html">Memory Map</a> for the rules,
-        <a href="bus-and-decode.html#supervisor-protection">Bus and Address
-        Decode</a> for the protection circuit, and
-        <a href="paging.html">Paging</a> for the page unit.
+        <a href="bus-and-decode.html#supervisor-protection"
+          >Bus and Address Decode</a
+        >
+        for the protection circuit, and <a href="paging.html">Paging</a> for the
+        page unit.
       </p>
 
       <p>
@@ -64,6 +70,12 @@
         <dt>Floppy drives</dt>
         <dd>
           Two Mitsumi D359M3D 3.5-inch, 1.44 MB drives on one twisted cable
+        </dd>
+
+        <dt>IDE</dt>
+        <dd>
+          Two-device 16-bit parallel ATA, PIO mode 0, with ATA and ATAPI
+          firmware support
         </dd>
 
         <dt>Sound</dt>
@@ -105,7 +117,7 @@
           <tbody>
             <tr>
               <td><a href="memory-map.html">Memory Map</a></td>
-              <td>Revision 2.0; address specification frozen</td>
+              <td>Revision 2.1; address specification frozen</td>
               <td>
                 Address ranges, privilege attributes, I/O slots, boot overlay,
                 peripheral registers, and DRAM organization.
@@ -113,7 +125,7 @@
             </tr>
             <tr>
               <td><a href="bus-and-decode.html">Bus and Address Decode</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 Bus cycles, address decoders, supervisor protection,
                 boot-overlay logic, worked decode examples, timing, and bus
@@ -122,7 +134,7 @@
             </tr>
             <tr>
               <td><a href="clock-and-reset.html">Clock and Reset</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 10 MHz clock, the DRAM and I/O clock buffers, and active-low
                 reset generation.
@@ -130,7 +142,7 @@
             </tr>
             <tr>
               <td><a href="power-control.html">Power Control</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 1.1 pre-layout design</td>
               <td>
                 Front-panel power-button timing, power-state logic, relay drive,
                 and switched +5 V and +12 V rails.
@@ -138,10 +150,10 @@
             </tr>
             <tr>
               <td><a href="interrupts.html">Interrupts</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
-                Priority encoding, acknowledge decode, autovector and the MFP
-                and PI/T vectors, and spurious-interrupt handling.
+                Priority encoding, IDE and expansion autovectors, MFP and PI/T
+                vectors, acknowledge decode, and spurious-interrupt handling.
               </td>
             </tr>
             <tr>
@@ -167,7 +179,7 @@
             </tr>
             <tr>
               <td><a href="dram.html">DRAM</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 DRAM organization, discrete controller, refresh, initialization,
                 timing, electrical checks, and assembled-board acceptance. Its
@@ -176,18 +188,19 @@
             </tr>
             <tr>
               <td><a href="firmware-rom.html">Firmware ROM</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
-                AT28C256 organization, read-only wiring, completion timing, and
-                the BIOS call gate.
+                AT28C256 organization, read-only wiring, completion timing, the
+                BIOS call gate, IDE storage services, and the level-2 vector.
               </td>
             </tr>
             <tr>
               <td><a href="mfp.html">MC68901 MFP</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 Bus interface, register map, timers, interrupt routing,
-                bidirectional PS/2 keyboard, and MAX232 RS-232 port.
+                bidirectional PS/2 keyboard, MAX232 RS-232 port, and the 5 MHz
+                IDE sequencer clock branch.
               </td>
             </tr>
             <tr>
@@ -196,6 +209,15 @@
               <td>
                 Intel 82077AA-1 bus adapter, programmed-I/O interface, and two
                 Mitsumi D359M3D drives.
+              </td>
+            </tr>
+            <tr>
+              <td><a href="ide.html">IDE Interface</a></td>
+              <td>Revision 1.0 pre-layout design; memory map 2.1</td>
+              <td>
+                Two-device parallel ATA host, PALCE20V8 control equations, PIO
+                mode 0 timing, IORDY waits, level-2 interrupt, connector, and
+                firmware rules.
               </td>
             </tr>
             <tr>
@@ -242,11 +264,11 @@
             </tr>
             <tr>
               <td><a href="expansion.html">Expansion Slots</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 Two front-loading DIN 41612 slots, fixed address windows,
-                buffered bus interface, pinout, power, card rules, and example
-                card.
+                buffered bus interface and R/W branches, pinout, power, card
+                rules, and example card.
               </td>
             </tr>
           </tbody>
@@ -286,6 +308,18 @@
               <td><a href="datasheets/82077AA.pdf">PDF</a></td>
               <td>
                 Floppy controller, FIFO, host timing, and drive interface.
+              </td>
+            </tr>
+            <tr>
+              <td>ATA/ATAPI-7, Volume 2</td>
+              <td>
+                <a href="https://t13.org/docs2004/d1532v2r4b-ATA-ATAPI-7.pdf"
+                  >PDF</a
+                >
+              </td>
+              <td>
+                Parallel ATA connector, signals, PIO timing, reset, and device
+                selection.
               </td>
             </tr>
             <tr>
@@ -417,7 +451,7 @@
               <td>
                 <a href="datasheets/cd74hc123.pdf">PDF</a>
               </td>
-              <td>Local YMF262 reset stretcher.</td>
+              <td>Local YMF262 and IDE reset stretchers.</td>
             </tr>
             <tr>
               <td>TL431</td>
@@ -495,8 +529,8 @@
               <td>
                 FAST glue logic used by the DRAM controller and by the floppy,
                 RTC, MIDI, OPL3, VGA, and expansion adapters. The F32 also
-                carries the final <code>DTACK_n</code> timeout mask and the
-                PI/T chip select.
+                carries the final <code>DTACK_n</code> timeout mask and the PI/T
+                chip select.
               </td>
             </tr>
             <tr>
@@ -511,8 +545,7 @@
               <td>
                 DRAM timing, decode, state, and initialization logic. Two F21
                 packages form the motherboard completion-response tree, and the
-                F10 qualifies the DRAM acknowledgement with the raw bus
-                strobes.
+                F10 qualifies the DRAM acknowledgement with the raw bus strobes.
               </td>
             </tr>
             <tr>
@@ -531,7 +564,9 @@
               </td>
               <td>
                 <code>U_PROT</code>, the supervisor protection decode and the
-                combined bus error, in a PALCE16V8Q-15JC. The 20V8 is spare.
+                combined bus error, in a PALCE16V8Q-15JC; and
+                <code>U_IDE_CTRL</code>, the ATA control and completion logic,
+                in a PALCE20V8Q-15JC/4.
               </td>
             </tr>
             <tr>
@@ -557,25 +592,28 @@
             <tr>
               <td>SN74HCT04</td>
               <td><a href="datasheets/sn54hct04.pdf">PDF</a></td>
-              <td>Logic NOT gates.</td>
+              <td>Logic NOT gates, including IDE R/W and interrupt buffers.</td>
             </tr>
             <tr>
               <td>SN74HCT08</td>
               <td><a href="datasheets/sn74hct08.pdf">PDF</a></td>
-              <td>CPU-space detection and firmware ROM selection.</td>
+              <td>
+                CPU-space detection, firmware ROM selection, and level-2/3/7
+                autovector combining.
+              </td>
             </tr>
             <tr>
               <td>SN74HCT244</td>
               <td><a href="datasheets/sn74hct244.pdf">PDF</a></td>
               <td>
-                Normal-cycle distribution, expansion address/control buffers,
-                and RTC address driver.
+                Normal-cycle distribution, expansion address/control and R/W
+                buffers, RTC address driver, and IDE cable control buffer.
               </td>
             </tr>
             <tr>
               <td>SN74HCT245</td>
               <td><a href="datasheets/sn74hct245.pdf">PDF</a></td>
-              <td>Expansion and RTC data-bus transceivers.</td>
+              <td>Expansion, RTC, and IDE data-bus transceivers.</td>
             </tr>
             <tr>
               <td>SN74HCT32</td>
@@ -618,7 +656,7 @@
               <td>
                 <a href="datasheets/cd74hc164.pdf">PDF</a>
               </td>
-              <td>RTC, floppy, and VGA bus-cycle sequencers.</td>
+              <td>RTC, floppy, IDE, and VGA bus-cycle sequencers.</td>
             </tr>
             <tr>
               <td>SN74HCT138</td>
