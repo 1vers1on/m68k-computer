@@ -17,7 +17,7 @@ $(foreach f,$(TB_FILES),$(eval TB_$(patsubst tb_%.sv,%,$(notdir $(f))) := $(f)))
 help:
 	@echo "SystemVerilog simulation commands:"
 	@echo "  make test              Run every testbench"
-	@echo "  make test NAME=decoder Run one testbench"
+	@echo "  make test NAME=dram_controller Run one testbench"
 	@echo "  make check             Run simulations and runner regression tests"
 	@echo "  make test-runner       Check the runner with Python 3"
 	@echo "  make list              List available test names"

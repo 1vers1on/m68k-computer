@@ -15,6 +15,7 @@ module tb_dram_controller;
     logic [15:0] cpu_data = 0;
     logic cpu_drive = 0;
     tri [15:0] D;
+    tri [15:0] DRAM_D;
     assign D = cpu_drive ? cpu_data : 16'hzzzz;
     wire [9:0] DRAM_A;
     wire RAS0_n, RAS1_n, CAS_U_n, CAS_L_n, W_n, OE_n;
@@ -22,7 +23,7 @@ module tb_dram_controller;
 
     dram_controller dut (.*);
 
-    // Both banks share D, addresses, CAS, W, and OE. DQ[0] is DQ1,
+    // Both banks share the isolated DRAM_D bus, addresses, CAS, W, and OE. DQ[0] is DQ1,
     // connected to the highest CPU bit of each nibble per dram.html.
     wire [31:0] violations [0:7];
     wire [31:0] warnings [0:7];
@@ -35,7 +36,7 @@ module tb_dram_controller;
                 .REFRESH_CHECKS(1), .DECAY_ENABLE(1), .POWERUP_CHECKS(1)) ram (
                 .A(DRAM_A), .RAS_N(b == 0 ? RAS0_n : RAS1_n),
                 .CAS_N(n < 2 ? CAS_U_n : CAS_L_n), .W_N(W_n), .OE_N(OE_n),
-                .DQ({D[12-4*n], D[13-4*n], D[14-4*n], D[15-4*n]}));
+                .DQ({DRAM_D[12-4*n], DRAM_D[13-4*n], DRAM_D[14-4*n], DRAM_D[15-4*n]}));
             assign violations[4*b+n] = ram.n_viol;
             assign warnings[4*b+n] = ram.n_warn;
             assign refreshes[4*b+n] = ram.n_ref;
@@ -112,6 +113,16 @@ module tb_dram_controller;
     // all its runtime timing requirements. Unselected read lanes must float.
     realtime data_changed = 0;
     always @(D) data_changed = $realtime;
+    always @(negedge CAS_U_n or negedge CAS_L_n) begin
+        #25;
+        if (RESET_n && dut.CPU_BUSY && dut.DRAM_CPU_REQ && !dut.CPU_REQUEST_ENDED) begin
+            check((dut.TX_BANK1 ? RAS1_n : RAS0_n) === 1'b0, "selected bank active at CAS");
+            check((dut.TX_BANK1 ? RAS0_n : RAS1_n) === 1'b1, "other bank inactive at CAS");
+            check({CAS_U_n,CAS_L_n} === {~dut.TX_UPPER,~dut.TX_LOWER}, "captured byte-lane CAS");
+            check(W_n === !dut.TX_WRITE, "captured read/write direction at CAS");
+            check(OE_n === dut.TX_WRITE, "DRAM drives only reads");
+        end
+    end
     always @(negedge DRAM_DTACK_n) begin
         if (RESET_n && R_W)
             check($realtime - data_changed >= 5.0, "read data setup before acknowledgement");
@@ -136,16 +147,15 @@ module tb_dram_controller;
                 if (DRAM_DTACK_n === 1'b0) begin
                     result = D;
                     check(DRAM_INIT_DONE === 1'b1, "no ACK before initialization");
-                    check((A[21] ? RAS1_n : RAS0_n) === 1'b0, "selected bank active at ACK");
-                    check((A[21] ? RAS0_n : RAS1_n) === 1'b1, "other bank inactive at ACK");
-                    check({CAS_U_n,CAS_L_n} === {UDS_n,LDS_n}, "byte-lane CAS at ACK");
-                    if (!R_W)
-                        check(OE_n === 1'b1 && W_n === 1'b0, "early-write controls");
-                    else begin
-                        check(OE_n === 1'b0 && W_n === 1'b1, "read controls");
+                    // ACK follows data capture; the physical row may be closed.
+                    if (R_W) begin
                         if (UDS_n) check(D[15:8] === 8'hzz, "unselected upper byte floats");
                         if (LDS_n) check(D[7:0] === 8'hzz, "unselected lower byte floats");
                     end
+                    // Completion-tree delay, asynchronous DTACK recognition,
+                    // then the CPU's following data-sampling cycle.
+                    #230;
+                    check(D === result, "data retained through delayed CPU sampling");
                     disable poll;
                 end
             end
@@ -312,6 +322,9 @@ module tb_dram_controller;
         // Fault injection: hold the CPU cycle despite ACK, for the documented
         // motherboard timeout interval. Physical RAS/CAS must still close.
         #51200;
+        check(D === result && result === expected[0][22],
+            "read data retained through DMA READY stall and timeout interval");
+        check(DRAM_D === 16'hzzzz, "DRAM bus floats while read registers hold CPU data");
         check(cpu_starts == mark_cpu, "held request is executed once");
         check(cbr_cycles == mark_cbr, "refresh does not preempt held CPU ownership");
         check({RAS0_n,RAS1_n,CAS_U_n,CAS_L_n} === 4'hf, "strobe widths bounded during CPU stall");

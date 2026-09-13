@@ -519,10 +519,19 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
           </tbody>
         </table>
         <p>
-          The three counter registers are read as three separate bytes, so a
-          count read while the timer runs can straddle a borrow. Firmware that
-          needs a coherent 24-bit count reads the three bytes twice and repeats
-          when the high byte changes.
+          The MC68230 does not latch its count registers during reads. A
+          high-byte comparison cannot detect a borrow between the middle and
+          low bytes, and the manual does not guarantee reads in the run state.
+          For a coherent count, exclude concurrent timer access, save TCR and
+          any pending timer status, clear TCR bit 0, then read CNTRH, CNTRM, and
+          CNTRL as separate bytes. Restore the saved TCR after reading.
+          Halting preserves the count but clears ZDS and resets the prescaler.
+          Re-entering the run state reloads the counter from CPR on the first
+          count event; it does not resume the saved count. Use this procedure
+          for a stopped interval measurement or a deliberate timer restart.
+          Do not use it to sample an uninterrupted periodic timebase. See
+          <a href="datasheets/mc68230.pdf">MC68230 User's Manual</a>,
+          sections 4.12 and 5.1.1-5.1.2.
         </p>
       </section>
 
@@ -1278,8 +1287,8 @@ level-5 acknowledge: /CS high, PIACK high, TIACK low</code></pre>
             while the affected handshake interrupts are disabled.
           </li>
           <li>
-            Access every register as a byte at an odd address. Read the three
-            count bytes twice when a coherent 24-bit value matters.
+            Access every register as a byte at an odd address. Halt the timer before reading a coherent count, following the
+            stop/read/restart procedure and its restart effects in section 4.
           </li>
           <li>
             Drive the DDC lines by direction only. Set a PCDDR bit to pull its

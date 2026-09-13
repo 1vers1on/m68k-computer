@@ -140,16 +140,16 @@
           input on any part.
         </p>
         <p>
-          The structural SystemVerilog controller and eight-chip testbench are
-          in the repository at
+          The structural controller and eight-chip testbench are in
           <code>code/system-verilog/rtl/dram_controller.sv</code> and
-          <code>code/system-verilog/test/tb_dram_controller.sv</code>. Run
-          <code>make test NAME=dram_controller</code> from
-          <code>code/system-verilog</code>. The simulation uses the existing
-          device models and includes the request-end correction in sections 10,
-          11, and 14. It expands count-7 decode with equivalent F08/F04 gates
-          because an F20 model is absent; it is not a package-exact schematic or
-          a board timing-closure result.
+          <code>code/system-verilog/test/tb_dram_controller.sv</code>.
+          Run <code>make test NAME=dram_controller</code> in
+          <code>code/system-verilog</code> with the project's Linux simulator
+          fork. This revision adds the isolated DRAM_D bus, read registers,
+          delayed CPU sampling, and long read-retention checks. These changes
+          have not been simulated. The model expands count-7 decode with F08/F04
+          gates because an F20 model is absent; it is not a package-exact
+          schematic or a board timing-closure result.
         </p>
       </section>
 
@@ -334,13 +334,14 @@
             <a href="#write-cycle">write</a> timelines give the exact steps.
           </li>
           <li>
-            CPU <code>D15..D0</code> connect directly to the corresponding DRAM
-            DQ pins in both banks, following the
-            <a href="#data-bus-organization">nibble wiring table</a>. Data does
-            not pass through the address muxes or control registers. On reads,
-            <code>OE_n</code> permits the selected memory to drive the bus. On
-            writes, the CPU drives data, <code>OE_n</code> stays high, and the
-            controller establishes <code>W_n</code> low before CAS.
+            The motherboard data bus connects to the isolated DRAM_D bus
+            through read registers and write buffers. Follow the
+            <a href="#data-bus-organization">nibble wiring table</a> on the
+            DRAM side, using DRAM_D15..DRAM_D0. On reads, capture DRAM_D
+            before acknowledgement and retain the selected bytes through
+            request release. On writes, enable the ACT244 write buffers,
+            keep OE_n high, and establish W_n low before CAS. See
+            <a href="#read-data-hold">read-data retention</a>.
           </li>
           <li>
             <code>ACK_ARM</code> passes through the F08 qualification gates to
@@ -493,7 +494,7 @@
             <tr>
               <th scope="col">Part role</th>
               <th scope="col">Part data pins</th>
-              <th scope="col">CPU data bits</th>
+              <th scope="col">Local DRAM data bits</th>
               <th scope="col">CAS input</th>
               <th scope="col">Selected by</th>
             </tr>
@@ -502,28 +503,28 @@
             <tr>
               <th scope="row">Upper-byte high nibble</th>
               <td><code>DQ1..DQ4</code></td>
-              <td><code>D15..D12</code></td>
+              <td><code>DRAM_D15..DRAM_D12</code></td>
               <td><code>CAS_U_n</code></td>
               <td><code>UDS_n</code></td>
             </tr>
             <tr>
               <th scope="row">Upper-byte low nibble</th>
               <td><code>DQ1..DQ4</code></td>
-              <td><code>D11..D8</code></td>
+              <td><code>DRAM_D11..DRAM_D8</code></td>
               <td><code>CAS_U_n</code></td>
               <td><code>UDS_n</code></td>
             </tr>
             <tr>
               <th scope="row">Lower-byte high nibble</th>
               <td><code>DQ1..DQ4</code></td>
-              <td><code>D7..D4</code></td>
+              <td><code>DRAM_D7..DRAM_D4</code></td>
               <td><code>CAS_L_n</code></td>
               <td><code>LDS_n</code></td>
             </tr>
             <tr>
               <th scope="row">Lower-byte low nibble</th>
               <td><code>DQ1..DQ4</code></td>
-              <td><code>D3..D0</code></td>
+              <td><code>DRAM_D3..DRAM_D0</code></td>
               <td><code>CAS_L_n</code></td>
               <td><code>LDS_n</code></td>
             </tr>
@@ -548,56 +549,56 @@
               <th scope="row">0</th>
               <td><code>U_DRAM0_UH</code></td>
               <td>Upper-byte high nibble</td>
-              <td><code>D15, D14, D13, D12</code></td>
+              <td><code>DRAM_D15, DRAM_D14, DRAM_D13, DRAM_D12</code></td>
               <td><code>CAS_U_n</code></td>
             </tr>
             <tr>
               <th scope="row">0</th>
               <td><code>U_DRAM0_UL</code></td>
               <td>Upper-byte low nibble</td>
-              <td><code>D11, D10, D9, D8</code></td>
+              <td><code>DRAM_D11, DRAM_D10, DRAM_D9, DRAM_D8</code></td>
               <td><code>CAS_U_n</code></td>
             </tr>
             <tr>
               <th scope="row">0</th>
               <td><code>U_DRAM0_LH</code></td>
               <td>Lower-byte high nibble</td>
-              <td><code>D7, D6, D5, D4</code></td>
+              <td><code>DRAM_D7, DRAM_D6, DRAM_D5, DRAM_D4</code></td>
               <td><code>CAS_L_n</code></td>
             </tr>
             <tr>
               <th scope="row">0</th>
               <td><code>U_DRAM0_LL</code></td>
               <td>Lower-byte low nibble</td>
-              <td><code>D3, D2, D1, D0</code></td>
+              <td><code>DRAM_D3, DRAM_D2, DRAM_D1, DRAM_D0</code></td>
               <td><code>CAS_L_n</code></td>
             </tr>
             <tr>
               <th scope="row">1</th>
               <td><code>U_DRAM1_UH</code></td>
               <td>Upper-byte high nibble</td>
-              <td><code>D15, D14, D13, D12</code></td>
+              <td><code>DRAM_D15, DRAM_D14, DRAM_D13, DRAM_D12</code></td>
               <td><code>CAS_U_n</code></td>
             </tr>
             <tr>
               <th scope="row">1</th>
               <td><code>U_DRAM1_UL</code></td>
               <td>Upper-byte low nibble</td>
-              <td><code>D11, D10, D9, D8</code></td>
+              <td><code>DRAM_D11, DRAM_D10, DRAM_D9, DRAM_D8</code></td>
               <td><code>CAS_U_n</code></td>
             </tr>
             <tr>
               <th scope="row">1</th>
               <td><code>U_DRAM1_LH</code></td>
               <td>Lower-byte high nibble</td>
-              <td><code>D7, D6, D5, D4</code></td>
+              <td><code>DRAM_D7, DRAM_D6, DRAM_D5, DRAM_D4</code></td>
               <td><code>CAS_L_n</code></td>
             </tr>
             <tr>
               <th scope="row">1</th>
               <td><code>U_DRAM1_LL</code></td>
               <td>Lower-byte low nibble</td>
-              <td><code>D3, D2, D1, D0</code></td>
+              <td><code>DRAM_D3, DRAM_D2, DRAM_D1, DRAM_D0</code></td>
               <td><code>CAS_L_n</code></td>
             </tr>
           </tbody>
@@ -623,8 +624,75 @@
           A word transfer drives both byte lanes; a byte transfer drives only
           the lane named by its CPU strobe. The controller converts the CPU byte
           strobes into the shared CAS signal for the selected lane. Both banks
-          sit on the CPU data bus at once, but only the bank with an active RAS
+          share the isolated DRAM_D bus, but only the bank with an active RAS
           can enable its outputs during a read.
+        </p>
+      </section>
+
+      <section id="read-data-hold">
+        <h2>3.1. Read-Data Retention</h2>
+        <p>
+          A CPU samples read data after recognizing DTACK. DMA can wait much
+          longer for device READY. Closing the DRAM strobes at phase 6 must
+          therefore leave the completed read data on the motherboard bus.
+          Add two SN74HCT574N read registers and two CD74ACT244E write
+          buffers. Both banks share DRAM_D15..DRAM_D0; remove their direct
+          connections to motherboard D15..D0.
+        </p>
+        <p>
+          U_DRAM_READ_HOLD_L captures DRAM_D0..DRAM_D7 on D inputs 2..9;
+          Q outputs 19..12 drive motherboard D0..D7 in that order.
+          U_DRAM_READ_HOLD_U uses the same pin order for bits 8..15.
+          On both packages, pin 11 receives READ_CAPTURE, pin 1 receives
+          that byte's READ_HOLD_OE_n, pin 10 is ground, and pin 20 is +5 V.
+          The fourth U_DRAM_MODE flip-flop generates READ_CAPTURE at phase 4;
+          it returns low one tick later. No reset of the stored data is
+          needed because the output-enable logic masks it during reset and
+          outside an accepted read.
+        </p>
+        <p>
+          U_DRAM_WRITE_BUF_L and U_DRAM_WRITE_BUF_U carry motherboard data
+          to the corresponding DRAM_D byte. Wire each ACT244 A input to
+          motherboard D and its matching Y output to DRAM_D, following the
+          package's channel pin table. Tie both /OE pins, 1 and 19, to that
+          byte's WRITE_BUF_OE_n. Pins 10 and 20 are ground and +5 V.
+          Keep writes disabled during reads and reset. Add one 100 nF bypass
+          capacitor at each register and buffer.
+        </p>
+        <pre><code>READ_CAPTURE_D = CPU_BUSY AND PHASE_4
+READ_CAPTURE   = U_DRAM_MODE fourth Q (registered on DRAM_CLK_A)
+TX_READ        = NOT TX_WRITE
+READ_SELECTED_x = TX_x AND RAW_x
+READ_HOLD_OE_x_n = NOT (RESET_n AND CPU_BUSY AND TX_READ AND READ_SELECTED_x
+                       AND R_W AND AS_ACTIVE AND DRAM_CPU_REQ AND ACK_REQUEST)
+WRITE_BUF_OE_x_n = NOT (RESET_n AND WRITE_REQ AND RAW_x AND AS_ACTIVE
+                       AND DRAM_CPU_REQ)
+
+x = UPPER or LOWER; RAW_UPPER = NOT UDS_n; RAW_LOWER = NOT LDS_n
+ACK_REQUEST = REQ_SYNC2 AND NOT CPU_REQUEST_ENDED
+Capture at phase 4; arm ACK at phase 5; register ACK at phase 6.
+Close RAS/CAS/OE at phase 6; retain read data until raw request release.</code></pre>
+        <p>
+          Add U_DRAM_DATA_INV (SN74F04N), gates 1 and 2, for PHASE_4 and
+          TX_READ. Add U_DRAM_DATA_LOGIC (SN74F08N), gates 1-3, for
+          READ_CAPTURE_D and the upper/lower READ_SELECTED terms. Use four
+          SN74F30N packages, one per read/write byte enable; tie the three
+          unused NAND inputs high on each write-enable gate. F30 inputs
+          A..H use pins 1, 2, 3, 4, 5, 6, 11, and 12; output is pin 8,
+          ground is pin 7, and VCC is pin 14. Leave NC pins 9 and 10 open.
+          Ground unused F04/F08 inputs, leave their outputs open, and bypass
+          each package with 100 nF. These ten added packages belong in the
+          controller parts and power budget. Include the two HCT574 clock
+          inputs in the fourth mode output's load budget.
+        </p>
+        <p>
+          Raw AS, byte strobes, direction, and reset qualify the bus drivers.
+          The request-end latch prevents an old ACK from authorizing a new
+          access. A held read keeps only its requested motherboard byte lanes
+          driven; the DRAM bus returns to high impedance after phase 6.
+          Keep the fixed DRAM close and refresh-credit logic: extending RAS
+          through a 32 us expansion READY wait would exceed the DRAM's 10 us
+          limit. The data registers require no refresh during that wait.
         </p>
       </section>
 
@@ -831,7 +899,7 @@ RAM1_REQ_n  --&gt; DRAM controller --&gt; RAS1_n</code></pre>
         </p>
 
         <p>
-          Both banks share the multiplexed DRAM address bus, CPU data bus, and
+          Both banks share the multiplexed DRAM address bus, isolated DRAM_D bus, and
           byte-lane CAS signals. The separate RAS signals isolate the banks
           during CPU accesses.
         </p>
@@ -1584,6 +1652,16 @@ assert selected CAS</code></pre>
               <td>Inversions</td>
             </tr>
             <tr>
+              <td>U_DRAM_READ_HOLD_L/U; U_DRAM_WRITE_BUF_L/U</td>
+              <td>Two SN74HCT574N and two CD74ACT244E</td>
+              <td>Read retention and isolated write data; section 3.1</td>
+            </tr>
+            <tr>
+              <td>U_DRAM_DATA_INV, U_DRAM_DATA_LOGIC, four data-enable gates</td>
+              <td>One SN74F04N, one SN74F08N, four SN74F30N</td>
+              <td>Capture and byte-driver qualification; section 3.1</td>
+            </tr>
+            <tr>
               <td><code>U_DRAM_AND_A..H</code></td>
               <td>Eight <code>SN74F08N</code></td>
               <td>Two-input product terms</td>
@@ -1783,7 +1861,8 @@ CBR_RAS_WINDOW = phase 1 through 2</code></pre>
           flip-flops 1 through 3. Their D inputs are pins 4, 5, and 12; their Q
           outputs are pins 2, 7, and 10. Pin 11 supplies
           <code>CPU_REQUEST_ENDED_n</code> for acknowledgement qualification.
-          Tie unused D input pin 13 low and leave its outputs open. Pin 1 is
+          Pin 13 receives READ_CAPTURE_D; pin 15 drives READ_CAPTURE to
+          the two read-register clocks. Leave inverted output pin 14 open. Pin 1 is
           <code>RESET_n</code>, pin 9 is <code>DRAM_CLK_A</code>, and pins 8 and
           16 are ground and +5 V.
         </p>
@@ -1839,8 +1918,9 @@ W_ACTIVE_D = CPU_BUSY AND CPU_RAS_WINDOW AND TX_WRITE
 OE_ACTIVE_D = CPU_BUSY AND CPU_CAS_WINDOW AND NOT TX_WRITE
 DRAM_ADDR_COL_D = CPU_BUSY AND CPU_COL_WINDOW
 ACK_ARM_D = CPU_BUSY AND NOT CPU_REQUEST_ENDED
-            AND REQ_SYNC2 AND (PHASE_3 OR ACK_ARM)
-OE_n_PRE = NOT (OE_ACTIVE AND DRAM_CPU_REQ)</code></pre>
+            AND REQ_SYNC2 AND (PHASE_5 OR ACK_ARM)
+OE_n_PRE = NOT (OE_ACTIVE AND DRAM_CPU_REQ)
+READ_CAPTURE_D = CPU_BUSY AND PHASE_4</code></pre>
 
         <p>
           These equations are the glue-logic netlist. Use the named SN74F08N
@@ -2289,7 +2369,22 @@ refresh arbiter grants the DRAM to the CPU</code></pre>
               <td>Low</td>
               <td>Low for each requested lane</td>
               <td>Low</td>
-              <td>Earliest <code>READ_READY</code> boundary.</td>
+              <td>Allow read data to settle; do not arm ACK yet.</td>
+            </tr>
+            <tr>
+              <th scope="row">200 ns</th>
+              <td>Column</td><td>Low</td><td>Low for requested lanes</td><td>Low</td>
+              <td>Phase 4: capture DRAM_D in the read registers.</td>
+            </tr>
+            <tr>
+              <th scope="row">250 ns</th>
+              <td>Column</td><td>Low</td><td>Low for requested lanes</td><td>Low</td>
+              <td>Phase 5: raise ACK_ARM.</td>
+            </tr>
+            <tr>
+              <th scope="row">300 ns</th>
+              <td>Row</td><td>High</td><td>High</td><td>High</td>
+              <td>Phase 6: close memory strobes and register ACK; retain read data.</td>
             </tr>
           </tbody>
         </table>
@@ -2368,21 +2463,20 @@ refresh arbiter grants the DRAM to the CPU</code></pre>
         </table>
 
         <p>
-          These nominal allocations are measured at sequencer state boundaries,
-          not at the DRAM or CPU pins. Clock tolerance, controller propagation,
-          trace delay, DRAM loading, and acknowledgement-logic delay consume
-          part of the margin. <code>READ_READY</code> at 150 ns is therefore the
-          earliest permitted internal ready state, not by itself proof that the
-          CPU may be acknowledged.
+          These nominal allocations describe DRAM access settling at 150 ns.
+          Capture occurs at 200 ns, ACK_ARM rises at 250 ns, and the ACK
+          register samples at 300 ns. Include the read-register setup and
+          clock-to-output limits in the timing budget in section 20.3.
         </p>
 
         <p>
-          The published access times use the TMS44400 data sheet's 100 pF output
-          load circuit, including probe and fixture capacitance. The load on
-          each DQ pin is one CPU data input plus its route and probe. Keep that
-          total within the test condition or recalculate the read-data delay.
-          The limits and load circuit are on pages 8-11 of the
-          <a href="datasheets/TMS44400.pdf">TMS44400 data sheet</a>.
+          The TMS44400 access limits use a 100 pF output load. Each local
+          DRAM_D net now includes both banks' DQ pins, one HCT574 input,
+          and one disabled ACT244 write-buffer output, plus routing and
+          probing. Keep that local load within 100 pF. Budget the separate
+          motherboard bus against the HCT574's 150 pF switching table.
+          See the <a href="datasheets/TMS44400.pdf">TMS44400 data sheet</a>
+          and <a href="datasheets/sn74hct574.pdf">SN74HCT574 data sheet</a>.
         </p>
 
         <h3>CPU acknowledgement</h3>
@@ -2411,32 +2505,30 @@ refresh arbiter grants the DRAM to the CPU</code></pre>
         <pre><code>OE_n = SEQUENCED_OE_n OR (NOT DRAM_CPU_REQ)</code></pre>
 
         <p>
-          Thus a missing raw request forces <code>OE_n</code> high even while
-          the sequencer still holds its read state. The implementation must be
-          free of a low-going hazard when the raw bank and strobe terms change.
-          The TMS44400DJ-70 specifies <code>tOEZ = 18 ns</code> maximum from OE
-          high to an undriven output. The MC68EC000FN10 provides at least 105 ns
-          with <code>AS_n</code> and its data strobes negated between bus
-          cycles, leaving time for the DRAM to release the shared data bus.
+          A missing raw request forces OE_n high even while the sequencer
+          retains its read state. This releases the isolated DRAM bus.
+          Separate READ_HOLD_OE_x_n gates release the motherboard bus.
+          Budget its release from raw AS or byte strobes through FAST logic
+          and the HCT574 output-disable path, including board delay, against
+          the CPU's 105 ns minimum inactive interval. See section 20.3.
         </p>
 
         <p>
-          The DRAM cycle closes on the phase-6 edge, independent of the CPU
-          request level. RAS, CAS, and OE return high and the address mux
-          returns to row mode. <code>ACK_ARM</code> remains high until
-          <code>REQ_SYNC2</code> clears, so the CPU still sees a valid
-          acknowledgement even though the DRAM row is closed. This separates the
-          DRAM's 10 us maximum strobe time from the motherboard's longer bus
-          timeout.
+          The DRAM cycle closes on the phase-6 edge, independent of the
+          request level. RAS, CAS, and OE return high and the mux returns to
+          row mode. The read registers retain data on the motherboard bus
+          while ACK remains asserted. Raw request release disables their
+          outputs without waiting for request synchronization. This permits
+          long DMA READY waits without violating the DRAM strobe maximum.
         </p>
 
-        <pre><code>register acknowledgement
-    -&gt; hold data and strobes for two more 20 MHz ticks
-    -&gt; return OE, CAS, and RAS high at the phase-6 edge
-    -&gt; return the address mux to row mode
+        <pre><code>capture read data at phase 4
+    -&gt; raise ACK_ARM at phase 5
+    -&gt; register acknowledgement and close DRAM strobes at phase 6
+    -&gt; retain read data until raw AS or the selected byte strobe releases
     -&gt; keep RAS high for 2 ticks
     -&gt; remember REQ_SYNC2 low in CPU_REQUEST_ENDED; clear ACK_ARM
-    -&gt; leave CPU ownership at phase 9, even if the next request is already high
+    -&gt; leave CPU ownership at phase 9
     -&gt; return to IDLE_ARMED</code></pre>
 
         <p>
@@ -2549,7 +2641,7 @@ OE_n remains high</code></pre>
               <td>Low for each requested lane</td>
               <td>Low</td>
               <td>High</td>
-              <td>Earliest <code>WRITE_READY</code> boundary.</td>
+              <td>Continue holding write data; arm ACK at phase 5 (250 ns).</td>
             </tr>
           </tbody>
         </table>
@@ -2711,38 +2803,27 @@ OE_n remains high</code></pre>
         <h3>Write acknowledgement and cycle close</h3>
 
         <p>
-          The nominal 150 ns boundary is the earliest
-          <code>WRITE_READY</code> state. It gives CAS one nominal 50 ns active
-          interval before acknowledgement is eligible, exceeding the 18 ns
-          <code>tCAS</code>, 15 ns <code>tWCH</code>, and 15 ns
-          <code>tDH</code> minima before state-output and board delays are
-          subtracted. <code>WRITE_READY</code> raises <code>ACK_ARM</code>; the
-          acknowledgement register samples it on the following 20 MHz rising
-          edge. If the completed path does not retain the DRAM margins and the
-          MC68EC000's 5 ns asynchronous-input setup, delay
-          <code>ACK_ARM</code> by another state.
+          The write completes inside the same bounded DRAM cycle as before.
+          For both reads and writes, raise ACK_ARM at phase 5 and sample it
+          in the acknowledgement register at phase 6. This leaves the CAS
+          pulse and write-data hold intervals complete before acknowledgement.
+          Keep the TMS44400 tCAS, tWCH, and tDH minima in the pin-level check.
         </p>
 
         <p>
-          After acknowledgement, hold the write controls through phase 6. On the
-          next edge, return CAS, RAS, and W high and select row mode. Two
-          precharge phases follow. The controller then waits in phase 9 for
-          <code>REQ_SYNC2</code> to clear while <code>ACK_ARM</code> stays high.
+          At phase 6, return CAS, RAS, and W high and select row mode.
+          The ACK register samples on that edge. Two precharge phases follow.
+          Wait in phase 9 until the current or remembered synchronized request
+          end permits retirement. Keep ACK asserted for a held request.
         </p>
 
         <pre><code>request accepted; row address already selected
     -&gt; assert selected RAS and W_n
-    -&gt; wait 1 tick
-    -&gt; select column address
-    -&gt; wait 1 tick
-    -&gt; assert selected CAS lane or lanes
-    -&gt; wait 1 tick
-    -&gt; set WRITE_READY
-    -&gt; register acknowledgement on the next 20 MHz rising edge
-    -&gt; hold the DRAM controls for two more ticks
-    -&gt; return CAS, RAS, and W_n high at the phase-6 edge
-    -&gt; select row-address mode
-    -&gt; keep RAS high for 2 ticks
+    -&gt; select column at phase 1
+    -&gt; assert selected CAS lanes at phase 2
+    -&gt; retain write data and controls through phase 5; raise ACK_ARM
+    -&gt; register acknowledgement and close strobes at phase 6
+    -&gt; select row-address mode; keep RAS high for 2 ticks
     -&gt; leave phase 9 after a remembered or current REQ_SYNC2 low
     -&gt; return to IDLE_ARMED</code></pre>
 
@@ -2882,25 +2963,24 @@ ACK_D = ACK_ARM AND AS_ACTIVE AND BYTE_ACTIVE AND ACK_REQUEST</code></pre>
         <h3>Assertion timing</h3>
 
         <p>
-          The read and write timelines measure their state boundaries from the
-          edge that asserts RAS, and W for a write. Their earliest
-          <code>READ_READY</code> or <code>WRITE_READY</code> boundary is 150 ns
-          later. The acknowledgement register samples <code>ACK_ARM</code> on
-          the following 20 MHz rising edge:
+          The read and write timelines use the selected RAS assertion as
+          their zero reference. Capture read data at phase 4, arm ACK at phase
+          5, and sample ACK_D at phase 6. The write path uses the same ACK
+          schedule.
         </p>
 
         <pre><code>0 ns     assert selected RAS; assert W_n for a write
-150 ns   earliest READ_READY or WRITE_READY; raise ACK_ARM
-200 ns   U_DRAM_ACK samples ACK_D (= ACK_ARM, cycle still active)
+200 ns   capture read data
+250 ns   raise ACK_ARM (read or write)
+300 ns   U_DRAM_ACK samples ACK_D; close physical DRAM strobes
           ACK_ACTIVE rises after clock-to-output delay
           DRAM_DTACK_n falls one SN74F10 gate delay later</code></pre>
 
         <p>
-          Request acceptance precedes the 0 ns boundary by the row-address setup
-          state. In the baseline sequence, the register edge is therefore
-          nominally 250 ns after request acceptance, not 200 ns. These are
-          nominal state allocations; the electrical timing proof must include
-          clock tolerance and logic, trace, and load delays.
+          Request acceptance precedes RAS assertion by the row-address setup
+          state. The ACK sampling edge is therefore 350 ns after request
+          acceptance, before clock-to-output and completion-tree delay.
+          Include clock tolerance, loading, and routing in the pin-level budget.
         </p>
 
         <p>
@@ -4628,56 +4708,45 @@ Delay conditions (access-time only, not legal maxima):
           verify total column-to-CAS skew remains below the 35 ns cushion.
         </p>
 
-        <h3 id="tv-read-data">20.3. Read-data timing</h3>
+        <h3 id="tv-read-data">20.3. Read-data capture and retention</h3>
+        <pre><code>Nominal boundaries from RAS assertion at tick N:
+N+2: CAS/OE active              N+4: capture data
+N+5: raise ACK_ARM              N+6: register ACK and close DRAM
 
-        <pre><code>Nominal state boundaries (min-period ticks from /RAS down at tick N):
-  tick N   (  0 ns nom):  /RAS low
-  tick N+1 ( 50 ns nom):  column select
-  tick N+2 (100 ns nom):  /CAS + /OE low
-  tick N+3 (150 ns nom):  earliest READ_READY  (architectural boundary only)
+Tdiv2_min = 49.995 ns
+CAS/OE-to-data budget at the capture edge:
+  2*Tdiv2_min - t_ctl(OE,24.4) - tOEA(18) - HCT574 setup(25)
+  = 32.59 ns for local routing, loading, and clock skew
+Column-to-data budget:
+  3*Tdiv2_min - t_ctl(col,19.1) - t_mux(14.5) - tAA(35) - setup(25)
+  = 56.385 ns before board terms
+Read register to motherboard data, ahead of the ACK sampling edge:
+  2*Tdiv2_min - F175 CLK-to-Q(9.5) - HCT574 CLK-to-Q(66)
+  = 24.49 ns; reserve 5 ns data setup, leaving 19.49 ns for board terms
 
-Path a  (column address -&gt; tAA -&gt; data at CPU):
-  data valid at CPU, relative to tick N+3
-    = -2 x Tdiv2_min + t_ctl(col) + t_mux(sel 14.5) + tAA(35) + t_pcb(addr+DQ)
-    = -99.99 + t_ctl(col) + 49.5 + t_pcb
-    = -50.5 ns + t_ctl(col) + t_pcb
-
-Path b  (/CAS + /OE -&gt; tCAC / tOEA -&gt; data at CPU):
-  data valid at CPU, relative to tick N+3
-    = -1 x Tdiv2_min + t_ctl(/CAS or /OE) + max(tCAC,tOEA)=18 + t_pcb
-    = -49.995 + t_ctl + 18 + t_pcb
-    = -32.0 ns + t_ctl + t_pcb
-
-Acknowledgement reaching the CPU /DTACK pin, referenced to tick N+3
-  (conservative: U_DRAM_ACK actually samples ACK_ARM one tick later, at N+4,
-   which only increases the lead below; assertion transitions are
-   F74 CLK->Q up 7.8; F10 g3 down 5.3; F21 down 5.5; F21 down 5.5; F32 down 6.3):
-    &gt;= t_F74(7.8) + t_F10(5.3) + t_F21(5.5) + t_F21(5.5) + t_F32(6.3) + t_pcb
-    =  +30.4 ns + t_pcb
-
-Data leads DTACK-at-CPU by at least:
-    path a:  30.4 - (-50.5) = 80.9 ns  - (t_ctl and t_pcb differences)
-    path b:  30.4 - (-32.0) = 62.4 ns  - (t_ctl and t_pcb differences)
-Plus the CPU still needs data only 5 ns (#27) before its next latching clock edge.</code></pre>
-
+HCT574 at 4.5 V, SN74 temperature range:
+  setup 25 ns; hold 5 ns; clock high/low 20 ns
+  CLK-to-Q 66 ns and output enable 59 ns at 150 pF
+  output disable 38 ns under the specified disable test load
+Read data remains driven until raw request release, including DMA READY waits.</code></pre>
         <p>
-          The 150 ns <code>READ_READY</code> boundary alone does not guarantee
-          valid data; it is the earliest architectural ready state. Final
-          acknowledgement is permitted only because the complete worst-case
-          budget closes: read data reaches the CPU pins 62-81 ns ahead of the
-          acknowledgement edge before the unquantified terms, and the CPU
-          data-in setup is only 5 ns. DRAM output loading: each DQ drives one
-          MC68EC000 data input (<code>Cin</code> 20 pF, M68000UM 10.13) plus the
-          other bank's DQ pin and the motherboard-wide data-bus load. No
-          access-time derating is needed if the assembled-board measurement is
-          at most 100 pF per bit and the data lead at the CPU is at least 5 ns.
-          The direct control delay is 19.1 ns and the OE delay is 24.4 ns, so
-          the slower control path leaves 38.0 ns of the original 62.4 ns lead
-          before board delay.
-          <strong
-            >Status: PASS by design; verify the 100 pF load and 5 ns CPU-pin
-            setup on the assembled board.</strong
-          >
+          Use the full-temperature SN74HCT574 limits from sections 4.5-4.7
+          of its <a href="datasheets/sn74hct574.pdf">data sheet</a>.
+          Capture precedes the physical close by two ticks. Check 5 ns of
+          input hold after READ_CAPTURE, including the F175 clock delay.
+          The read outputs enable during request acceptance, before capture;
+          the master must wait for DTACK before sampling the resulting data.
+          Each unrequested byte remains disabled.
+        </p>
+        <p>
+          From raw AS, output release crosses an F10 inverter, an F30 NAND,
+          and HCT574 output disable. A byte-only release also crosses the
+          raw-lane inverter and READ_SELECTED F08. Include these paths and
+          the actual output load in the 105 ns bus-turnaround check. Retaining
+          data after phase 6 removes the former dependence on CPU sampling
+          phase and device READY latency. This revision has not been simulated;
+          run the updated testbench with the project's Linux simulator fork
+          and measure capture, hold, and bus release before board release.
         </p>
 
         <h3 id="tv-read-ack">20.4. Read acknowledgement timing</h3>
@@ -4766,52 +4835,23 @@ Assembled-board acceptance: /AS(/DS) receiver plus PCB/interconnect plus loaded
         </p>
 
         <h3 id="tv-write-data">20.6. Write-data timing</h3>
-
-        <pre><code>MC68EC000 write data valid --&gt; (CPU keeps driving; controller does not latch it)
-  --&gt; TMS44400 early-write: W_n low first, so the selected /CAS falling edge is
-      the controlling write-data event (tDS/tDH referenced to the later of CAS or W)
-
-CPU delivers (MC68EC000FN10 10 MHz):
-  #26 data-out valid to DS asserted (write) = 30 ns min   -> data valid >= 30 ns before /DS
-  #25 AS,DS negated to data-out invalid    = 30 ns min    -> data held  >= 30 ns after strobes negate
-
-Controller inserts before /CAS falls: byte-strobe qualification + 2 x CPU_CLK_DIV2
-synchronizer stages + CPU_START + 2 sequencer ticks (row, column)  >=  4 x Tdiv2_min
-  ~ 200 ns  after /DS asserted.
-
-    tDS_actual  ~  30 ns (#26) + 200 ns (sync + sequencer) - t_ctl(/CAS) + t_pcb(data)
-                ~  230 ns                        vs  tDS spec = 0 ns min       PASS
-    tDH_actual  :  CPU cannot negate its strobes until it has seen /DTACK, which
-                   is after READ/WRITE_READY; /CAS fell ~200 ns into the cycle, so
-                   data stays valid for hundreds of ns after /CAS down, and the
-                   CPU still holds it 30 ns past strobe negation (#25)
-                                                 vs  tDH spec = 15 ns min      PASS
-    tWCS  (W low before CAS low, 0 min)  : W down at tick 0, CAS down at tick +2
-                   = 2 x Tdiv2_min - t_skew  =  99.99 ns - skew            PASS
-    tWCH  (W low after CAS low, 15 min)  : W held low through cycle close       PASS
-    tWP   (W low pulse, 10 min)          : W low for the whole DRAM cycle       PASS
-    tCWL  (W low before CAS high, 18 min): W low throughout the CAS pulse       PASS
-    tRWL  (W low before RAS high, 18 min): W low throughout the RAS pulse       PASS
-    tWCR  (W low after RAS low, 55 min)  : W down and RAS down share a state
-                   boundary; W then stays low >= 2 x Tdiv2_min to /CAS and past
-                   cycle close  =  99.99 ns - t_skew   vs 55 ns
-                                                 PASS for t_skew &lt; 44.99 ns
-    tDHR  (data hold after RAS low, 55)  : data valid hundreds of ns after RAS  PASS</code></pre>
-
         <p>
-          The DRAM early-write needs data valid 0 ns before the controlling CAS
-          edge (<code>tDS = 0</code>) and held 15 ns after. The controller
-          actually presents data about 230 ns before <code>/CAS</code> falls,
-          because the request must cross two 20 MHz synchronizer stages and two
-          sequencer ticks after the CPU asserts its data strobe, and the data is
-          then held for the entire remaining bus cycle because the CPU cannot
-          release it until <code>/DTACK</code> is seen. The margin is the
-          synchronizer plus sequencer latency, which the architecture guarantees
-          is at least four <code>CPU_CLK_DIV2</code> ticks.
-          <strong>Status: PASS.</strong> The direct registered RAS and W paths
-          use matched CD74ACT244E channels. Their measured pin-to-pin skew must
-          remain below 44.99 ns; the tighter RAS pulse check below controls the
-          actual acceptance limit.
+          Write data passes through U_DRAM_WRITE_BUF to DRAM_D. Include the
+          ACT244 data propagation and output-enable limits, its FAST enable
+          gates, and local routing when checking setup at the selected CAS
+          falling edge. The raw byte strobe enables the buffer before the
+          request crosses two synchronizer stages and the row/column states.
+          Check tDS = 0 ns and tDH = 15 ns at the DRAM pins. A CPU write
+          supplies data at least 30 ns before DS; DMA supplies data under its
+          device READY protocol. Acknowledge at phase 6 after the write pulse
+          completes. Raw request release disables the write buffers.
+        </p>
+        <p>
+          W goes low at phase 0 and CAS at phase 2. Both return high at
+          phase 6. The read-register addition does not change those strobe
+          boundaries or their tWCS, tWCH, tWP, tCWL, tRWL, and tWCR budgets.
+          Verify the buffered data path for both bus masters with the updated
+          simulation and the assembled-board timing check.
         </p>
 
         <h3 id="tv-pulse-widths">20.7. /RAS and /CAS pulse widths</h3>
@@ -5177,17 +5217,15 @@ why tRP is allocated two ticks.</code></pre>
               </td>
             </tr>
             <tr>
-              <td>Read data -&gt; CPU</td>
-              <td>PASS; measure assembled board</td>
-              <td>
-                62-81 ns logic headroom before control and board terms. Confirm
-                each DQ net is at most 100 pF and data is valid at the CPU at
-                least 5 ns before its sampling edge.
-              </td>
+              <td>Read data capture and retention</td>
+              <td>Simulation pending; board measurements required</td>
+              <td>Check HCT574 setup/hold, motherboard data before ACK,
+                retained data during READY stalls, and raw-strobe output
+                release against section 20.3.</td>
             </tr>
             <tr>
               <td>Read ACK assertion</td>
-              <td>Simulation passes; verify revised setup/hold paths</td>
+              <td>Simulation pending; verify revised setup/hold paths</td>
               <td>
                 ACK_ARM setup budget 25.3 ns; added request-qualification budget
                 18.0 ns, both before board delay and clock skew. Output
@@ -5206,12 +5244,9 @@ why tRP is allocated two ticks.</code></pre>
             </tr>
             <tr>
               <td>Write data timing</td>
-              <td>PASS</td>
-              <td>
-                <code>tDS</code> actual ~230 ns vs 0 ns; data held through the
-                cycle vs <code>tDH</code> 15 ns. Measured RAS-to-W skew must be
-                less than 44.99 ns.
-              </td>
+              <td>Buffered path requires simulation and pin-level checks</td>
+              <td>Include ACT244 propagation and enable delay; check
+                tDS = 0 ns and tDH = 15 ns at DRAM_D. See section 20.6.</td>
             </tr>
             <tr>
               <td><code>/RAS</code> pulse width</td>
@@ -5505,15 +5540,12 @@ PASS requires both results &gt;= 0 V at the stated output current.</code></pre>
               <td><strong>PASS</strong></td>
             </tr>
             <tr>
-              <td>MC68EC000 write data to TMS44400 DQ input</td>
-              <td>4.0 V / 2.4 V</td>
-              <td><code>4.0 - 2.4 = 1.60 V</code></td>
-              <td>0.5 V / 0.8 V</td>
-              <td><code>0.8 - 0.5 = 0.30 V</code></td>
-              <td><strong>PASS</strong></td>
+              <td>Motherboard data through ACT244 to DRAM_D</td>
+              <td colspan="5">Check both interfaces at their actual loads;
+                see Data-bus loading and section 20.6.</td>
             </tr>
             <tr>
-              <td>TMS44400 DQ output to MC68EC000 data input</td>
+              <td>TMS44400 DQ output to SN74HCT574 data input</td>
               <td>2.4 V / 2.0 V</td>
               <td><code>2.4 - 2.0 = 0.40 V</code></td>
               <td>0.4 V / 0.8 V</td>
@@ -5762,45 +5794,34 @@ MC68EC000 bus-control drive is 400 uA source / 5.3 mA sink.</code></pre>
         </p>
 
         <h3>Data-bus loading</h3>
-
         <p>
-          Each CPU data bit connects to one DQ pin in bank 0 and the
-          corresponding DQ pin in bank 1. One bank may drive during a read; the
-          other bank remains high-impedance but its pin capacitance remains on
-          the net.
+          Budget two separate nets per bit. DRAM_D includes two DRAM DQ pins,
+          one HCT574 input, the disabled ACT244 write output, and local
+          routing. Motherboard D includes the HCT574 output, ACT244 input,
+          CPU, DMAC, and peripheral data connections. The DRAM access budget
+          permits 100 pF on DRAM_D; the HCT574 clock-to-output budget uses
+          its 150 pF table. Include socket and probe capacitance in both.
         </p>
-
-        <pre><code>per CPU Dn line:
-  2 x TMS44400 DQ capacitance = 2 x 7 pF = 14 pF max
-  1 x MC68EC000 input         = 20 pF max
-  known subtotal              = 34 pF max
-  plus other motherboard receivers, PCB/interconnect, sockets, and probe
-
-selected DRAM output drive    = 5 mA source at VOH &gt;= 2.4 V
-                                4.2 mA sink at VOL &lt;= 0.4 V
-known receiving DC current    = 20 uA CPU input
-unknown physical terms        = other motherboard loads, routes, sockets, probe
-special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</code></pre>
-
         <p>
-          The data-level check passes numerically: 0.40 V HIGH margin and 0.40 V
-          LOW margin from a TMS44400 to the CPU, and 1.60 V HIGH plus 0.30 V LOW
-          from the CPU to the DRAM during writes. The DRAM access times are
-          characterized with a 100 pF output load, so the 34 pF known subtotal
-          leaves 66 pF for every other connected pin and physical term before
-          reaching that condition. The assembled-board test enforces both the
-          100 pF condition and the CPU's 5 ns data setup directly.
-        </p>
-
-        <p>
-          The supplied TMS44400 sheet specifies <code>IO = +/-10 uA</code> with
-          CAS HIGH, not for the shared-CAS condition above. Do not substitute
-          that number. Verify valid CPU HIGH and LOW levels with the other bank
-          deselected, and verify no bus-current or waveform evidence of
-          contention. Keep each completed read net at or below 100 pF.
+          Check DC levels and aggregate current on all four interfaces:
+          DRAM to HCT574, HCT574 to motherboard receivers, motherboard writer
+          to ACT244, and ACT244 to DRAM. DRAM VOH = 2.4 V meets the HCT574's
+          2.0 V input threshold. For the driven motherboard bus, use the
+          HCT574 VOH/VOL limits at the actual source/sink current, including
+          TTL input loads and pull resistors. The other DRAM bank remains on
+          DRAM_D during a read; check its off-state behavior with shared CAS
+          and OE. The old 34 pF direct-CPU subtotal no longer describes either
+          net.
         </p>
 
         <h3>Local current and power implications</h3>
+        <p>
+          Include the two HCT574 registers, two ACT244 write buffers, four
+          F30 enable gates, F08, and F04 in the controller supply budget.
+          Account for TTL-level input supply current and read-bus switching
+          current as well as quiescent current. Their ten 100 nF capacitors
+          supplement the existing DRAM/control decoupling.
+        </p>
 
         <p>
           The TMS44400DJ-70 lists <code>ICC1 = 90 mA max</code> per part for a
@@ -5920,11 +5941,11 @@ special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</c
 
         <ul>
           <li>
-            <strong>DRAM data bus: PASS for the frozen DRAM protocol.</strong>
-            A normal read asserts RAS for one bank only. A write has
-            <code>OE_n</code> HIGH and uses early write, so the CPU is the only
-            driver. CBR refresh keeps <code>OE_n</code> HIGH, so neither bank
-            drives. The unselected bank's DQ capacitance remains present.
+            <strong>DRAM data paths.</strong> A read enables one bank on
+            DRAM_D and the selected holding-register bytes on motherboard D.
+            A write enables the ACT244 write buffers while DRAM OE stays
+            high. Refresh drives neither data bus. Check driver release
+            during byte changes, aborts, reset, and CPU/DMA handoff.
           </li>
           <li>
             <strong>DRAM address bus: PASS.</strong> Each net has one
@@ -6034,20 +6055,18 @@ special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</c
               <td>PASS DC; loaded delay measurement required</td>
             </tr>
             <tr>
-              <td>CPU <code>Dn</code>, DRAM read</td>
-              <td>one selected <code>TMS44400DJ-70</code> DQ</td>
-              <td>
-                2 x DRAM DQ pins + MC68EC000 input + motherboard data loads
-              </td>
-              <td>14 pF DRAM + 20 pF CPU = 34 pF max known</td>
-              <td>PASS levels; board limit 100 pF and 5 ns setup</td>
+              <td>Motherboard Dn, DRAM read</td>
+              <td>SN74HCT574 Q</td>
+              <td>CPU, DMA, peripheral inputs and ACT244 write-buffer input</td>
+              <td>150 pF maximum for the chosen clock-to-output budget</td>
+              <td>Verify levels, 5 ns CPU setup, and release; section 20.3</td>
             </tr>
             <tr>
-              <td>CPU <code>Dn</code>, DRAM write</td>
-              <td><code>MC68EC000FN10</code></td>
-              <td>2 x TMS44400 DQ pins + motherboard data loads</td>
-              <td>14 pF max added by DRAM</td>
-              <td>PASS levels; verify board waveform</td>
+              <td>Local DRAM_Dn, write</td>
+              <td>CD74ACT244E output</td>
+              <td>Two DRAM DQ pins and one HCT574 input</td>
+              <td>Include trace, socket, and probe capacitance</td>
+              <td>Verify buffered write timing; section 20.6</td>
             </tr>
           </tbody>
         </table>
@@ -6233,7 +6252,9 @@ special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</c
             <tr>
               <td>Read data at CPU pins</td>
               <td>
-                At most 100 pF per bit and valid at least 5 ns before sampling
+                At most 150 pF on motherboard D; valid at least 5 ns before
+                sampling and retained through the longest READY wait. Check
+                local DRAM_D at 100 pF maximum and 25 ns capture setup.
               </td>
             </tr>
             <tr>
@@ -6297,8 +6318,8 @@ special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</c
             part;
           </li>
           <li>
-            a read-data timing budget from RAS, CAS, and column address through
-            the board to the CPU, ending before <code>DRAM_DTACK_n</code>;
+            a read-data timing budget through the HCT574 capture registers to
+            the motherboard bus, with data retained through request release;
           </li>
           <li>
             the <code>DRAM_DTACK_n</code> release path: two

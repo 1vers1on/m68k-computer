@@ -5,7 +5,8 @@
 // Structural simulation: sequential state, muxes, buffers, and glue use the
 // existing device models and their specify delays (compile with -gspecify).
 // Each scalar gate/flip-flop instance represents a channel, not a whole IC.
-// CPU data connects directly to the DRAMs outside this controller.
+// Read registers retain data after the bounded DRAM cycle closes.
+// D is the motherboard bus; DRAM_D is the isolated bus shared by both banks.
 // The spare third U_DRAM_MODE bit remembers request end through precharge.
 // This and ACK_REQUEST prevent stale ACK/re-arm failures at a 105 ns bus gap.
 // INIT_LAST uses equivalent F08/F04 gates because no F20 model is available;
@@ -15,6 +16,7 @@ module dram_controller (
     input  wire RAM0_REQ_n, RAM1_REQ_n,
     input  wire AS_n, UDS_n, LDS_n, R_W,
     input  wire CPU_CLK_DIV2, CPU_CLK_10, RESET_n,
+    inout  wire [15:0] D, DRAM_D,
     output wire [9:0] DRAM_A,
     output wire RAS0_n, RAS1_n, CAS_U_n, CAS_L_n, W_n, OE_n,
     output wire DRAM_ADDR_COL, DRAM_DTACK_n, DRAM_INIT_DONE,
@@ -32,6 +34,8 @@ module dram_controller (
     wire CPU_BUSY, REFRESH_BUSY, CPU_REQUEST_ENDED, CPU_REQUEST_ENDED_n;
     wire [3:0] CTL_A, CTL_A_n, CTL_B, CTL_B_n;
     wire ACK_ACTIVE;
+    wire PHASE_4, READ_CAPTURE_D, READ_CAPTURE, TX_READ;
+    wire [1:0] READ_HOLD_OE_n, WRITE_BUF_OE_n;
     wire TX_BANK1 = TX[0];
     wire TX_UPPER = TX[1];
     wire TX_LOWER = TX[2];
@@ -88,7 +92,6 @@ module dram_controller (
     wire DRAM_CPU_REQ;
     wire RUN;
     wire PHASE_QD_n;
-    wire PHASE_3;
     wire PHASE_5;
     wire REFRESH_DONE;
     wire PHASE_LOAD_n;
@@ -196,8 +199,8 @@ module dram_controller (
     sn74f32 g_RUN (.A(CPU_BUSY), .B(REFRESH_BUSY), .Y(RUN));
     // PHASE_QD_n = ~PHASE_Q[3]
     sn74f04 g_PHASE_QD_n (.A(PHASE_Q[3]), .Y(PHASE_QD_n));
-    // PHASE_3 = ~PHASE_n[3]
-    sn74f04 g_PHASE_3 (.A(PHASE_n[3]), .Y(PHASE_3));
+    sn74f04 g_PHASE_4 (.A(PHASE_n[4]), .Y(PHASE_4));
+    sn74f08 g_READ_CAPTURE (.A(CPU_BUSY), .B(PHASE_4), .Y(READ_CAPTURE_D));
     // PHASE_5 = ~PHASE_n[5]
     sn74f04 g_PHASE_5 (.A(PHASE_n[5]), .Y(PHASE_5));
     // REFRESH_DONE = REFRESH_BUSY & PHASE_5
@@ -278,9 +281,10 @@ module dram_controller (
     sn74f08 g_OE_ACTIVE_D (.A(CPU_BUSY), .B(OE_ACTIVE_D_term68), .Y(OE_ACTIVE_D));
     // DRAM_ADDR_COL_D = CPU_BUSY & CPU_COL_WINDOW
     sn74f08 g_DRAM_ADDR_COL_D (.A(CPU_BUSY), .B(CPU_COL_WINDOW), .Y(DRAM_ADDR_COL_D));
-    // ACK_ARM_D = (CPU_BUSY & ~CPU_REQUEST_ENDED) & (REQ_SYNC2 & (PHASE_3 | ACK_ARM))
+    // Allow a full tick after the phase-4 data capture before arming ACK.
+    // ACK_ARM_D = (CPU_BUSY & ~CPU_REQUEST_ENDED) & (REQ_SYNC2 & (PHASE_5 | ACK_ARM))
     sn74f08 g_ACK_ARM_D_term72 (.A(CPU_BUSY), .B(CPU_REQUEST_ENDED_n), .Y(ACK_ARM_D_term72));
-    sn74f32 g_ACK_ARM_D_term75 (.A(PHASE_3), .B(ACK_ARM), .Y(ACK_ARM_D_term75));
+    sn74f32 g_ACK_ARM_D_term75 (.A(PHASE_5), .B(ACK_ARM), .Y(ACK_ARM_D_term75));
     sn74f08 g_ACK_ARM_D_term74 (.A(REQ_SYNC2), .B(ACK_ARM_D_term75), .Y(ACK_ARM_D_term74));
     sn74f08 g_ACK_ARM_D (.A(ACK_ARM_D_term72), .B(ACK_ARM_D_term74), .Y(ACK_ARM_D));
     // Mask stale ACK_ARM while request-end propagates through the mode/control
@@ -359,7 +363,34 @@ module dram_controller (
     sn74f175 U_DRAM_MODE_3 (.CLR_n(RESET_BRANCH_n[1]),
         .CLK(DRAM_CLK_A), .D(CPU_REQUEST_ENDED_D), .Q(CPU_REQUEST_ENDED), .Q_n(CPU_REQUEST_ENDED_n));
     sn74f175 U_DRAM_MODE_4 (.CLR_n(RESET_BRANCH_n[1]),
-        .CLK(DRAM_CLK_A), .D(1'b0), .Q(), .Q_n());
+        .CLK(DRAM_CLK_A), .D(READ_CAPTURE_D), .Q(READ_CAPTURE), .Q_n());
+
+    // Two HCT574 packages read the local bus. Two ACT244 packages carry writes
+    // in the opposite direction. Each byte has its own output enable.
+    // Raw direction/strobes prevent contention after aborts and at handoff.
+    sn74f04 g_TX_READ (.A(TX_WRITE), .Y(TX_READ));
+    for (genvar lane = 0; lane < 2; lane = lane + 1) begin : data_lane
+        wire selected = lane == 0 ? TX_LOWER : TX_UPPER;
+        wire raw_selected = lane == 0 ? LOWER_REQ : UPPER_REQ;
+        wire read_selected;
+        sn74f08 g_READ_SELECTED (.A(selected), .B(raw_selected), .Y(read_selected));
+        sn74f30 g_READ_ENABLE (.A(RESET_n), .B(CPU_BUSY), .C(TX_READ),
+            .D(read_selected), .E(R_W), .F(AS_ACTIVE), .G(DRAM_CPU_REQ),
+            .H(ACK_REQUEST), .Y(READ_HOLD_OE_n[lane]));
+        sn74f30 g_WRITE_ENABLE (.A(RESET_n), .B(WRITE_REQ), .C(raw_selected),
+            .D(AS_ACTIVE), .E(DRAM_CPU_REQ), .F(1'b1), .G(1'b1), .H(1'b1),
+            .Y(WRITE_BUF_OE_n[lane]));
+        for (genvar bit_n = 0; bit_n < 8; bit_n = bit_n + 1) begin : bit_driver
+            // SN74 grade at 4.5 V: use 150 pF clock/output-enable limits,
+            // and the full-temperature setup, hold, and pulse requirements.
+            sn74hct574 #(.TPLH(66.0), .TPHL(66.0), .TPZH(59.0), .TPZL(59.0),
+                .TPHZ(38.0), .TPLZ(38.0), .TSU(25.0), .TH(5.0), .TW(20.0))
+                U_DRAM_READ_HOLD (.OE_n(READ_HOLD_OE_n[lane]),
+                .CLK(READ_CAPTURE), .D(DRAM_D[8*lane+bit_n]), .Q(D[8*lane+bit_n]));
+            cd74act244 U_DRAM_WRITE_BUF (.OE_n(WRITE_BUF_OE_n[lane]),
+                .A(D[8*lane+bit_n]), .Y(DRAM_D[8*lane+bit_n]));
+        end
+    end
     sn74f175 U_DRAM_CTL_A_1 (.CLR_n(RESET_BRANCH_n[1]),
         .CLK(DRAM_CLK_A), .D(RAS0_ACTIVE_D), .Q(CTL_A[0]), .Q_n(CTL_A_n[0]));
     sn74f175 U_DRAM_CTL_A_2 (.CLR_n(RESET_BRANCH_n[1]),

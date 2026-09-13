@@ -102,7 +102,7 @@
       <section id="architecture">
         <h2>2. Architecture</h2>
         <pre><code>                         +---------------- MC68EC000
-                         | BR/BG/BGACK
+                         | CPU_BR/BG (OWN holds CPU_BR)
                          | A1..A23, FC, AS, DS, R/W
                          v
 device REQ/PCL ----&gt; MC68450L8 ---- ACK/DTC/DONE ----&gt; device glue
@@ -111,7 +111,7 @@ device REQ/PCL ----&gt; MC68450L8 ---- ACK/DTC/DONE ----&gt; device glue
                          +&lt;-&gt; 2 x HCT245 &lt;-&gt; D0..D15
  D15..D8 &lt;------------- HCT245 HIBYTE -------------&gt; D7..D0
 
-motherboard DTACK --&gt; HCT125 --&gt; DMAC DTACK pin --&gt; HCT125 --&gt; tree
+motherboard DTACK --&gt; HCT125 --&gt; DMAC DTACK pin --&gt; HCT125 --&gt; register qualifier --&gt; tree
 BUS_BERR_n --------&gt; retained DMA fault -----------&gt; BEC2..BEC0
 RESET_n/PERIPH_RESET_n ----------------------------&gt; BEC reset code
 IRQ ------------------------------------------------&gt; level 1 autovector</code></pre>
@@ -373,31 +373,42 @@ DMA_CLK_RAW = toggle Q = MASTER_CLK_40 / 6</code></pre>
 
       <section id="arbitration">
         <h2>6. Bus Arbitration</h2>
+        <p>
+          The MC68EC000 uses two-wire BR/BG arbitration. In the 68-lead
+          package, pin 13 is /BR and pin 14 is VCC. The BGACK label in
+          Figure 11-3 is a manual error; see page 2 of Motorola's
+          <a href="https://www.nxp.com/docs/en/reference-manual/MC68000UMAD.pdf">pinout addendum</a>.
+          The MC68450 still uses BGACK for its own ownership sequence.
+        </p>
+        <pre><code>CPU_BR_n = DMA_BR_n AND OWN_n
+CPU_BG_n --&gt; MC68450 BG_n
+BGACK_n  --&gt; DMA fault/READY logic only</code></pre>
+        <p>
+          Add U_DMA_BR_HOLD, an SN74F08N. Gate 1 inputs 1 and 2 receive
+          DMA_BR_n and OWN_n; output 3 drives CPU pin 13. Keep 2.2 kohm
+          pull-ups on the DMAC DMA_BR_n, OWN_n, and BGACK_n nets. The gate
+          drives CPU_BR_n as a push-pull signal. Ground unused inputs 4, 5,
+          9, 10, 12, and 13; leave outputs 6, 8, and 11 open. Pins 7 and 14
+          connect to ground and +5 V. Add a 100 nF bypass capacitor.
+        </p>
         <ol>
-          <li>The DMAC pulls processor <code>BR_n</code> low.</li>
-          <li>
-            The processor finishes its current cycle, releases its bus outputs,
-            and pulls <code>BG_n</code> low.
-          </li>
-          <li>
-            The DMAC waits for CS, IACK, AS, and BGACK to be inactive. It then
-            pulls <code>OWN_n</code> low.
-          </li>
-          <li>
-            One half DMA clock later it pulls <code>BGACK_n</code> low. Its
-            first S0 drives FC, A1..A7, and the multiplexed upper address.
-          </li>
-          <li>
-            After the last cycle it releases BGACK. It releases OWN one half DMA
-            clock later. The processor synchronizes released BGACK before
-            driving the bus.
-          </li>
+          <li>The DMAC pulls DMA_BR_n low; the bridge asserts CPU_BR_n.</li>
+          <li>The CPU responds with BG_n; the DMAC must still wait for the
+            current bus cycle to end.</li>
+          <li>The DMAC waits for CS, IACK, AS, and BGACK to be inactive,
+            then asserts OWN_n. Half a DMA clock later it asserts BGACK_n.</li>
+          <li>The DMAC negates DMA_BR_n one clock after asserting BGACK_n.
+            OWN_n keeps CPU_BR_n low throughout the transfer or burst.</li>
+          <li>After the last cycle, the DMAC negates BGACK_n, then OWN_n
+            half a clock later. The bridge releases CPU_BR_n only when
+            DMA_BR_n and OWN_n are both high. The CPU synchronizes BR release
+            before resuming bus ownership.</li>
         </ol>
         <p>
           The CPU and DMA clock patterns repeat every twelve 40 MHz periods, but
           startup phase is arbitrary. No cross-clock setup assumption is used.
           Both devices apply their documented asynchronous-input synchronizers.
-          Reduced 2.2 kohm pull-ups make BR and BGACK rise to the 2.0 V input
+          The 2.2 kohm pull-ups make DMA_BR_n and BGACK rise to the 2.0 V input
           threshold in about 27 ns for a conservative 30 pF net, leaving the
           remaining latency to the receiver synchronizers.
         </p>
@@ -528,7 +539,7 @@ DMAC_CS_n  = IO12_n OR (NOT CPU_OWNER) OR (NOT DS_ACTIVE)</code></pre>
               <td>2</td>
               <td>
                 /OE 4=<code>NOT OWN_n</code>, A 5=DMAC pin 11, Y 6=<code
-                  >DMAC_DTACK_n</code
+                  >DMAC_DTACK_RAW_n</code
                 >
               </td>
               <td>Enabled only for CPU register cycles</td>
@@ -544,34 +555,70 @@ DMAC_CS_n  = IO12_n OR (NOT CPU_OWNER) OR (NOT DS_ACTIVE)</code></pre>
           </tbody>
         </table>
         <p>
-          A 2.2 kohm pull-up at DMAC pin 11 provides the high level required by
-          its open-drain MPU-mode DTACK output. A 4.7 kohm pull-up on
-          <code>DMAC_DTACK_n</code> keeps the completion-tree input inactive
-          while gate 2 is disabled. With 30 pF at that isolated node, reaching
-          2.0 V from 0.5 V takes 57 ns. Gate 2 remains enabled until OWN falls,
-          after the CPU has released the cycle, so this RC does not extend a
-          live register cycle.
+          A 2.2 kohm pull-up at DMAC pin 11 supplies the high level for its
+          open-drain MPU-mode output. Keep a 4.7 kohm pull-up on the isolated
+          <code>DMAC_DTACK_RAW_n</code> node. Feed that node through the
+          completion qualifier below before connecting the completion tree.
+          Gate 2 remains enabled throughout CPU ownership.
         </p>
-        <pre><code>DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND BSRAM_DTACK_n AND 1
+        <pre><code>DS_INACTIVE       = UDS_n AND LDS_n
+CYCLE_END         = AS_n OR DS_INACTIVE
+REG_INVALID       = DMAC_CS_n OR CYCLE_END OR NOT RESET_n
+REG_CLEAR_n       = NOT REG_INVALID
+REG_ARM1          = register(1, CPU_CLK_10, async_clear=REG_CLEAR_n)
+REG_ARM2          = register(REG_ARM1, CPU_CLK_10, async_clear=REG_CLEAR_n)
+DMAC_DTACK_n      = DMAC_DTACK_RAW_n OR NOT REG_ARM2 OR REG_INVALID
+
+DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND BSRAM_DTACK_n AND 1
 DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n
 DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE
 DTACK_TO_DMA_n = DTACK_n OR DMA_FAULT</code></pre>
         <p>
-          Add <code>U_DTACK_C</code>, an <code>SN74F21N</code>. Gate 1 uses pins
-          1, 2, 4, and 5 for IDE, DMAC, BSRAM_DTACK_n, and +5 V; pin 6 drives
-          group 3. Tie unused gate-2 inputs 9, 10, 12, and 13 high and leave pin
-          8 open. The existing final F21 gate now takes groups 0 through 3. IDE
-          gains one F21 level. The DMAC register path is HCT125, F21, F21, then
-          F32.
+          Add <code>U_DTACK_C</code>, an <code>SN74F21N</code>. Gate 1 uses
+          inputs 1, 2, 4, and 5 for IDE, qualified DMAC, BSRAM_DTACK_n,
+          and +5 V; output 6 drives group 3. Tie unused inputs 9, 10, 12,
+          and 13 high and leave output 8 open. The final F21 takes groups
+          0 through 3. Use the qualified <code>DMAC_DTACK_n</code> here,
+          not the HCT125 output.
         </p>
         <p>
-          The published maximums give 25 ns for the HCT125 path and 7 ns per F21
-          plus 8.5 ns for the F32, or 47.5 ns before routes and loading. This
-          fits the CPU's 110 ns DTACK-release allowance with 62.5 ns for the
-          source release, routing, and load. The DRAM path remains two F21
-          levels plus F32, 22.5 ns from its local completion source before
-          routing; the former 28.5 ns budget remains conservative after the
-          added group is wired with one FAST load per output.
+          The MC68450 allows 110 ns from DS negation to DTACK release
+          (AC specification 21). Adding the old HCT125/F21/F21/F32 path
+          would take 157.5 ns before pull-up rise and board delay, exceeding
+          the CPU's 110 ns allowance. Raw AS or both byte strobes now force
+          the qualified branch high. From AS, four F32 levels and two F21
+          levels plus the final F32 take at most 56.5 ns; the byte-strobe
+          path adds one 7 ns F08, for 63.5 ns before routing and loading.
+          Also include the U_DMA_CTRL_BUF delay from the master pins to these
+          motherboard strobes in the 110 ns pin-to-pin release budget.
+          Check those added loads against the published gate test conditions.
+          Assertion waits for REG_ARM2 so a late release from the preceding
+          access cannot acknowledge the next one. At 10 MHz, the two stages
+          add at least one clock after selection. The 105 ns CPU strobe gap
+          plus that clock exceeds the source's 110 ns release, the 27 ns
+          pin-11 pull-up rise at 30 pF, and the 25 ns HCT125 delay (162 ns).
+          Keep the pin-11 load at or below 30 pF, or redo this recovery bound.
+        </p>
+        <p>
+          Add U_DMA_REG_ARM (SN74F74N): pins 1 and 13 receive REG_CLEAR_n;
+          pins 4 and 10 tie high; pins 3 and 11 receive CPU_CLK_10; pin 2
+          ties high; pin 5 feeds pin 12; pin 8 provides NOT REG_ARM2.
+          Leave pins 6 and 9 open. Pins 7 and 14 are ground and +5 V.
+          Add two SN74F32N packages for CYCLE_END, REG_END,
+          REG_INVALID, the raw-ACK/arm OR, and the final release OR.
+          REG_END is DMAC_CS_n OR CYCLE_END. Assign the first F32
+          package gates 1-4 to CYCLE_END, REG_END, REG_INVALID, and the
+          raw-ACK/arm OR; assign the second package gate 1 to final release.
+          Each F32 uses A/B/Y pins 1/2/3, 4/5/6, 9/10/8, and 12/13/11.
+          Use an SN74F04N, gates 1 and 2 (pins 1-to-2 and 3-to-4), for RESET_n
+          and REG_INVALID inversions. CYCLE_END can share the expansion OR output if the
+          added fanout meets its timing load. Share DS_INACTIVE from the expansion
+          DMA enable package, or add one SN74F08N gate if that package is
+          absent. Tie unused gate inputs low and leave outputs open. All added 14-pin gates use
+          pin 7 for ground and pin 14 for +5 V; bypass
+          each added package with 100 nF. Include both arm clock inputs in
+          the CPU_CLK_10 fanout budget. The structural connections are in
+          <code>code/system-verilog/rtl/dma_bus_glue.sv</code>.
         </p>
         <p>
           The timeout counter clears whenever shared <code>AS_n</code> is high.
@@ -1028,13 +1075,14 @@ CPU MOVE.L loop        = 4 bytes per 2.0 us = 2.00 MB/s</code></pre>
           wait for BGACK release.
         </p>
         <p>
-          A dual-address DMAC read latches data at the end of S6. The source may
-          invalidate data no earlier than DTACK assertion under the manual's 150
-          ns maximum DTACK-to-data-invalid allowance. The HCT245 adds at most 28
-          ns and the DMAC requires 15 ns before its falling sample edge, leaving
-          107 ns for synchronization and board routing. The existing DRAM
-          controller holds its output through AS/DS release, so it exceeds that
-          interval. Verify the final transceiver output at DMAC pins.
+          A dual-address DMAC read samples data at the end of S6. The
+          DRAM read registers capture the selected bytes before local DTACK
+          and drive them through AS/DS release, including a delayed IDE or
+          expansion READY. The physical DRAM strobes close at phase 6 while
+          the registers retain the data. Check setup at the DMAC input after
+          its data transceiver, and device setup/hold at the DTC-controlled
+          IDE or expansion write strobe. See
+          <a href="dram.html#read-data-hold">DRAM read-data retention</a>.
         </p>
         <h3>Floppy Deadline</h3>
         <pre><code>IDE or expansion timeout                         51.2 us
@@ -1106,7 +1154,7 @@ margin                                           65.05 us</code></pre>
           </thead>
           <tbody>
             <tr>
-              <td><code>BR_n, BGACK_n, OWN_n, IRQ_n</code></td>
+              <td><code>DMA_BR_n, BGACK_n, OWN_n, IRQ_n</code></td>
               <td>2.2 kohm to +5 V</td>
               <td>Open-drain release with bounded rise time</td>
             </tr>
@@ -1198,7 +1246,12 @@ margin                                           65.05 us</code></pre>
           FAST divider packages. The remaining logic is fourteen ACT and HCT
           packages, seven more FAST packages, and one PALCE16V8Q. At 15 mA for
           each CMOS package, 15 mA for each FAST package, and the quarter-power
-          PAL's own 55 mA, that group draws 0.37 A and dissipates 1.85 W.
+          PAL's own 55 mA, that original group reserves 0.37 A and 1.85 W. Add five
+          FAST packages for the BR bridge and register-DTACK qualifier
+          (one F08, one F74, two F32, and one F04). Reserve another 0.15 A
+          at 5 V for those packages. Count the four new expansion data-glue
+          packages and ten DRAM data-path packages in their own subsystems;
+          include them when summing the motherboard supply budget.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -1228,17 +1281,23 @@ margin                                           65.05 us</code></pre>
               <td>1.85 W</td>
             </tr>
             <tr>
-              <td>Total</td>
-              <td>0.93 A</td>
-              <td>4.65 W</td>
+              <td>BR bridge and register-DTACK qualifier allowance</td>
+              <td>0.15 A</td>
+              <td>0.75 W</td>
+            </tr>
+            <tr>
+              <td>Total DMA reservation</td>
+              <td>1.08 A</td>
+              <td>5.40 W</td>
             </tr>
           </tbody>
         </table>
         <p>
           The existing 5 A supply budget must retain that headroom after every
-          board load is summed. The current figures are catalogue maximums for
-          the families rather than measured values; confirm them on the
-          assembled board.
+          board load is summed. The glue figures are planning allowances. Sum the selected
+          parts' specified currents and switching loads, then confirm rail
+          current on the assembled board; do not treat the allowances as
+          measured consumption or a completed supply check.
         </p>
         <p>
           The ceramic package has estimated theta-JA 30 C/W and theta-JC 15 C/W.

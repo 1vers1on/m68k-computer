@@ -372,13 +372,9 @@
           <tbody>
             <tr>
               <td><code>/BR</code></td>
-              <td>MC68450 <code>BR_n</code>, 2.2 kohm pull-up to +5 V</td>
+              <td><code>CPU_BR_n = DMA_BR_n AND OWN_n</code>; see
+                <a href="dma.html#arbitration">two-wire arbitration bridge</a></td>
               <td>Requests CPU bus release.</td>
-            </tr>
-            <tr>
-              <td><code>/BGACK</code></td>
-              <td>MC68450 <code>BGACK_n</code>, 2.2 kohm pull-up to +5 V</td>
-              <td>Marks DMAC ownership.</td>
             </tr>
             <tr>
               <td><code>/BG</code></td>
@@ -388,6 +384,15 @@
           </tbody>
         </table>
       </section>
+
+      <p>
+        Use the corrected MC68EC000 68-lead pinout: pin 13 is /BR, pin 14
+        is VCC, and pin 31 is A0. The CPU has two-wire BR/BG arbitration.
+        Keep the MC68450 BGACK net for DMA ownership and fault logic;
+        it has no connection to a CPU BGACK pin. Motorola corrects Figure 11-3
+        on page 2 of the
+        <a href="https://www.nxp.com/docs/en/reference-manual/MC68000UMAD.pdf">MC68000UMAD addendum</a>.
+      </p>
 
       <section id="simplified-bus-cycle">
         <h2>5. Simplified Bus Cycle</h2>
@@ -7884,7 +7889,11 @@ DMA_BERR        = (A23 OR A22) AND (NOT OWN_n) AND (NOT AS_n)
 DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND BSRAM_DTACK_n AND 1
 DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n</code></pre>
         <p>
-          An SN74HCT125N isolates the bidirectional DMAC DTACK pin. One gate
+          An SN74HCT125N isolates the bidirectional DMAC DTACK pin.
+          The CPU-side output is DMAC_DTACK_RAW_n. The two-stage arm and
+          raw-strobe qualifier in <a href="dma.html#dtack">DMA section 8</a>
+          produces DMAC_DTACK_n for the completion tree; do not feed the
+          isolated raw output into the tree. One gate
           carries motherboard completion into the DMAC only while OWN is low;
           another carries register completion into group 3 only while OWN is
           high. Pull-ups define both isolated nodes. The timeout counter resets
@@ -7912,7 +7921,7 @@ DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n</code></pre>
           completion and drives BEC code 101 for at least two DMA clocks. Reset
           drives BEC code 000 regardless of ownership. This covers the A84G
           ownership restriction and prevents a CPU fault from parking the DMAC.
-          BR, BGACK, and OWN use 2.2 kohm pull-ups; their calculated 2.0 V
+          DMAC DMA_BR_n, BGACK, and OWN use 2.2 kohm pull-ups; their calculated 2.0 V
           threshold crossing is below 45 ns at 50 pF. Final rise time, control
           buffer loading, and all twelve relative clock phases remain
           post-layout scope checks.
