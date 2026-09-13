@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Power Control, Revision 1.1</title>
+    <title>68EC000 Computer - Power Control, Revision 1.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -36,7 +36,7 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 1.1 pre-layout design; component values and logic equations
+          Revision 1.2 pre-layout design; component values and logic equations
           are frozen, while relay inrush margin, RC timing, and assembled-board
           behavior remain to be measured
         </dd>
@@ -81,6 +81,7 @@
           <a href="#layout-and-acceptance">Board Layout and Acceptance</a>
         </li>
         <li><a href="#sources">Sources</a></li>
+        <li><a href="#backup-sram">Backup SRAM Power Branch</a></li>
       </ol>
     </nav>
 
@@ -992,6 +993,36 @@ tOFF = (10 + 0.5) * 493 ms = 5.18 seconds</code></pre>
             conditioning.
           </li>
         </ul>
+      </section>
+      <section id="backup-sram">
+        <h2>Backup SRAM Power Branch</h2>
+        <p>
+          Revision 1.2 adds the
+          <a href="backup-sram.html#power">BIOS backup SRAM</a> branch. Feed
+          DS1210 VCCI and the SRAM interface logic from switched motherboard +5
+          V. Feed only the HM62256ALP-10SL from DS1210 VCCO. Use a separate
+          CR2032 and BA2032 holder for this controller; the RTC retains BT_RTC.
+          Do not connect a charging path, raw +5 V, or relay-control circuitry
+          to either cell.
+        </p>
+        <p>
+          Add the 50 mA SRAM and 5 mA DS1210 maximums as a 55 mA subtotal to the
+          switched +5 V load. Include the seven interface/clock packages and
+          their dynamic loads in the assembled-board budget. The battery budget
+          is 3.1 uA maximum over 0-40 C or 10.1 uA over 0-70 C before board
+          leakage, using the SRAM's 3 V retention specification. The controller
+          requires at least a 2.3 V cell to guarantee 2.0 V at SRAM under its
+          specified backup-load drop.
+        </p>
+        <p>
+          Measure the switched rail at DS1210 VCCI during relay opening and
+          brownout. Require the datasheet power-down intervals of at least 300
+          us from 4.75 to 4.5 V and 10 us from 4.5 V to battery crossover, plus
+          /CE low pulses within 1.5 us. The local 100 nF capacitors provide
+          bypassing, not a proven hold-up interval. Size any required supply
+          hold-up from the measured total motherboard load and repeat the
+          power-loss tests.
+        </p>
       </section>
     </main>
   </body>

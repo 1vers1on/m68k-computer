@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - DRAM, Revision 2.2</title>
+    <title>68EC000 Computer - DRAM, Revision 2.3</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -28,7 +28,7 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.2 pre-layout design; assembled-board measurements remain
+          Revision 2.3 pre-layout design; assembled-board measurements remain
         </dd>
         <dt>Privilege</dt>
         <dd>
@@ -1661,7 +1661,11 @@ assert selected CAS</code></pre>
 DRAM_CLK_B -&gt; both U_DRAM_REQ_SYNC clocks, U_DRAM_TX, U_DRAM_ACK
 DRAM_CLK_C -&gt; U_REFRESH_SYNC, U_REFRESH_CREDIT, U_DRAM_INIT_CNT
 DRAM_CLK_D -&gt; both U_INIT_SYNC clocks
-DRAM_CLK_10 -&gt; U_STARTUP_DIV, U_REFRESH_DIV, U_DRAM_CLK_BUF pin 15, U_DRAM_CLK_BUF pin 17
+DRAM_CLK_10 -&gt; U_REFRESH_DIV, U_DRAM_CLK_BUF pin 15, U_DRAM_CLK_BUF pin 17
+            -&gt; U_BSRAM_CLK_BUF pin 2 (pin 18 is BSRAM_CLK_ROOT)
+BSRAM_CLK_ROOT -&gt; U_BSRAM_CLK_BUF pins 4 and 6
+STARTUP_CLK_10 -&gt; U_STARTUP_DIV pin 10 (from U_BSRAM_CLK_BUF pin 14)
+BSRAM_CLK   -&gt; four SN74AHCT74N clock inputs in the backup SRAM request delay
 ROM_CLK     -&gt; four SN74AHCT74N clock inputs in the firmware ROM read-delay chain
 INT_CLK     -&gt; two SN74LS174 and one CD74HCT4040E clock input in the interrupt logic
             -&gt; one SN74HCT74N clock input in the MFP clock divider
@@ -1677,11 +1681,18 @@ MFP_CLK_5   -&gt; one SN74F04N input in the MIDI local clock buffer
         </p>
 
         <p>
-          <code>DRAM_CLK_10</code> gains two <code>CD74ACT244E</code> input
-          loads at pins 15 and 17; it now drives the two divider counters and
-          those two buffer inputs. <code>ROM_CLK</code> on pin 5 drives four
-          firmware flip-flop clocks; <code>INT_CLK</code> on pin 3 drives three
-          interrupt clock inputs and the first stage of the
+          <code>DRAM_CLK_10</code> drives the refresh divider, U_DRAM_CLK_BUF
+          pins 15 and 17, and U_BSRAM_CLK_BUF pin 2. Revision 2.3 moves
+          U_STARTUP_DIV pin 10 to STARTUP_CLK_10 from U_BSRAM_CLK_BUF pin 14 to
+          keep four receivers on DRAM_CLK_10: at most 40 pF before routing.
+          BSRAM_CLK_ROOT from pin 18 drives buffer inputs 4 and 6; pin 16 drives
+          BSRAM_CLK. Check each routed branch against its 50 pF timing load and
+          check startup-counter reset recovery with the added clock delay.
+          <a href="backup-sram.html#completion">BIOS Backup SRAM</a>
+          defines the separate buffer and four-load BSRAM_CLK branch.
+          <code>ROM_CLK</code> on pin 5 drives four firmware flip-flop clocks;
+          <code>INT_CLK</code> on pin 3 drives three interrupt clock inputs and
+          the first stage of the
           <a href="mfp.html#clock-reset">MFP clock divider</a>. Those known
           <code>INT_CLK</code> loads total 40 pF. The RTC adds one SN74F04
           input; its input capacitance is not specified. The
@@ -3671,9 +3682,8 @@ motherboard reset released:
           leave a stale refresh event.
         </p>
 
-        <pre><code>DRAM_CLK_10 falling edges
-    -&gt; U_STARTUP_DIV Q12: INIT_DELAY_RAW after 2048 clocks
-    -&gt; U_REFRESH_DIV Q7:  REFRESH_EVENT_RAW every 128 clocks
+        <pre><code>STARTUP_CLK_10 falling edges -&gt; U_STARTUP_DIV Q12: INIT_DELAY_RAW after 2048 clocks
+DRAM_CLK_10 falling edges    -&gt; U_REFRESH_DIV Q7:  REFRESH_EVENT_RAW every 128 clocks
 
 STARTUP_COUNTER_RESET = NOT RESET_n
 REFRESH_COUNTER_RESET = NOT (RESET_n AND DRAM_INIT_DONE)</code></pre>
@@ -3707,7 +3717,7 @@ REFRESH_COUNTER_RESET = NOT (RESET_n AND DRAM_INIT_DONE)</code></pre>
             </tr>
             <tr>
               <td>10</td>
-              <td><code>DRAM_CLK_10</code></td>
+              <td><code>STARTUP_CLK_10</code></td>
               <td><code>DRAM_CLK_10</code></td>
             </tr>
             <tr>
@@ -3826,10 +3836,11 @@ REFRESH_COUNTER_RESET = NOT (RESET_n AND DRAM_INIT_DONE)</code></pre>
         </p>
 
         <p>
-          Both counters load <code>DRAM_CLK_10</code>, not the motherboard clock
-          directly. Counter propagation delay can move the request time but
-          cannot shorten a CBR pulse because the synchronized event only changes
-          the credit count.
+          The startup counter uses <code>STARTUP_CLK_10</code>; the refresh
+          counter uses <code>DRAM_CLK_10</code>. Both counters use buffered
+          clock branches. Counter propagation delay can move the request time
+          but cannot shorten a CBR pulse because the synchronized event only
+          changes the credit count.
         </p>
       </section>
 
@@ -4941,7 +4952,7 @@ slowest-clock headroom   = 16 - 13.1085 = 2.8915 ms</code></pre>
         <h3 id="tv-reset-init">20.10. Reset / initialization timing</h3>
 
         <pre><code>U_STARTUP_DIV MR = STARTUP_COUNTER_RESET = NOT RESET_n
-  -> counter held at 0 while RESET_n low; counts DRAM_CLK_10 after RESET_n high
+  -> counter held at 0 while RESET_n low; counts STARTUP_CLK_10 after RESET_n high
 Q12 first rising edge = 2048 CPU_CLK_10 periods
 
   nominal            : 2048 / 10.000 MHz         = 204.800 us

@@ -23,7 +23,7 @@ Do not edit third-party material unless the repository includes it under terms t
 
 Treat memory maps, register layouts, connector pinouts, bus timing, power limits, and mechanical dimensions as interfaces. Describe compatibility effects when changing one of them.
 
-The [revision 2.1 memory map](docs/static/memory-map.html) is frozen. An address-range, I/O-slot, register-address, privilege, or interrupt assignment change needs a new memory-map revision and coordinated updates to the affected hardware, firmware, software, and documentation.
+The [revision 2.3 memory map](docs/static/memory-map.html) is frozen. An address-range, I/O-slot, register-address, privilege, or interrupt assignment change needs a new memory-map revision and coordinated updates to the affected hardware, firmware, software, and documentation.
 
 For a hardware change, include the evidence needed to review it: relevant calculations, datasheet references, layout constraints, or measurements. Mark planned values and measured values clearly.
 

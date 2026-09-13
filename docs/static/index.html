@@ -18,9 +18,13 @@
       </p>
 
       <p>
-        Revision 2.2 fits an MC68450 direct-memory-access controller in I/O slot
-        12 and gives it four channels: IDE, floppy, and one per expansion slot.
-        The controller shares the processor bus, addresses physical DRAM with
+        Revision 2.3 adds
+        <a href="backup-sram.html">32 KiB of BIOS backup SRAM</a> in slot 13,
+        using an HM62256ALP-10SL, DS1210, and a separate CR2032. The BIOS uses
+        odd-byte addresses and validates retained records at boot. Revision 2.2
+        fitted an MC68450 direct-memory-access controller in I/O slot 12 and
+        gives it four channels: IDE, floppy, and one per expansion slot. The
+        controller shares the processor bus, addresses physical DRAM with
         supervisor data function codes, and interrupts at autovectored level 1.
         Only the BIOS programs it, and it moves disk data without the processor
         copying each word. The IDE byte lanes are crossed so a DMA sector lands
@@ -62,6 +66,8 @@
         <dt>Main RAM</dt>
         <dd>4 MiB of TMS44400 FPM DRAM</dd>
 
+        <dt>BIOS backup SRAM</dt>
+        <dd>32 KiB, HM62256ALP-10SL with DS1210 and separate CR2032</dd>
         <dt>Firmware</dt>
         <dd>128 KiB in four AT28C256-15PU EEPROMs, always read-only</dd>
 
@@ -132,7 +138,7 @@
           <tbody>
             <tr>
               <td><a href="memory-map.html">Memory Map</a></td>
-              <td>Revision 2.2; address specification frozen</td>
+              <td>Revision 2.3; address specification frozen</td>
               <td>
                 Address ranges, privilege attributes, I/O slots, boot overlay,
                 peripheral registers, and DRAM organization.
@@ -140,7 +146,7 @@
             </tr>
             <tr>
               <td><a href="bus-and-decode.html">Bus and Address Decode</a></td>
-              <td>Revision 2.2 pre-layout design</td>
+              <td>Revision 2.3 pre-layout design</td>
               <td>
                 Bus cycles, address decoders, supervisor protection,
                 boot-overlay logic, worked decode examples, MC68450 ownership
@@ -149,7 +155,7 @@
             </tr>
             <tr>
               <td><a href="clock-and-reset.html">Clock and Reset</a></td>
-              <td>Revision 2.2 pre-layout design</td>
+              <td>Revision 2.3 pre-layout design</td>
               <td>
                 10 MHz clock, the 6.6667 MHz DMA clock, the DRAM and I/O clock
                 buffers, and active-low reset generation.
@@ -157,7 +163,7 @@
             </tr>
             <tr>
               <td><a href="power-control.html">Power Control</a></td>
-              <td>Revision 1.1 pre-layout design</td>
+              <td>Revision 1.2 pre-layout design</td>
               <td>
                 Front-panel power-button timing, power-state logic, relay drive,
                 and switched +5 V and +12 V rails.
@@ -195,7 +201,7 @@
             </tr>
             <tr>
               <td><a href="dram.html">DRAM</a></td>
-              <td>Revision 2.2 pre-layout design</td>
+              <td>Revision 2.3 pre-layout design</td>
               <td>
                 DRAM organization, discrete controller, refresh, initialization,
                 timing, electrical checks, and assembled-board acceptance. It
@@ -204,8 +210,17 @@
               </td>
             </tr>
             <tr>
+              <td><a href="backup-sram.html">BIOS Backup SRAM</a></td>
+              <td>Revision 1.0 pre-layout design; memory map 2.3</td>
+              <td>
+                32 KiB BIOS retention storage, DS1210 and separate cell wiring,
+                byte access, completion timing, power-loss checks, and BIOS
+                startup probe.
+              </td>
+            </tr>
+            <tr>
               <td><a href="firmware-rom.html">Firmware ROM</a></td>
-              <td>Revision 2.2 pre-layout design</td>
+              <td>Revision 2.3 pre-layout design</td>
               <td>
                 AT28C256 organization, read-only wiring, completion timing, the
                 BIOS call gate, storage services, DMA ownership and error rules,
@@ -232,7 +247,7 @@
             </tr>
             <tr>
               <td><a href="ide.html">IDE Interface</a></td>
-              <td>Revision 2.0 pre-layout design; memory map 2.2</td>
+              <td>Revision 2.0 pre-layout design; memory map 2.3</td>
               <td>
                 Two-device parallel ATA host, crossed byte lanes, PALCE20V8
                 control equations, PIO mode 0 and channel-0 DMA timing, IORDY
@@ -266,7 +281,7 @@
             </tr>
             <tr>
               <td><a href="rtc.html">DS1285 RTC</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 Multiplexed-bus adapter, register map, timing, crystal, battery,
                 reset, firmware access rules, and interrupt wiring.
@@ -283,7 +298,7 @@
             </tr>
             <tr>
               <td><a href="dma.html">DMA Controller</a></td>
-              <td>Revision 1.0 pre-layout design</td>
+              <td>Revision 1.1 pre-layout design</td>
               <td>
                 MC68450L8 clock and arbitration, address and data
                 demultiplexing, register window, DTACK isolation, bus-exception
@@ -439,6 +454,21 @@
               <td>
                 1 Kbit MICROWIRE serial EEPROM organized as 64 x 16; the
                 NM93C46N holds the CL-GD5428 configuration.
+              </td>
+            </tr>
+            <tr>
+              <td>Hitachi HM62256ALP-10SL</td>
+              <td><a href="datasheets/HM62256A.PDF">PDF</a></td>
+              <td>
+                32K x 8, 100 ns, low-retention-current SRAM for BIOS backup
+                storage.
+              </td>
+            </tr>
+            <tr>
+              <td>Dallas / Maxim DS1210</td>
+              <td><a href="datasheets/DS1210.pdf">PDF</a></td>
+              <td>
+                SRAM battery switch and power-fail chip-enable protection.
               </td>
             </tr>
             <tr>
@@ -706,7 +736,8 @@
               <td>MPD BA2032</td>
               <td><a href="datasheets/BA2032-datasheet.pdf">PDF</a></td>
               <td>
-                Through-hole CR2032 coin-cell holder for the DS1285 battery.
+                Through-hole CR2032 holder. Fit one for the DS1285 and a
+                separate holder for the BIOS SRAM DS1210.
               </td>
             </tr>
             <tr>

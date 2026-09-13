@@ -9,6 +9,7 @@ A 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 | CPU              | Motorola MC68EC000FN10 at 10 MHz                                                             |
 | CPU bus          | 24-bit address bus, 16-bit data bus, 16 MiB address space                                    |
 | Main memory      | 4 MiB FPM DRAM in two 2 MiB banks, using eight TMS44400DJ-70 parts                           |
+| BIOS backup SRAM | 32 KiB in one HM62256ALP-10SL, with DS1210 and a separate CR2032; supervisor byte access |
 | Firmware         | 128 KiB, 16-bit-wide, read-only EEPROM storage in four AT28C256-15PU parts                   |
 | Video            | Cirrus Logic CL-GD5428 VGA controller with 2 MiB VRAM and DE-15 output                       |
 | Floppy           | Intel 82077AA-1 controller and two Mitsumi D359M3D 3.5-inch 1.44 MB drives                   |
@@ -24,7 +25,7 @@ A 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 
 ## Documentation
 
-Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, the DMA controller, IDE and floppy storage, peripherals, video, audio, parallel I/O, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
+Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, [BIOS backup SRAM](docs/static/backup-sram.html), interrupts, the DMA controller, IDE and floppy storage, peripherals, video, audio, parallel I/O, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
 
 ## Repository layout
 

@@ -1,0 +1,912 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>68EC000 Computer - BIOS Backup SRAM, Revision 1.0</title>
+    <link rel="stylesheet" href="defaults.css" />
+  </head>
+  <body>
+    <header>
+      <h1>BIOS Backup SRAM</h1>
+      <p>
+        Use this 32 KiB battery-backed SRAM for BIOS settings and other retained
+        state. <a href="index.html">Return to the main page</a>.
+      </p>
+      <dl>
+        <dt>Document status</dt>
+        <dd>
+          Revision 1.0 pre-layout design; timing and retention require board
+          measurements
+        </dd>
+        <dt>Memory map</dt>
+        <dd><a href="memory-map.html">Frozen revision 2.3</a>, I/O slot 13</dd>
+        <dt>Parts</dt>
+        <dd>
+          One HM62256ALP-10SL, one DS1210+ in PDIP, and a separate CR2032 in a
+          BA2032 holder
+        </dd>
+        <dt>Capacity</dt>
+        <dd>32,768 bytes; offset zero is the BIOS diagnostic byte</dd>
+        <dt>Access</dt>
+        <dd>Supervisor CPU byte reads and writes on D7..D0; no DMA access</dd>
+      </dl>
+    </header>
+    <nav aria-label="On this page">
+      <ol>
+        <li><a href="#addressing">Addressing</a></li>
+        <li><a href="#memory-wiring">Memory and Battery Wiring</a></li>
+        <li><a href="#bus-interface">Bus Qualification</a></li>
+        <li><a href="#completion">Clock and Completion</a></li>
+        <li><a href="#timing">Timing and Loading</a></li>
+        <li><a href="#power">Power and Retention</a></li>
+        <li><a href="#bios">BIOS Requirements</a></li>
+        <li><a href="#components">Components and Layout</a></li>
+        <li><a href="#acceptance">Acceptance Checks</a></li>
+        <li><a href="#sources">Sources</a></li>
+      </ol>
+    </nav>
+    <main>
+      <section id="addressing">
+        <h2>1. Addressing</h2>
+        <p>
+          The
+          <a href="memory-map.html#i-o-and-firmware-map">memory map</a> assigns
+          <code>$FA0000-$FBFFFF</code> to this subsystem. Use
+          <code>MOVE.B</code> for reads and writes. Bus A1..A15 select SRAM
+          A0..A14; A16 has no connection to the local decoder.
+        </p>
+        <pre><code>BIOS byte offset N = 0..32767
+canonical address = $FA0001 + 2*N
+mirror address    = $FB0001 + 2*N</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Slot 13 address contract
+          </caption>
+          <thead>
+            <tr>
+              <th>Addresses</th>
+              <th>Meaning</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>$FA0001</code>, mirror <code>$FB0001</code></td>
+              <td>Diagnostic byte, offset zero</td>
+            </tr>
+            <tr>
+              <td>Odd addresses <code>$FA0003-$FAFFFF</code></td>
+              <td>32,767 bytes available to BIOS retained records</td>
+            </tr>
+            <tr>
+              <td>Odd addresses <code>$FB0003-$FBFFFF</code></td>
+              <td>Mirrors of those same bytes, not extra storage</td>
+            </tr>
+            <tr>
+              <td>Even-byte or word accesses</td>
+              <td>
+                No SRAM selection or local completion; motherboard timeout
+                reports a bus error
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The qualified <code>IO13_n</code> comes from
+          <code>U_IO_HIGH /Y5</code>, pin 10. The existing protection and
+          ownership gates exclude user, CPU-space, and DMA cycles. Slot 14 stays
+          reserved. BIOS stacks, vectors, and working state remain in physical
+          DRAM <code>$000000-$01FFFF</code>. The page unit cannot map this SRAM
+          into a user context.
+        </p>
+      </section>
+      <section id="memory-wiring">
+        <h2>2. Memory and Battery Wiring</h2>
+        <p>
+          Fit <code>U_BSRAM</code> as the HM62256ALP-10SL, a 100 ns, 600-mil
+          28-pin DIP. Use the L-SL retention limits from
+          <a href="datasheets/HM62256A.PDF">HM62256A, pages 1-2 and 11</a>.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_BSRAM pin connections
+          </caption>
+          <thead>
+            <tr>
+              <th>Pin(s)</th>
+              <th>SRAM signal(s)</th>
+              <th>Connection, in matching order</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>10, 9, 8, 7, 6, 5, 4, 3</td>
+              <td>A0..A7</td>
+              <td>Bus A1..A8</td>
+            </tr>
+            <tr>
+              <td>25, 24, 21, 23, 2, 26, 1</td>
+              <td>A8..A14</td>
+              <td>Bus A9..A15</td>
+            </tr>
+            <tr>
+              <td>11, 12, 13, 15, 16, 17, 18, 19</td>
+              <td>I/O0..I/O7</td>
+              <td>Bus D0..D7</td>
+            </tr>
+            <tr>
+              <td>20</td>
+              <td>/CS</td>
+              <td>
+                <code>BSRAM_CEO_n</code> from DS1210 pin 6; no other load or
+                pull resistor
+              </td>
+            </tr>
+            <tr>
+              <td>22</td>
+              <td>/OE</td>
+              <td><code>BSRAM_OE_n</code></td>
+            </tr>
+            <tr>
+              <td>27</td>
+              <td>/WE</td>
+              <td><code>BSRAM_WE_n</code></td>
+            </tr>
+            <tr>
+              <td>28</td>
+              <td>VCC</td>
+              <td>
+                <code>BSRAM_VCC</code> from DS1210 pin 1; 100 nF ceramic to
+                ground at this pin
+              </td>
+            </tr>
+            <tr>
+              <td>14</td>
+              <td>VSS</td>
+              <td>Ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_BSRAM_NV, DS1210+ 8-pin PDIP connections
+          </caption>
+          <thead>
+            <tr>
+              <th>Pin</th>
+              <th>Signal</th>
+              <th>Connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>VCCO</td>
+              <td><code>BSRAM_VCC</code>, SRAM supply only</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>VBAT1</td>
+              <td><code>BT_BSRAM</code> CR2032 positive terminal</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>TOL</td>
+              <td>Ground, 5% supply tolerance selection</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>GND</td>
+              <td>Ground, shared with cell negative terminal</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>/CE</td>
+              <td><code>BSRAM_CE_n</code>; 10 kohm pull-up to switched +5 V</td>
+            </tr>
+            <tr>
+              <td>6</td>
+              <td>/CEO</td>
+              <td><code>BSRAM_CEO_n</code>, SRAM pin 20 only</td>
+            </tr>
+            <tr>
+              <td>7</td>
+              <td>VBAT2</td>
+              <td>Ground, unused battery input</td>
+            </tr>
+            <tr>
+              <td>8</td>
+              <td>VCCI</td>
+              <td>Switched motherboard +5 V; 100 nF ceramic to ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Connect the BA2032 holder contacts by their positive and negative
+          markings. Keep <code>BT_BSRAM</code> separate from
+          <a href="rtc.html#clock-battery">BT_RTC</a>. Fit no charging path,
+          series diode, or external load on the battery net. Power the clock
+          buffer and interface gates from switched +5 V.
+        </p>
+      </section>
+      <section id="bus-interface">
+        <h2>3. Bus Qualification</h2>
+        <p>
+          Use the shared, buffered bus controls described in
+          <a href="bus-and-decode.html">Bus and Address Decode</a>.
+          <code>R_W</code> is the local spelling of the shared
+          <code>R/W</code> net; 1 means read. Require <code>LDS_n = 0</code> and
+          <code>UDS_n = 1</code>; a word cycle must not write its lower byte.
+        </p>
+        <pre><code>UDS_ACTIVE       = NOT UDS_n
+RESET_ACTIVE     = NOT RESET_n
+WRITE_ACTIVE     = NOT R_W
+BSRAM_LANE_n     = IO13_n OR LDS_n
+BSRAM_BLOCK      = UDS_ACTIVE OR RESET_ACTIVE
+BSRAM_SELECT_n   = BSRAM_LANE_n OR BSRAM_BLOCK
+BSRAM_REQ_n      = BSRAM_SELECT_n OR AS_n
+BSRAM_ACTIVE     = NOT BSRAM_REQ_n
+BSRAM_CE_n       = BSRAM_REQ_n OR Q2_n
+BSRAM_OE_n       = BSRAM_CE_n OR WRITE_ACTIVE
+BSRAM_WRITE_n    = BSRAM_CE_n OR R_W
+BSRAM_WE_n       = LDS_n OR BSRAM_WRITE_n</code></pre>
+        <p>
+          The final LDS term ends a write through one AHCT gate after LDS rises.
+          The SRAM ends a write on the first rising edge of /WE or /CS. Do not
+          rely on the DS1210 propagation delay to meet write-data hold. Gate
+          DS1210 /CE with Q2_n so a brief lane-strobe mismatch cannot select
+          SRAM before the second delay stage. Check the glitch and clear-path
+          budget below during word cycles before accepting this pre-layout
+          circuit.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Interface gate assignment
+          </caption>
+          <thead>
+            <tr>
+              <th>Package / part</th>
+              <th>Input pins &rarr; output pin: signals</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_BSRAM_INV</code>, SN74HCT04N</td>
+              <td>
+                1 &rarr; 2: UDS_n &rarr; UDS_ACTIVE; 3 &rarr; 4: RESET_n &rarr;
+                RESET_ACTIVE; 5 &rarr; 6: R_W &rarr; WRITE_ACTIVE; 9 &rarr; 8:
+                BSRAM_REQ_n &rarr; BSRAM_ACTIVE
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_BSRAM_OR_A</code>, SN74AHCT32N</td>
+              <td>
+                1,2 &rarr; 3: IO13_n, LDS_n &rarr; BSRAM_LANE_n; 4,5 &rarr; 6:
+                UDS_ACTIVE, RESET_ACTIVE &rarr; BSRAM_BLOCK; 9,10 &rarr; 8:
+                BSRAM_LANE_n, BSRAM_BLOCK &rarr; BSRAM_SELECT_n; 12,13 &rarr;
+                11: BSRAM_SELECT_n, AS_n &rarr; BSRAM_REQ_n
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_BSRAM_OR_B</code>, SN74AHCT32N</td>
+              <td>
+                1,2 &rarr; 3: BSRAM_CE_n, WRITE_ACTIVE &rarr; BSRAM_OE_n; 4,5
+                &rarr; 6: BSRAM_CE_n, R_W &rarr; BSRAM_WRITE_n; 9,10 &rarr; 8:
+                BSRAM_REQ_n, Q4_n &rarr; BSRAM_ACK_BLOCK_n; 12,13 &rarr; 11:
+                AS_n, BSRAM_ACK_BLOCK_n &rarr; BSRAM_DTACK_n
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_BSRAM_OR_C</code>, SN74AHCT32N</td>
+              <td>
+                1,2 &rarr; 3: LDS_n, BSRAM_WRITE_n &rarr; BSRAM_WE_n; 4,5 &rarr;
+                6: BSRAM_REQ_n, Q2_n &rarr; BSRAM_CE_n
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Ground U_BSRAM_INV inputs 11 and 13; leave outputs 10 and 12 open.
+          Ground U_BSRAM_OR_C inputs 9, 10, 12, and 13; leave outputs 8 and 11
+          open. These 14-pin packages use pin 14 for +5 V and pin 7 for ground,
+          with one 100 nF ceramic per package.
+        </p>
+      </section>
+      <section id="completion">
+        <h2>4. Clock and Completion</h2>
+        <p>
+          Add <code>U_BSRAM_CLK_BUF</code>, a CD74ACT244E. Ground enable pins 1
+          and 19, feed pin 2 from <code>DRAM_CLK_10</code>, and use pin 18 as
+          <code>BSRAM_CLK_ROOT</code>. Feed that root to pins 4 and 6. Pin 16
+          supplies <code>BSRAM_CLK</code>; pin 14 supplies
+          <code>STARTUP_CLK_10</code> to U_STARTUP_DIV pin 10, replacing its
+          former DRAM_CLK_10 connection. Ground unused inputs 8, 11, 13, 15, and
+          17; leave outputs 12, 9, 7, 5, and 3 open. Pins 20 and 10 connect to
+          +5 V and ground, with a 100 nF bypass capacitor. The
+          <a href="dram.html#clock-distribution">existing clock buffer</a> has
+          no spare channel.
+        </p>
+        <p>
+          Use two SN74AHCT74N packages, <code>U_BSRAM_DELAY_A</code> and
+          <code>U_BSRAM_DELAY_B</code>, for a four-stage request delay. Feed
+          pins 3 and 11 of both packages from BSRAM_CLK; feed clear pins 1 and
+          13 from BSRAM_ACTIVE. Tie preset pins 4 and 10 high. Connect pin 14 to
+          +5 V and pin 7 to ground, with one 100 nF capacitor per package.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Delay data connections
+          </caption>
+          <thead>
+            <tr>
+              <th>Stage</th>
+              <th>D input</th>
+              <th>Q output / next connection</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Q1</td>
+              <td>Delay A pin 2: +5 V</td>
+              <td>Delay A pin 5 &rarr; Delay A pin 12</td>
+            </tr>
+            <tr>
+              <td>Q2</td>
+              <td>Delay A pin 12: Q1</td>
+              <td>
+                Delay A pin 9 &rarr; Delay B pin 2; pin 8 is Q2_n &rarr;
+                U_BSRAM_OR_C pin 5
+              </td>
+            </tr>
+            <tr>
+              <td>Q3</td>
+              <td>Delay B pin 2: Q2</td>
+              <td>Delay B pin 5 &rarr; Delay B pin 12</td>
+            </tr>
+            <tr>
+              <td>Q4</td>
+              <td>Delay B pin 12: Q3</td>
+              <td>
+                Delay B pin 8: Q4_n &rarr; U_BSRAM_OR_B pin 10; pin 9 open
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>Leave Delay A pin 6 and Delay B pin 6 open.</p>
+        <pre><code>While BSRAM_ACTIVE = 0: Q1 = Q2 = Q3 = Q4 = 0
+On each rising BSRAM_CLK edge while BSRAM_ACTIVE = 1:
+  Q1 &lt;- 1
+  Q2 &lt;- Q1
+  Q3 &lt;- Q2
+  Q4 &lt;- Q3
+
+BSRAM_ACK_BLOCK_n = BSRAM_REQ_n OR Q4_n
+BSRAM_DTACK_n     = AS_n OR BSRAM_ACK_BLOCK_n
+DTACK_GROUP3_n    = IDE_DTACK_n AND DMAC_DTACK_n AND BSRAM_DTACK_n AND 1</code></pre>
+        <p>
+          Use old stage values for each clock edge. Route BSRAM_DTACK_n to
+          <code>U_DTACK_C</code> gate 1 pin 4, replacing its +5 V tie. Keep pin
+          1 as IDE_DTACK_n, pin 2 as DMAC_DTACK_n, pin 5 high, and pin 6 as
+          DTACK_GROUP3_n. Retain the final timeout mask.
+        </p>
+        <p>
+          Generate completion from the bus request, not DS1210 /CEO. The BIOS
+          must finish a probe cycle even if the DS1210 inhibits SRAM access. The
+          SRAM has no ready or battery-status output. AS high releases
+          completion through the final OR gate; request removal clears all
+          stages. Reset suppresses requests and clears the delay.
+        </p>
+      </section>
+      <section id="timing">
+        <h2>5. Timing and Loading</h2>
+        <p>
+          Use the MC68EC000 10 MHz limits in
+          <a href="datasheets/M68000UM.pdf"
+            >M68000 User's Manual, section 10.14</a
+          >, the
+          <a href="datasheets/HM62256A.PDF">HM62256A -10 column, pages 6-11</a>,
+          and the <a href="datasheets/DS1210.pdf">DS1210, pages 4-6</a>.
+          Calculations below start at the named local net, after motherboard
+          decode. They exclude routing, master-buffer skew, and loading above
+          the datasheet test conditions.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Calculated timing budget at 10 MHz
+          </caption>
+          <thead>
+            <tr>
+              <th>Check</th>
+              <th>Calculation / requirement</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Read data after BSRAM_CE_n falls</td>
+              <td>
+                DS1210 /CE delay 20 ns + SRAM /CS access 100 ns = 120 ns; also
+                require address access 100 ns and /OE access 50 ns
+              </td>
+            </tr>
+            <tr>
+              <td>Normal delay after Q1 captures</td>
+              <td>
+                Q4 follows Q1 by three periods. Selection begins after Q2; two
+                periods leave 199.980 - 10 ns Q2 CLK-to-Q - 9 ns select gate -
+                120 ns memory path = 60.980 ns before the Q4 clock
+              </td>
+            </tr>
+            <tr>
+              <td>Stage setup margin</td>
+              <td>
+                99.990 - 10 ns CLK-to-Q - 5 ns setup = 84.990 ns for skew and
+                interconnect
+              </td>
+            </tr>
+            <tr>
+              <td>Q4 clock to CPU completion</td>
+              <td>
+                10 ns + two AHCT32 gates at 9 ns + two F21 gates at 7 ns + F32
+                at 8.5 ns = 50.5 ns
+              </td>
+            </tr>
+            <tr>
+              <td>AS release to CPU completion release</td>
+              <td>
+                9 + 7 + 7 + 8.5 = 31.5 ns from shared AS; 78.5 ns remains within
+                CPU parameter #28, before master-buffer and route delays
+              </td>
+            </tr>
+            <tr>
+              <td>Delay clear from shared AS high</td>
+              <td>
+                9 ns request gate + 25 ns HCT04 + 13 ns clear-to-Q = 47 ns; 58
+                ns remains within the 105 ns inactive interval
+              </td>
+            </tr>
+            <tr>
+              <td>Read output release from shared AS high</td>
+              <td>
+                9 + 9 + 9 ns through request, /CE, and /OE gates + 35 ns SRAM
+                tOHZ = 62 ns, against CPU #29A maximum 150 ns
+              </td>
+            </tr>
+            <tr>
+              <td>Write requirements</td>
+              <td>
+                tWC 100 ns, tCW 80 ns, tWP 60 ns, tDW 40 ns; address setup,
+                write recovery, and data hold are each 0 ns minimum
+              </td>
+            </tr>
+            <tr>
+              <td>Write-window budget</td>
+              <td>
+                199.980 - 10 - 9 - 20 = 160.980 ns from latest /CS assertion to
+                earliest Q4 clock, giving 80.980 ns above tCW and 100.980 ns
+                above tWP before completion and CPU release
+              </td>
+            </tr>
+            <tr>
+              <td>Write-data hold</td>
+              <td>
+                CPU #25 gives 30 ns at 10 MHz; one 9 ns LDS-to-/WE gate leaves
+                21 ns for relative control/data buffer and route delay
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          For word-cycle glitch rejection, require any false BSRAM_REQ_n low
+          pulse plus the 25 ns inverter and 13 ns clear-to-Q path to stay below
+          one 99.990 ns clock period, including routing and skew. This keeps Q1
+          clear before Q2 can select memory. Measure that bound at Q1/Q2 with
+          the earliest and latest lane strobes; a truth table alone does not
+          prove it. Check address-valid and /OE timing alongside /CS timing. For
+          reads, require data at least 5 ns before the CPU sample edge. For
+          writes, the CPU presents data at least 30 ns before LDS assertion
+          (#26) and holds it throughout wait states. The delayed completion
+          supplies write setup margin, but the final /WE edge must still precede
+          loss of valid data at the SRAM pins.
+        </p>
+        <p>
+          The request and clear release can violate stage-1 setup or recovery.
+          As with the
+          <a href="firmware-rom.html#rom-dtack-generation">ROM delay</a>, the
+          later stages provide settling time; the arithmetic does not establish
+          a metastability failure rate. Measure recovery, clock skew, CPU
+          parameter #28A, and back-to-back cycles.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Added electrical loads
+          </caption>
+          <thead>
+            <tr>
+              <th>Net</th>
+              <th>Added load / drive check</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Bus A1..A15</td>
+              <td>One SRAM input per line: 6 pF and 1 uA maximum</td>
+            </tr>
+            <tr>
+              <td>Bus D0..D7</td>
+              <td>
+                One SRAM I/O per line: 8 pF and 1 uA leakage maximum while
+                deselected
+              </td>
+            </tr>
+            <tr>
+              <td>SRAM data outputs</td>
+              <td>
+                VOH 2.4 V at -1 mA; VOL 0.4 V at 2.1 mA. Sum existing bus
+                receiver loads and verify the complete read path at these drive
+                limits
+              </td>
+            </tr>
+            <tr>
+              <td>IO13_n / UDS_n / RESET_n</td>
+              <td>
+                One AHCT32 / one HCT04 / one HCT04 input, respectively; budget
+                10 pF and 1 uA per input
+              </td>
+            </tr>
+            <tr>
+              <td>LDS_n / AS_n / R_W</td>
+              <td>
+                Two AHCT32 / two AHCT32 / one HCT04 plus one AHCT32 input,
+                respectively; budget 20 pF and 2 uA per net
+              </td>
+            </tr>
+            <tr>
+              <td>DRAM_CLK_10</td>
+              <td>
+                Replace the startup-counter input with one ACT244 input, 10 pF/1
+                uA maximum. Four receivers remain: refresh counter, ROM buffer,
+                interrupt buffer, and SRAM root buffer; at most 40 pF before
+                routing
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_CLK_ROOT / STARTUP_CLK_10</td>
+              <td>
+                Two ACT244 inputs / one HCT4040 clock input: up to 20 pF / 10 pF
+                before routing. The startup divider retains 10 MHz with two
+                added buffer delays; check reset recovery
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_CLK</td>
+              <td>
+                Four AHCT74 clock inputs, up to 40 pF; retain 10 pF for routing
+                within a 50 pF timing load
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_ACTIVE</td>
+              <td>
+                Four clear inputs: up to 40 pF; retain 10 pF for routing within
+                a 50 pF timing load
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_REQ_n</td>
+              <td>
+                Two AHCT32 inputs and one HCT04 input: up to 30 pF before
+                routing
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_CE_n</td>
+              <td>
+                Two AHCT32 inputs and DS1210 /CE: up to 25 pF plus a 10 kohm
+                pull-up (0.5 mA at 5 V when low)
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_CEO_n</td>
+              <td>
+                One SRAM /CS input, 6 pF and 1 uA. DS1210 drive is -1 mA high, 4
+                mA low; no FAST input or other powered-down load on this net
+              </td>
+            </tr>
+            <tr>
+              <td>BSRAM_DTACK_n</td>
+              <td>
+                One F21 input: 20 uA high, 0.6 mA low; AHCT32 +/-8 mA drive
+                gives at least 13x low-state current margin
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The new buffer adds no direct CPU_CLK_10 load. Use the stated input
+          maxima when updating the bus and clock loading audits. SRAM read
+          access uses the manufacturer's 100 pF output test load; high-impedance
+          timing uses its separate 5 pF condition. Include probe capacitance in
+          board measurements.
+        </p>
+      </section>
+      <section id="power">
+        <h2>6. Power and Retention</h2>
+        <p>
+          With TOL grounded, the DS1210 trip range is 4.50-4.74 V. At normal
+          input voltage it guarantees VCCO at least VCCI - 0.2 V; a 4.75 V input
+          therefore leaves at least 4.55 V at SRAM, above the SRAM's 4.5 V
+          operating minimum. Do not select the 10% trip option.
+        </p>
+        <p>
+          The SRAM draws at most 50 mA at its minimum -10 cycle time, below the
+          DS1210's 80 mA average output rating before I/O loads. The SRAM's 50
+          mA specification excludes output current; include the actual data-bus
+          source current and require the total VCCO load to stay below 80 mA.
+          Add the DS1210's 5 mA maximum operating current and the interface
+          logic to the switched +5 V budget. Use 55 mA as the memory/controller
+          subtotal, not the complete subsystem current. Calculate logic
+          switching current from the cited parts' Cpd and routed loads; measure
+          the assembled branch under continuous reads and writes. A 40 pF clock
+          load at 5 V and 10 MHz alone requires about 2 mA of dynamic supply
+          current.
+        </p>
+        <p>
+          For the L-SL SRAM, retention current at 3 V is 0.2 uA typical, 3 uA
+          maximum over 0-40 C, and 10 uA maximum over 0-70 C. Adding the
+          DS1210's 0.1 uA maximum battery current gives 3.1 uA and 10.1 uA
+          budgets, before holder, capacitor, and PCB leakage. Both fit below its
+          50 uA battery-mode output rating. Use the chosen cell's rated capacity
+          and discharge curve for a life estimate; do not promise a service
+          interval from typical SRAM current.
+        </p>
+        <p>
+          The SRAM requires at least 2.0 V for retention. The DS1210 specifies
+          VCCO at least VBAT - 0.3 V under its backup-load condition, so a 2.3 V
+          cell is the minimum arithmetic input for guaranteed 2.0 V SRAM power.
+          Allow replacement margin above that value. Its 2.0 V battery-warning
+          threshold does not prove adequate retention voltage.
+        </p>
+        <p>
+          The DS1210 holds /CEO high near the retained supply during backup.
+          Follow the SRAM requirement /CS &gt;= VCC - 0.2 V. The SRAM retention
+          note permits other inputs to float while /CS controls retention; keep
+          them free of negative voltage and prevent other circuits from loading
+          VCCO or /CEO. Do not add battery-powered pull-ups to the bus.
+        </p>
+        <p>
+          On power failure, the DS1210 lets an active enable cycle finish before
+          write protection. Its /CE low pulse must not exceed 1.5 us. A normal
+          four-stage request needs about 0.3-0.4 us plus logic and CPU
+          termination, so use 1.0 us as the assembled-board acceptance ceiling
+          for normal /CE pulses. The motherboard timeout is not a substitute for
+          this limit. Clock stoppage or a held bus request can exceed it; this
+          circuit provides no independent pulse limiter.
+        </p>
+        <p>
+          Check the power-down waveform against DS1210 Figure 6: at least 300 us
+          through the specified 4.75-to-4.5 V interval and at least 10 us from
+          4.5 V to the battery crossover. Check /CEO and SRAM voltage together.
+          The worst-case trip point and switch drop do not prove valid active
+          writes throughout a brownout. BIOS record integrity checks must reject
+          an interrupted or invalid update.
+        </p>
+        <p>
+          Allow 125 ms after the supply exceeds the DS1210's rising trip
+          threshold before the first SRAM request. The motherboard's 250 ms
+          reset starts at the DS1233 threshold, which need not match the DS1210
+          threshold. Require a stable valid +5 V rail at reset release and a
+          BIOS delay of at least 150 ms after that release before SRAM access. A
+          warm reset may use the same delay. The DS1210 has no reset input; CPU
+          reset does not erase SRAM or restart its battery test.
+        </p>
+        <p>
+          A newly attached battery stays behind the DS1210 freshness seal until
+          VCCI has exceeded the selected trip threshold and then fallen below
+          the battery voltage. Complete a powered commissioning cycle before
+          testing off-power retention.
+        </p>
+      </section>
+      <section id="bios">
+        <h2>7. BIOS Requirements</h2>
+        <p>
+          Reserve physical SRAM offset zero at <code>$FA0001</code> for a
+          diagnostic. After the startup delay, make these the first accesses to
+          the SRAM since power-up, before any scan, checksum, or debugger read.
+          Use volatile byte accesses in the order below; keep other firmware
+          paths out of the SRAM during the probe.
+        </p>
+        <ol>
+          <li>Read the diagnostic byte into <code>old</code>.</li>
+          <li>Write <code>old XOR $FF</code> to the diagnostic byte.</li>
+          <li>Read it again and compare with <code>old XOR $FF</code>.</li>
+        </ol>
+        <p>
+          The DS1210 inhibits the second memory cycle after power-up if it
+          detects a battery below 2.0 V. With a retained readable byte, that
+          inhibits the test write and causes a mismatch. No restore is needed:
+          this byte belongs to the diagnostic, not a settings record. A mismatch
+          means the BIOS must distrust retention; it is not a calibrated battery
+          measurement. Open-bus values, missing SRAM, or an invalid supply can
+          also affect this test. A match cannot prove battery health,
+          particularly after a warm reset or prior SRAM access.
+        </p>
+        <p>
+          Validate retained records with a format/version check and checksum or
+          CRC before using their contents. Use defaults after a failed
+          diagnostic or invalid record, and preserve valid records across
+          resets. Use a commit marker or alternate copy when implementing
+          multi-byte updates so an interrupted write cannot pass as a complete
+          record. Define the record layout and BIOS service API with the future
+          BIOS source; this document assigns no additional record addresses.
+        </p>
+        <p>
+          Exclude slot 13 from DRAM clearing, destructive boot memory tests,
+          program allocators, and DMA buffers. BIOS range validation must reject
+          caller pointers into it. Access persistent settings through checked
+          BIOS services. Never use the mirrored half as another allocation.
+        </p>
+      </section>
+      <section id="components">
+        <h2>8. Components and Layout</h2>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Subsystem components
+          </caption>
+          <thead>
+            <tr>
+              <th>Quantity</th>
+              <th>Part</th>
+              <th>Use</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>HM62256ALP-10SL</td>
+              <td>U_BSRAM, DIP-28, 600 mil</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>DS1210+</td>
+              <td>U_BSRAM_NV, DIP-8, 300 mil</td>
+            </tr>
+            <tr>
+              <td>1 each</td>
+              <td>CR2032 and MPD BA2032</td>
+              <td>BT_BSRAM and through-hole holder</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>SN74AHCT32N</td>
+              <td>U_BSRAM_OR_A, B, C</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>SN74HCT04N</td>
+              <td>U_BSRAM_INV</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>SN74AHCT74N</td>
+              <td>U_BSRAM_DELAY_A, B</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>CD74ACT244E</td>
+              <td>U_BSRAM_CLK_BUF</td>
+            </tr>
+            <tr>
+              <td>9</td>
+              <td>100 nF ceramic, 10 V or higher</td>
+              <td>One per IC; only the SRAM capacitor uses BSRAM_VCC</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>10 kohm, 5%, 1/8 W</td>
+              <td>DS1210 /CE pull-up to switched +5 V</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          Place the DS1210 beside SRAM pins 20 and 28. Keep VCCO, /CEO, and
+          battery traces short and clean of flux residue. Put the holder where a
+          user can replace the cell without disturbing the memory wiring. Label
+          cell polarity and distinguish BT_BSRAM from BT_RTC.
+        </p>
+        <p>
+          Place the clock buffer beside the delay packages. Route the direct
+          LDS-to-/WE path without extra gates and keep control/data skew within
+          the hold budget. Provide probe access to VCCI, BSRAM_VCC, /CE, /CEO,
+          /WE, and BSRAM_DTACK_n. Use a high-impedance probe for retention
+          measurements; a meter or probe can dominate the battery load.
+        </p>
+      </section>
+      <section id="acceptance">
+        <h2>9. Acceptance Checks</h2>
+        <ul>
+          <li>
+            Verify offset 0 and 32767, each address bit, and both mirrors.
+            Confirm that changing one byte leaves adjacent SRAM bytes intact.
+          </li>
+          <li>
+            Exercise even-byte, word, user, DMA, and CPU-space cycles. Require
+            inactive /CS and /WE and no BSRAM_DTACK_n. Sweep lane and decode
+            skew to detect transient selection during a word cycle.
+          </li>
+          <li>
+            Measure read setup, write width/setup/hold, output release, and CPU
+            completion assertion/release. Test back-to-back read/write cycles
+            and reset or aborted requests at each delay stage.
+          </li>
+          <li>
+            Measure the complete data-bus load, DRAM_CLK_10 and BSRAM_CLK loads,
+            clear-net capacitance, and shortest inactive interval. Resolve any
+            exceeded timing-test load before layout acceptance.
+          </li>
+          <li>
+            Measure normal /CE pulses below 1.0 us and verify the DS1210 1.5 us
+            requirement during power removal. Test power loss during writes at
+            several phases and check surrounding records for damage.
+          </li>
+          <li>
+            Check startup delay from the DS1210 threshold crossing, slow ramps,
+            relay power-off slew, brownout, and warm reset. Confirm that
+            firmware keeps SRAM untouched until the diagnostic probe.
+          </li>
+          <li>
+            With a current-limited battery simulator, test a fresh cell,
+            warning-level voltage, and absent battery. Confirm defaults after
+            invalid records and verify the inhibited second-cycle behavior.
+          </li>
+          <li>
+            After commissioning, write a test pattern, remove main power,
+            measure retained voltage and current, then restore power and compare
+            the pattern excluding the diagnostic byte. Check both
+            temperature-range current budgets and the separate RTC supply.
+          </li>
+        </ul>
+        <p>
+          These are board acceptance requirements, not reported measurements.
+          The repository contains design documentation, not a board schematic or
+          BIOS implementation for this subsystem.
+        </p>
+      </section>
+      <section id="sources">
+        <h2>10. Sources</h2>
+        <ul>
+          <li>
+            <a href="datasheets/HM62256A.PDF">Hitachi HM62256A</a>, package and
+            pinout, DC limits, -10 timing, and L-SL retention limits.
+          </li>
+          <li>
+            <a href="datasheets/DS1210.pdf">DS1210, revision 6/12</a>, PDIP
+            pins, power switching, battery probe, recovery, and power-down
+            waveforms;
+            <a
+              href="https://www.analog.com/media/en/technical-documentation/data-sheets/DS1210.pdf"
+              >manufacturer copy</a
+            >.
+          </li>
+          <li>
+            <a href="datasheets/BA2032-datasheet.pdf">MPD BA2032</a>, cell
+            holder drawing.
+          </li>
+          <li>
+            <a href="datasheets/M68000UM.pdf">M68000 User's Manual</a>, section
+            10.14, MC68EC000 bus timing.
+          </li>
+          <li>
+            <a href="datasheets/sn74ahct74.pdf">SN74AHCT74</a>,
+            <a href="datasheets/sn74ahct32.pdf">SN74AHCT32</a>, and
+            <a href="datasheets/sn54hct04.pdf">SN74HCT04</a>, logic timing and
+            loading.
+          </li>
+          <li>
+            <a href="datasheets/cd74act244.pdf">CD74ACT244</a>, clock buffer;
+            <a href="datasheets/sn74f21.pdf">SN74F21</a> and
+            <a href="datasheets/sn74f32.pdf">SN74F32</a>, completion tree.
+          </li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

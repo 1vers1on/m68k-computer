@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Memory Map, Revision 2.2</title>
+    <title>68EC000 Computer - Memory Map, Revision 2.3</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,13 +14,20 @@
         and firmware. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        The revision 2.2 address specification is frozen. This document may be
+        The revision 2.3 address specification is frozen. This document may be
         corrected or expanded without a new revision. Any change to an address
         range, slot assignment, register address, or privilege attribute
         requires a new memory map revision.
       </p>
       <p>
-        Revision 2.2 assigns I/O slot 12 to the MC68450 DMA controller, assigns
+        Revision 2.3 assigns I/O slot 13 to 32 KiB of BIOS backup SRAM. Use
+        lower-byte accesses at <code>$FA0001 + 2*N</code>, for
+        <code>N = 0..32767</code>; A16 creates a mirror in the upper half of the
+        slot. Supervisor CPU access only; DMA cannot reach this region. Earlier
+        firmware retains its existing mappings but needs the startup probe and
+        retained-record support to use the SRAM.
+        <a href="backup-sram.html">BIOS Backup SRAM</a> defines the circuit.
+        Revision 2.2 assigned I/O slot 12 to the MC68450 DMA controller, assigns
         processor interrupt level 1 to DMA, and moves IDE byte registers to the
         even upper byte after the IDE lane crossing. Revision 2.1 assigned I/O
         slot 11 to IDE and processor interrupt level 2 to its interrupt request.
@@ -47,12 +54,13 @@
         aperture, I/O slot 10 holds the page-unit control block, and
         <code>SYSREG2</code> holds the VGA window grant. Revision 2.1 assigns
         I/O slot 11 to a two-device parallel ATA interface. Every other address
-        range, slot assignment, and register address carries over from revision
-        2.0 unchanged.
+        range, slot assignment, and register address carried over from revision
+        2.0 unchanged in revision 2.1. Revision 2.3 retains the revision 2.2
+        assignments outside slot 13.
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 2.2; the address specification is frozen</dd>
+        <dd>Revision 2.3; the address specification is frozen</dd>
         <dt>Privilege model</dt>
         <dd>
           Supervisor-only I/O and firmware; paged main memory with 4 KiB pages
@@ -65,6 +73,10 @@
         <dd>16-bit</dd>
         <dt>Main RAM</dt>
         <dd>4 MiB of FPM DRAM</dd>
+        <dt>BIOS backup SRAM</dt>
+        <dd>
+          32 KiB in one HM62256ALP-10SL, with DS1210 and a separate CR2032
+        </dd>
         <dt>Firmware ROM</dt>
         <dd>
           128 KiB, 16-bit wide, always read-only, built from four AT28C256-15PU
@@ -388,6 +400,13 @@
           table into RAM, and build at least one page table before it leaves
           supervisor mode.
         </p>
+        <p>
+          BIOS persistent storage uses the separate
+          <a href="backup-sram.html">32 KiB backup SRAM</a> in slot 13. Reserve
+          its offset zero for the power-up diagnostic; exclude it from DRAM
+          clearing and DMA buffers. The DRAM stack and working-state allocation
+          above stays in place.
+        </p>
       </section>
 
       <section id="i-o-and-firmware-map">
@@ -576,8 +595,14 @@
               <td><code>$FA0000</code></td>
               <td><code>$FBFFFF</code></td>
               <td>128 KiB</td>
-              <td>Reserved</td>
-              <td>Available for future I/O.</td>
+              <td>BIOS backup SRAM</td>
+              <td>
+                One HM62256ALP-10SL, 32 KiB on D7..D0. Canonical odd addresses
+                <code>$FA0001-$FAFFFF</code>, mirrored at
+                <code>$FB0001-$FBFFFF</code>. Byte reads/writes only; even-byte
+                and word accesses time out. Offset zero is the diagnostic byte.
+                See <a href="backup-sram.html">BIOS Backup SRAM</a>.
+              </td>
             </tr>
             <tr>
               <th scope="row">14</th>
@@ -759,9 +784,10 @@
       <section id="8-bit-peripheral-addressing">
         <h2>8. 8-bit Peripheral Addressing</h2>
         <p>
-          The 8-bit peripherals connect to <code>D7..D0</code> and use
-          <code>/LDS</code>. As a result, consecutive peripheral registers are
-          two bytes apart in the 68k address space and use odd addresses.
+          The 8-bit peripherals and BIOS backup SRAM connect to
+          <code>D7..D0</code> and use <code>/LDS</code>. As a result,
+          consecutive peripheral registers are two bytes apart in the 68k
+          address space and use odd addresses.
         </p>
         <p><code>peripheral register N = BASE + 1 + (N * 2)</code></p>
 

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - DS1285 RTC, Revision 2.0</title>
+    <title>68EC000 Computer - DS1285 RTC, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -26,7 +26,7 @@
         <dt>Privilege</dt>
         <dd>Supervisor only; application code calls the BIOS</dd>
         <dt>Document status</dt>
-        <dd>Revision 2.0 pre-layout design</dd>
+        <dd>Revision 2.1 pre-layout design</dd>
         <dt>RTC</dt>
         <dd>Dallas DS1285, 24-pin plastic DIP</dd>
         <dt>Bus connection</dt>
@@ -473,6 +473,15 @@ Register D, $0D:  VRT 0 0 0 0 0 0 0</code></pre>
         </p>
 
         <h3>Backup Cell</h3>
+        <p>
+          Revision 2.1 distinguishes the two backup supplies:
+          <code>BT_RTC</code> serves this DS1285, while
+          <code>BT_BSRAM</code> serves the
+          <a href="backup-sram.html#memory-wiring">BIOS SRAM DS1210</a>. Fit
+          separate CR2032 cells and BA2032 holders; do not join the positive
+          terminals. RTC VRT does not report SRAM retention or DS1210 battery
+          status.
+        </p>
         <p>
           BT_RTC is a replaceable CR2032 primary lithium cell in a through-hole
           holder. Its positive terminal connects directly to

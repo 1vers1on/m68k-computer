@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - DMA Controller, Revision 1.0</title>
+    <title>68EC000 Computer - DMA Controller, Revision 1.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,14 +13,19 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 1.0 adds four physical DMA channels for IDE, floppy, and two
-        expansion slots. An idle expansion channel can be borrowed for a memory
-        copy. The design shares the MC68EC000 bus, uses physical supervisor DRAM
-        addresses, and keeps all channel programming inside the BIOS.
+        Revision 1.1 adds the BIOS backup SRAM completion on U_DTACK_C pin 4,
+        following memory map 2.3. The ownership gates exclude slot 13 from DMA;
+        BIOS channel validation must reject the entire
+        <code>$FA0000-$FBFFFF</code> range, including its mirror. See
+        <a href="backup-sram.html">BIOS Backup SRAM</a>. Revision 1.0 added four
+        physical DMA channels for IDE, floppy, and two expansion slots. An idle
+        expansion channel can be borrowed for a memory copy. The design shares
+        the MC68EC000 bus, uses physical supervisor DRAM addresses, and keeps
+        all channel programming inside the BIOS.
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.0 pre-layout design</dd>
+        <dd>Revision 1.1 pre-layout design</dd>
         <dt>Controller</dt>
         <dd>Socketed MC68450L8, A84G restrictions assumed</dd>
         <dt>Clock</dt>
@@ -547,16 +552,17 @@ DMAC_CS_n  = IO12_n OR (NOT CPU_OWNER) OR (NOT DS_ACTIVE)</code></pre>
           after the CPU has released the cycle, so this RC does not extend a
           live register cycle.
         </p>
-        <pre><code>DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND 1 AND 1
+        <pre><code>DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND BSRAM_DTACK_n AND 1
 DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n
 DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE
 DTACK_TO_DMA_n = DTACK_n OR DMA_FAULT</code></pre>
         <p>
           Add <code>U_DTACK_C</code>, an <code>SN74F21N</code>. Gate 1 uses pins
-          1, 2, 4, and 5 for IDE, DMAC, +5 V, and +5 V; pin 6 drives group 3.
-          Tie unused gate-2 inputs 9, 10, 12, and 13 high and leave pin 8 open.
-          The existing final F21 gate now takes groups 0 through 3. IDE gains
-          one F21 level. The DMAC register path is HCT125, F21, F21, then F32.
+          1, 2, 4, and 5 for IDE, DMAC, BSRAM_DTACK_n, and +5 V; pin 6 drives
+          group 3. Tie unused gate-2 inputs 9, 10, 12, and 13 high and leave pin
+          8 open. The existing final F21 gate now takes groups 0 through 3. IDE
+          gains one F21 level. The DMAC register path is HCT125, F21, F21, then
+          F32.
         </p>
         <p>
           The published maximums give 25 ns for the HCT125 path and 7 ns per F21

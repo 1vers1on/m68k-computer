@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Firmware ROM, Revision 2.2</title>
+    <title>68EC000 Computer - Firmware ROM, Revision 2.3</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,7 +13,10 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.2 follows memory map 2.2. The vector table gains the DMA
+        Revision 2.3 follows memory map 2.3 and adds the
+        <a href="backup-sram.html#bios"
+          >BIOS backup SRAM startup and retention rules</a
+        >. Revision 2.2 followed memory map 2.2. The vector table gains the DMA
         level-1 autovector, and the BIOS call gate gains the rules that make it
         the only writer of MC68450 channel programs: physical-range validation,
         buffer pinning, per-channel ownership, and error handling that
@@ -26,7 +29,7 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.2 pre-layout design; assembled-board measurements and
+          Revision 2.3 pre-layout design; assembled-board measurements and
           firmware-image checks remain
         </dd>
         <dt>Privilege</dt>
@@ -81,6 +84,7 @@
         <li>
           <a href="#internal-signal-reference">Internal Signal Reference</a>
         </li>
+        <li><a href="#backup-sram">BIOS Backup SRAM Startup</a></li>
       </ol>
     </nav>
     <main>
@@ -2406,6 +2410,37 @@ ROM1_LO[i] = F[0x10001 + 2*i]
             </tr>
           </tbody>
         </table>
+      </section>
+      <section id="backup-sram">
+        <h2>BIOS Backup SRAM Startup</h2>
+        <p>
+          Use the <a href="backup-sram.html#bios">slot-13 backup SRAM</a> for
+          persistent BIOS records. Keep exception vectors, stacks, and runtime
+          working state in their existing DRAM allocation. Exclude
+          <code>$FA0000-$FBFFFF</code> from DRAM initialization, destructive
+          boot tests, user buffers, and DMA programs.
+        </p>
+        <p>
+          Require a stable valid +5 V supply at reset release, then wait at
+          least 150 ms before the first SRAM access. Reserve offset zero at
+          <code>$FA0001</code>. Make the first three SRAM accesses a byte read,
+          a byte write of the read value XOR <code>$FF</code>, and a byte
+          read/compare. Keep debugger reads and other BIOS paths out of the
+          region until this sequence completes. The DS1210 can inhibit the
+          second cycle after power-up to signal a battery below 2.0 V; a warm
+          reset does not restart that test.
+        </p>
+        <p>
+          Treat a failed probe or invalid retained record as loss of retained
+          state and use defaults. A passing probe does not prove sufficient
+          battery voltage. Check record format/version and checksum or CRC
+          before using a record; preserve valid contents across resets. Reserve
+          only the diagnostic byte at this stage. Define record formats,
+          interrupted-update handling, and checked BIOS services with the BIOS
+          implementation. Use volatile byte operations at
+          <code>$FA0001 + 2*N</code>; the upper half of the slot mirrors the
+          same storage.
+        </p>
       </section>
     </main>
   </body>

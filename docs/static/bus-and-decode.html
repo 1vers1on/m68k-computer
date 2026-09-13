@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Bus and Address Decode, Revision 2.2</title>
+    <title>68EC000 Computer - Bus and Address Decode, Revision 2.3</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -21,10 +21,12 @@
       </p>
 
       <p>
-        Revision 2.2 adds MC68450 bus ownership, I/O slot 12, DTACK isolation,
-        DMA exception routing, the fourth completion group, and three ownership
-        interlocks that keep a DMA cycle inside main memory. Revision 2.1
-        assigned <code>IO11_n</code> to the
+        Revision 2.3 connects I/O slot 13 to
+        <a href="backup-sram.html">BIOS backup SRAM</a> and adds its completion
+        to group 3. Revision 2.2 added MC68450 bus ownership, I/O slot 12, DTACK
+        isolation, DMA exception routing, the fourth completion group, and three
+        ownership interlocks that keep a DMA cycle inside main memory. Revision
+        2.1 assigned <code>IO11_n</code> to the
         <a href="ide.html">IDE interface</a> and connects
         <code>IDE_DTACK_n</code> to the spare fourth input of the final
         acknowledgement-tree gate. The top I/O decoder and the first three
@@ -55,10 +57,10 @@
 
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 2.2 pre-layout design</dd>
+        <dd>Revision 2.3 pre-layout design</dd>
 
         <dt>Memory map</dt>
-        <dd><a href="memory-map.html">Frozen revision 2.1</a></dd>
+        <dd><a href="memory-map.html">Frozen revision 2.3</a></dd>
 
         <dt>Privilege model</dt>
         <dd>Supervisor-only I/O, firmware, and BIOS memory</dd>
@@ -148,6 +150,7 @@
         </li>
         <li><a href="#dma-integration">DMA Bus Integration</a></li>
         <li><a href="#sources">Sources</a></li>
+        <li><a href="#backup-sram">BIOS Backup SRAM Integration</a></li>
       </ol>
     </nav>
 
@@ -2188,13 +2191,13 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
               <td><code>/Y4</code></td>
               <td><code>IO12_n</code></td>
               <td><code>$F80000-$F9FFFF</code></td>
-              <td>Reserved</td>
+              <td>MC68450 DMA controller</td>
             </tr>
             <tr>
               <td><code>/Y5</code></td>
               <td><code>IO13_n</code></td>
               <td><code>$FA0000-$FBFFFF</code></td>
-              <td>Reserved</td>
+              <td>BIOS backup SRAM</td>
             </tr>
             <tr>
               <td><code>/Y6</code></td>
@@ -2214,8 +2217,10 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
         <p>
           <code>IO10_n</code> selects the page unit and
           <code>IO11_n</code> selects the IDE interface.
-          <code>IO12_n..IO14_n</code> remain on the motherboard with no
-          destination. <code>IO9_n</code> leaves the decoder for the
+          <code>IO12_n</code> selects the DMA controller, and
+          <code>IO13_n</code> selects BIOS backup SRAM. Only
+          <code>IO14_n</code> remains reserved without a destination.
+          <code>IO9_n</code> leaves the decoder for the
           <a href="pit.html#bus-interface">PI/T chip-select gate</a>.
         </p>
 
@@ -4126,6 +4131,14 @@ VGA_MEM_n        = REGION4_n OR NORMAL_PROT_n
 
           <tbody>
             <tr>
+              <td>BIOS backup SRAM</td>
+              <td><code>IO13_n</code>, lower-byte cycle</td>
+              <td><code>BSRAM_DTACK_n</code></td>
+              <td>
+                <a href="backup-sram.html#completion">Backup SRAM interface</a>
+              </td>
+            </tr>
+            <tr>
               <td>DRAM bank 0</td>
               <td><code>LRAM0_REQ_n</code></td>
               <td><code>DRAM_DTACK_n</code></td>
@@ -4368,8 +4381,10 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
           Pin 7 of each package connects to ground and pin 14 connects to +5 V.
           Revision 2.2 connects <code>DTACK_GROUP3_n</code> to pin 13 on
           <code>U_DTACK_B</code> gate 2. New <code>U_DTACK_C</code>, an
-          SN74F21N, combines <code>IDE_DTACK_n</code> and
-          <code>DMAC_DTACK_n</code>, with its other two gate inputs high.
+          SN74F21N, combines <code>IDE_DTACK_n</code> on pin 1,
+          <code>DMAC_DTACK_n</code> on pin 2, and <code>BSRAM_DTACK_n</code>
+          on pin 4, with pin 5 high. Pin 6 drives group 3. Revision 2.3 replaces
+          the former pin-4 +5 V tie with the SRAM completion.
           <code>EXP_DTACK_n</code> has a 10 kohm pull-up at the motherboard and
           the expansion card may only pull it low. The timeout circuit masks
           <code>DTACK_RAW_n</code> after a bus error and drives the CPU
@@ -4870,6 +4885,12 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td><code>DRAM_DTACK_n</code></td>
             </tr>
             <tr>
+              <td>BIOS backup SRAM</td>
+              <td><a href="backup-sram.html">BIOS Backup SRAM</a></td>
+              <td><code>IO13_n</code>, lower-byte qualification</td>
+              <td><code>BSRAM_DTACK_n</code></td>
+            </tr>
+            <tr>
               <td>Firmware ROM</td>
               <td><a href="firmware-rom.html">Firmware ROM</a></td>
               <td><code>ROM_CYCLE_n</code></td>
@@ -4969,10 +4990,12 @@ NORMAL_CYCLE_n  = 0 OR 1
           selection and otherwise mirror through the slot. Slot 10 now carries
           the page-unit control registers, and <code>EXP_MEM5_n</code> and
           <code>EXP_MEM6_n</code> now carry its table aperture, so the only
-          selects without a destination are <code>IO12_n</code> through
-          <code>IO14_n</code>. Empty expansion ranges produce no
-          <code>EXP_DTACK_n</code> response, so the motherboard timeout reports
-          a bus error.
+          select without a destination is <code>IO14_n</code>.
+          <code>IO12_n</code> selects the DMA controller and
+          <code>IO13_n</code> selects BIOS backup SRAM. The SRAM accepts only
+          lower-byte cycles; even-byte and word cycles time out. Empty expansion
+          ranges produce no <code>EXP_DTACK_n</code> response, so the
+          motherboard timeout reports a bus error.
         </p>
 
         <p>
@@ -7657,6 +7680,13 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               <td><code>DTACK_n</code> combination logic</td>
             </tr>
             <tr>
+              <td><code>BSRAM_DTACK_n</code></td>
+              <td>Qualified backup SRAM byte read/write completion.</td>
+              <td>Low</td>
+              <td><code>U_BSRAM_OR_B</code> pin 11</td>
+              <td><code>U_DTACK_C</code> pin 4</td>
+            </tr>
+            <tr>
               <td><code>ROM_DTACK_n</code></td>
               <td>A firmware ROM transaction completed.</td>
               <td>Low</td>
@@ -7851,7 +7881,7 @@ DMA_FAULT_SET_n = BUS_BERR_n OR BGACK_n
 DMAC_CS_n       = IO12_n OR (NOT OWN_n) OR (UDS_n AND LDS_n)
 DMA_BERR        = (A23 OR A22) AND (NOT OWN_n) AND (NOT AS_n)
 
-DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND 1 AND 1
+DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND BSRAM_DTACK_n AND 1
 DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n</code></pre>
         <p>
           An SN74HCT125N isolates the bidirectional DMAC DTACK pin. One gate
@@ -7955,6 +7985,32 @@ DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n</code></pre>
             PIO timing, and <code>IDE_DTACK_n</code>.
           </li>
         </ul>
+      </section>
+      <section id="backup-sram">
+        <h2>BIOS Backup SRAM Integration</h2>
+        <p>
+          Route qualified <code>IO13_n</code> from U_IO_HIGH pin 10 to the
+          <a href="backup-sram.html#bus-interface">backup SRAM qualifier</a>.
+          Connect bus A1..A15 and D0..D7, shared AS_n, LDS_n, UDS_n, R_W, and
+          RESET_n as listed there. The existing region-7 protection and I/O
+          ownership enables exclude user, CPU-space, and DMA requests.
+        </p>
+        <p>
+          The SRAM accepts a supervisor lower-byte read or write and supplies
+          <code>BSRAM_DTACK_n</code> after its clocked delay. Wire that signal
+          to U_DTACK_C pin 4. Retain the timeout mask and CPU/DMA completion
+          isolation. Update both group-3 equations and physical gate ties
+          together; do not connect SRAM /CEO to the completion tree.
+        </p>
+        <p>
+          For the <a href="backup-sram.html#timing">loading audit</a>, add 6
+          pF/1 uA to each A1..A15 net and 8 pF/1 uA to each D0..D7 net. Add one
+          CMOS input to IO13_n, UDS_n, and RESET_n, and two to each AS_n, LDS_n,
+          and R_W net. Check the SRAM's 2.1 mA low and 1 mA high data-output
+          drive against the total shared-bus load. U_BSRAM_CLK_BUF replaces the
+          startup-divider load on DRAM_CLK_10; it supplies separate BSRAM_CLK
+          and STARTUP_CLK_10 branches.
+        </p>
       </section>
     </main>
   </body>

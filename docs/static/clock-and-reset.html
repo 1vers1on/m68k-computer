@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Clock and Reset, Revision 2.2</title>
+    <title>68EC000 Computer - Clock and Reset, Revision 2.3</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -34,7 +34,7 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.2 pre-layout design; loaded clock waveforms, reset edges,
+          Revision 2.3 pre-layout design; loaded clock waveforms, reset edges,
           and supply-ramp behavior remain to be measured on the assembled board
         </dd>
 
@@ -94,6 +94,7 @@
         </li>
         <li><a href="#dma-clock-reset">DMA Clock and Reset</a></li>
         <li><a href="#sources">Sources</a></li>
+        <li><a href="#backup-sram">Backup SRAM Clock and Reset</a></li>
       </ol>
     </nav>
 
@@ -1101,7 +1102,9 @@ U_CPU_CLK second stage (2Q, pin 9)
     |       |
     |       +-- DRAM_CLK_10
     |               |
-    |               +-- U_STARTUP_DIV CD74HCT4040E CP (pin 10)
+    |               +-- U_BSRAM_CLK_BUF pin 2 -> pin 18 BSRAM_CLK_ROOT
+    |               |       +-- pin 4 -> pin 16 BSRAM_CLK -> four AHCT74 clocks
+    |               |       +-- pin 6 -> pin 14 STARTUP_CLK_10 -> U_STARTUP_DIV CP pin 10
     |               +-- U_REFRESH_DIV CD74HCT4040E CP (pin 10)
     |               +-- U_DRAM_CLK_BUF pin 15 -&gt; ROM_CLK (firmware ROM)
     |               +-- U_DRAM_CLK_BUF pin 17 -&gt; INT_CLK (interrupt logic,
@@ -4945,6 +4948,40 @@ t(0.8 V to 2.0 V) = Rmax * Ctotal * ln((Vfinal - 0.8) / (Vfinal - 2.0))</code></
           switching table. The LS07 and LS14 datasheets do not specify every pin
           capacitance or output edge needed for pre-layout timing closure; those
           checks require measurements on the routed board.
+        </p>
+      </section>
+      <section id="backup-sram">
+        <h2>Backup SRAM Clock and Reset</h2>
+        <p>
+          Memory map 2.3 adds
+          <a href="backup-sram.html#completion">U_BSRAM_CLK_BUF</a>, a
+          CD74ACT244E powered from switched +5 V. Feed pin 2 from DRAM_CLK_10;
+          pin 18 supplies BSRAM_CLK_ROOT to pins 4 and 6. Pin 16 supplies
+          BSRAM_CLK for four SN74AHCT74N clocks. Pin 14 supplies STARTUP_CLK_10
+          to U_STARTUP_DIV pin 10, replacing its DRAM_CLK_10 connection. The
+          existing U_DRAM_CLK_BUF has no spare channel. Replace the
+          startup-counter load with the new ACT244 input, retaining four
+          DRAM_CLK_10 receivers and a 40 pF maximum input load before routing.
+          Check startup-divider reset recovery with the added buffer delay.
+          BSRAM_CLK has up to 40 pF of receiver capacitance before routing. Keep
+          each routed timing-analysis branch at or below 50 pF.
+        </p>
+        <p>
+          Feed RESET_n to the SRAM request qualifier, adding one HCT04 input.
+          Reset blocks chip selection and clears the completion delay, while the
+          DS1210 retains SRAM power. It has no reset pin. Require a stable valid
+          +5 V rail at CPU reset release and a BIOS delay of at least 150 ms
+          before SRAM access. The DS1210 recovery maximum is 125 ms from its own
+          rising threshold crossing; the DS1233's 250 ms hold starts at a
+          different threshold. Check both crossings on slow supply ramps rather
+          than subtracting the two delays.
+        </p>
+        <p>
+          Check SRAM /CE duration during power failure against its 1.5 us limit
+          and the DS1210 power-down slew limits. The ordinary bus timeout cannot
+          bound a stopped clock or a held SRAM request. See
+          <a href="backup-sram.html#power">Power and Retention</a> for voltage
+          and timing acceptance.
         </p>
       </section>
     </main>
