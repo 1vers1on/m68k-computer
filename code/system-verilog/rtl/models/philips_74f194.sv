@@ -1,7 +1,6 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-// Philips/NXP 74F194 4-bit bidirectional universal shift register.
 module philips_74f194 #(
     // max propagation delay times in ns
     parameter real TPLH    =  7.0,

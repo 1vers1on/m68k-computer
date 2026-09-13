@@ -1,8 +1,6 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-// Fairchild 74F191 4-bit synchronous up/down counter,
-// asynchronous transparent parallel load.
 module fairchild_74f191 #(
     // max propagation delay times in ns
     parameter real TPLH_Q     =  8.0,
