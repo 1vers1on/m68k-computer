@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - DRAM, Revision 2.1</title>
+    <title>68EC000 Computer - DRAM, Revision 2.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,7 +14,9 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.1 follows memory map 2.1 and adds the IDE sequencer to the
+        Revision 2.2 adds the MC68450 as a second master and makes refresh
+        independent of bus ownership. Revision 2.1 added the IDE sequencer to
+        the
         <code>MFP_CLK_5</code> clock branch. Revision 2.0 added the
         <a href="paging.html">page unit</a> between the address decoder and this
         controller: it supplies <code>RAM0_REQ_n</code> and
@@ -26,7 +28,7 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.1 pre-layout design; assembled-board measurements remain
+          Revision 2.2 pre-layout design; assembled-board measurements remain
         </dd>
         <dt>Privilege</dt>
         <dd>
@@ -110,6 +112,7 @@
         <li>
           <a href="#implementation-checklist">Implementation Checklist</a>
         </li>
+        <li><a href="#dma-master">DMA Master Timing</a></li>
         <li><a href="#sources">Sources</a></li>
       </ol>
     </nav>
@@ -4072,8 +4075,8 @@ CPU_START =
           A CPU request arriving during refresh remains asserted because the
           MC68EC000 has not received DTACK. The two-stage request synchronizer
           presents it to the arbiter, and the controller grants it after the CBR
-          sequence and precharge complete. No CPU-request queue is required;
-          there is no other bus master in the baseline system.
+          sequence and precharge complete. No CPU-request queue is required; the
+          request remains asserted across either CPU or DMA ownership.
         </p>
 
         <p>
@@ -6319,8 +6322,36 @@ special condition             = unselected bank has RAS=HIGH, CAS=LOW, OE=LOW</c
         </ul>
       </section>
 
+      <section id="dma-master">
+        <h2>24. DMA Master Timing</h2>
+        <p>
+          Revision 2.2 makes AS, UDS/LDS, R/W, FC, physical address, and data
+          master-neutral. The request capture records bank, row/column address,
+          byte lanes, and direction from whichever master owns the bus.
+          Supervisor-data DMA cycles bypass translation and use A21 as the
+          physical bank bit.
+        </p>
+        <p>
+          A device-to-memory single-address write does not assert UDS/LDS until
+          the device READY input is active. The DRAM sequencer therefore cannot
+          start its delayed write before IDE or expansion data is valid. A
+          memory-to-device cycle keeps DRAM output valid through the successful
+          DTC point. Dual-address reads include the HCT245 delay and retain more
+          than the MC68450's 15 ns input setup at its final S6 falling edge.
+        </p>
+        <p>
+          Refresh arbitration is independent of CPU ownership. A pending credit
+          wins at the first legal boundary after any CPU or DMA DRAM cycle, even
+          if BGACK remains low for a burst. The longest blocked interval is one
+          accepted bus cycle, capped by the motherboard timeout. The four-credit
+          counter and 12.8 us source therefore remain valid under DMA. Exercise
+          continuous IDE and memory-copy traffic during board verification and
+          confirm that no credit waits for bus release.
+        </p>
+      </section>
+
       <section id="sources">
-        <h2>24. Sources</h2>
+        <h2>25. Sources</h2>
         <ul>
           <li>
             Texas Instruments,

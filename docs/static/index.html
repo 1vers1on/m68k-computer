@@ -18,18 +18,25 @@
       </p>
 
       <p>
-        Revision 2.1 adds a two-device parallel ATA interface in I/O slot 11 and
-        assigns its interrupt to autovectored processor level 2. The adapter
-        uses PIO mode 0 with IORDY wait extension, so firmware can identify and
-        drive ATA disks, ATAPI optical drives, and adapter-connected 2.5-inch or
-        CompactFlash devices. Revision 2.0 added hardware memory protection and
-        paging. The motherboard reads <code>FC2</code> and refuses user-mode
-        access to every I/O register and to the firmware ROM, so applications
-        reach hardware only by calling the BIOS. Main memory goes through a page
-        table: each program gets its own 4 MiB space built from 4 KiB pages, and
-        it reaches only the pages the BIOS mapped for it. The break is
-        deliberate and no revision 1.x firmware runs on it. See
-        <a href="memory-map.html">Memory Map</a> for the rules,
+        Revision 2.2 fits an MC68450 direct-memory-access controller in I/O slot
+        12 and gives it four channels: IDE, floppy, and one per expansion slot.
+        The controller shares the processor bus, addresses physical DRAM with
+        supervisor data function codes, and interrupts at autovectored level 1.
+        Only the BIOS programs it, and it moves disk data without the processor
+        copying each word. The IDE byte lanes are crossed so a DMA sector lands
+        in memory in 68000 order, which also removes the programmed-I/O swap
+        loop. See <a href="dma.html">DMA Controller</a> for the subsystem.
+        Revision 2.1 added the two-device parallel ATA interface in I/O slot 11
+        at autovectored level 2, using PIO mode 0 with IORDY wait extension, so
+        firmware can identify and drive ATA disks, ATAPI optical drives, and
+        adapter-connected 2.5-inch or CompactFlash devices. Revision 2.0 added
+        hardware memory protection and paging. The motherboard reads
+        <code>FC2</code> and refuses user-mode access to every I/O register and
+        to the firmware ROM, so applications reach hardware only by calling the
+        BIOS. Main memory goes through a page table: each program gets its own 4
+        MiB space built from 4 KiB pages, and it reaches only the pages the BIOS
+        mapped for it. The break is deliberate and no revision 1.x firmware runs
+        on it. See <a href="memory-map.html">Memory Map</a> for the rules,
         <a href="bus-and-decode.html#supervisor-protection"
           >Bus and Address Decode</a
         >
@@ -65,7 +72,10 @@
         </dd>
 
         <dt>Floppy controller</dt>
-        <dd>Intel 82077AA-1 using interrupt-driven programmed I/O</dd>
+        <dd>
+          Intel 82077AA-1 on DMA channel 1, with programmed-I/O command and
+          result phases
+        </dd>
 
         <dt>Floppy drives</dt>
         <dd>
@@ -74,8 +84,13 @@
 
         <dt>IDE</dt>
         <dd>
-          Two-device 16-bit parallel ATA, PIO mode 0, with ATA and ATAPI
-          firmware support
+          Two-device 16-bit parallel ATA, PIO mode 0 plus motherboard DMA, with
+          ATA and ATAPI firmware support
+        </dd>
+        <dt>DMA controller</dt>
+        <dd>
+          MC68450L8 at 6.6667 MHz with four channels, single-address device
+          transfers, and dual-address memory copies
         </dd>
 
         <dt>Sound</dt>
@@ -117,7 +132,7 @@
           <tbody>
             <tr>
               <td><a href="memory-map.html">Memory Map</a></td>
-              <td>Revision 2.1; address specification frozen</td>
+              <td>Revision 2.2; address specification frozen</td>
               <td>
                 Address ranges, privilege attributes, I/O slots, boot overlay,
                 peripheral registers, and DRAM organization.
@@ -125,19 +140,19 @@
             </tr>
             <tr>
               <td><a href="bus-and-decode.html">Bus and Address Decode</a></td>
-              <td>Revision 2.1 pre-layout design</td>
+              <td>Revision 2.2 pre-layout design</td>
               <td>
                 Bus cycles, address decoders, supervisor protection,
-                boot-overlay logic, worked decode examples, timing, and bus
-                termination.
+                boot-overlay logic, worked decode examples, MC68450 ownership
+                and DTACK isolation, timing, and bus termination.
               </td>
             </tr>
             <tr>
               <td><a href="clock-and-reset.html">Clock and Reset</a></td>
-              <td>Revision 2.1 pre-layout design</td>
+              <td>Revision 2.2 pre-layout design</td>
               <td>
-                10 MHz clock, the DRAM and I/O clock buffers, and active-low
-                reset generation.
+                10 MHz clock, the 6.6667 MHz DMA clock, the DRAM and I/O clock
+                buffers, and active-low reset generation.
               </td>
             </tr>
             <tr>
@@ -150,10 +165,11 @@
             </tr>
             <tr>
               <td><a href="interrupts.html">Interrupts</a></td>
-              <td>Revision 2.1 pre-layout design</td>
+              <td>Revision 2.2 pre-layout design</td>
               <td>
-                Priority encoding, IDE and expansion autovectors, MFP and PI/T
-                vectors, acknowledge decode, and spurious-interrupt handling.
+                Priority encoding, DMA, IDE, and expansion autovectors, MFP and
+                PI/T vectors, acknowledge decode, and spurious-interrupt
+                handling.
               </td>
             </tr>
             <tr>
@@ -170,7 +186,7 @@
             </tr>
             <tr>
               <td><a href="paging.html">Paging</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
                 Page table format and storage, table aperture, control
                 registers, address translation, page faults, and the firmware
@@ -179,19 +195,21 @@
             </tr>
             <tr>
               <td><a href="dram.html">DRAM</a></td>
-              <td>Revision 2.1 pre-layout design</td>
+              <td>Revision 2.2 pre-layout design</td>
               <td>
                 DRAM organization, discrete controller, refresh, initialization,
-                timing, electrical checks, and assembled-board acceptance. Its
-                column address and bank requests now come from the page unit.
+                timing, electrical checks, and assembled-board acceptance. It
+                now answers either bus master and keeps refresh independent of
+                bus ownership.
               </td>
             </tr>
             <tr>
               <td><a href="firmware-rom.html">Firmware ROM</a></td>
-              <td>Revision 2.1 pre-layout design</td>
+              <td>Revision 2.2 pre-layout design</td>
               <td>
                 AT28C256 organization, read-only wiring, completion timing, the
-                BIOS call gate, IDE storage services, and the level-2 vector.
+                BIOS call gate, storage services, DMA ownership and error rules,
+                and the level-1 and level-2 vectors.
               </td>
             </tr>
             <tr>
@@ -205,19 +223,20 @@
             </tr>
             <tr>
               <td><a href="floppy.html">Floppy Controller</a></td>
-              <td>Revision 2.0 pre-layout design</td>
+              <td>Revision 2.1 pre-layout design</td>
               <td>
-                Intel 82077AA-1 bus adapter, programmed-I/O interface, and two
-                Mitsumi D359M3D drives.
+                Intel 82077AA-1 bus adapter, channel-1 DMA strobes and terminal
+                count, programmed-I/O command phases, and two Mitsumi D359M3D
+                drives.
               </td>
             </tr>
             <tr>
               <td><a href="ide.html">IDE Interface</a></td>
-              <td>Revision 1.0 pre-layout design; memory map 2.1</td>
+              <td>Revision 2.0 pre-layout design; memory map 2.2</td>
               <td>
-                Two-device parallel ATA host, PALCE20V8 control equations, PIO
-                mode 0 timing, IORDY waits, level-2 interrupt, connector, and
-                firmware rules.
+                Two-device parallel ATA host, crossed byte lanes, PALCE20V8
+                control equations, PIO mode 0 and channel-0 DMA timing, IORDY
+                waits, level-2 interrupt, connector, and firmware rules.
               </td>
             </tr>
             <tr>
@@ -263,12 +282,23 @@
               </td>
             </tr>
             <tr>
+              <td><a href="dma.html">DMA Controller</a></td>
+              <td>Revision 1.0 pre-layout design</td>
+              <td>
+                MC68450L8 clock and arbitration, address and data
+                demultiplexing, register window, DTACK isolation, bus-exception
+                and reset encoding, the level-1 interrupt, per-device channels,
+                descriptors and memory copies, firmware rules, and the A84G mask
+                restrictions.
+              </td>
+            </tr>
+            <tr>
               <td><a href="expansion.html">Expansion Slots</a></td>
-              <td>Revision 2.1 pre-layout design</td>
+              <td>Revision 2.2 pre-layout design</td>
               <td>
                 Two front-loading DIN 41612 slots, fixed address windows,
-                buffered bus interface and R/W branches, pinout, power, card
-                rules, and example card.
+                buffered bus interface and R/W branches, pinout, the card DMA
+                service contract, power, card rules, and example card.
               </td>
             </tr>
           </tbody>
@@ -304,12 +334,33 @@
               <td>Corrections to the MC68000 user manual.</td>
             </tr>
             <tr>
-              <td>Motorola MC68450</td>
+              <td>Motorola MC68450 Technical Summary</td>
               <td><a href="datasheets/MC68450L8.pdf">PDF</a></td>
               <td>
-                Direct memory access controller, kept for reference. No DMA
-                controller is fitted; the floppy and IDE interfaces use
-                programmed I/O.
+                MC68450L8 pin assignment, AC and DC limits, package dissipation,
+                and the demultiplex reference circuit.
+              </td>
+            </tr>
+            <tr>
+              <td>Motorola MC68450 User Manual</td>
+              <td>
+                <a
+                  href="datasheets/MC68450_Direct_Memory_Access_Controller_DMAC_Jul89.pdf"
+                  >PDF</a
+                >
+              </td>
+              <td>
+                Register set, transfer protocols, bus arbitration, exception
+                control, chaining, and the appended A84G mask addendum.
+              </td>
+            </tr>
+            <tr>
+              <td>Motorola MC68450 Addendum</td>
+              <td><a href="datasheets/MC68450AD.pdf">PDF</a></td>
+              <td>
+                A84G mask restrictions. The design answers all ten: five are
+                honoured by construction and five are avoided because the board
+                never enters the case.
               </td>
             </tr>
             <tr>
@@ -469,6 +520,36 @@
                 <a href="datasheets/cd74hc123.pdf">PDF</a>
               </td>
               <td>Local YMF262 and IDE reset stretchers.</td>
+            </tr>
+            <tr>
+              <td>CD74ACT373</td>
+              <td>
+                <a href="datasheets/cd74act373.pdf">PDF</a>
+              </td>
+              <td>
+                Transparent address latches for the MC68450 multiplexed upper
+                address.
+              </td>
+            </tr>
+            <tr>
+              <td>CD74ACT157</td>
+              <td>
+                <a href="datasheets/cd74act157.pdf">PDF</a>
+              </td>
+              <td>
+                ATA register-address and PCL0 source selection between
+                programmed I/O and DMA.
+              </td>
+            </tr>
+            <tr>
+              <td>SN74HCT125</td>
+              <td>
+                <a href="datasheets/sn74hct125.pdf">PDF</a>
+              </td>
+              <td>
+                Ownership-controlled isolation of the bidirectional MC68450
+                DTACK pin.
+              </td>
             </tr>
             <tr>
               <td>TL431</td>

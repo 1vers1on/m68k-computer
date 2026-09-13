@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Floppy Controller, Revision 2.0</title>
+    <title>68EC000 Computer - Floppy Controller, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -16,19 +16,21 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.0 follows memory map 2.0. The 82077AA-1 sits in I/O slot 1,
-        inside the protected I/O region, so its host registers answer supervisor
-        cycles only. Disk access is a BIOS service, which also keeps DMA-free
-        programmed I/O and the drive-select state under firmware control. Every
-        circuit, register address, and timing figure carries over from revision
-        1.0 unchanged.
+        Revision 2.1 connects the controller's DRQ, DACK, and TC pins to MC68450
+        channel 1 and adds a byte buffer, DMA strobe generation, and a qualified
+        terminal count. Command and result phases stay in programmed I/O. The
+        82077AA-1 sits in I/O slot 1, inside the protected I/O region, so its
+        host registers answer supervisor cycles only. Disk access remains a BIOS
+        service, which keeps the drive-select state and every channel program
+        under firmware control. Register addresses, the drive interface, the
+        cable, and drive power carry over from revision 2.0 unchanged.
       </p>
       <dl>
         <dt>Privilege</dt>
         <dd>Supervisor only; application code calls the BIOS</dd>
         <dt>Document status</dt>
         <dd>
-          Revision 2.0 pre-layout design; board layout and assembled-system
+          Revision 2.1 pre-layout design; board layout and assembled-system
           checks remain
         </dd>
         <dt>Controller</dt>
@@ -48,7 +50,12 @@
           512 bytes per sector
         </dd>
         <dt>Transfer method</dt>
-        <dd>Interrupt-driven programmed I/O through the 16-byte FIFO</dd>
+        <dd>
+          MC68450 channel 1 single-address DMA for disk data; programmed I/O for
+          command and result phases
+        </dd>
+        <dt>FIFO threshold</dt>
+        <dd>Eight bytes, 126.5 us service allowance at 500 kbit/s</dd>
         <dt>Interrupt connection</dt>
         <dd>MC68901 GPIP5, rising edge, vector <code>$47</code></dd>
         <dt>Drive cable</dt>
@@ -66,7 +73,7 @@
         <li><a href="#drive-interface">Drive Interface</a></li>
         <li><a href="#cable">Signal Connector and Cable</a></li>
         <li><a href="#power">Drive Power</a></li>
-        <li><a href="#interrupts">Interrupts and Programmed I/O</a></li>
+        <li><a href="#interrupts">Interrupts and Transfer Modes</a></li>
         <li><a href="#firmware">Firmware Contract</a></li>
         <li><a href="#pins">Package and Pin Maps</a></li>
         <li><a href="#timing">Timing and Electrical Checks</a></li>
@@ -97,7 +104,11 @@
           <code>$47</code>. The
           <a href="clock-and-reset.html">Clock and Reset</a> design owns
           <code>PERIPH_RESET_n</code>, and the MFP clock divider supplies
-          <code>MFP_CLK_5</code> to the bus-response sequencer.
+          <code>MFP_CLK_5</code> to the bus-response sequencer. The
+          <a href="dma.html#floppy">DMA Controller</a> owns channel 1, its
+          priority, the arbitration and service-latency budget, and the
+          <code>REQ1_n</code>, <code>ACK1_n</code>, <code>DTC_n</code>, and
+          <code>DONE_n</code> signals that reach this adapter.
         </p>
         <p>
           Signal names ending in <code>_n</code>, and names written with a
@@ -109,14 +120,21 @@
         <h2>2. Architecture</h2>
         <pre><code>MC68EC000 lower byte                  Intel 82077AA-1
 
-D7..D0 &lt;--------------------------&gt; DB7..DB0
+D7..D0 &lt;------&gt; U_FDC_DATA HCT245 &lt;--&gt; DB7..DB0
 A3..A1 ----------------------------&gt; A2..A0
-IO1_n + LDS_n --&gt; FDC_CYCLE --&gt; FDC_CS_n --&gt; CS
-R/W + FDC_CYCLE --&gt; FDC_RD_n ------&gt; RD
-R/W + FDC_CYCLE --&gt; FDC_WR_n ------&gt; WR
+IO1_n + LDS_n --&gt; FDC_PIO --&gt; FDC_CS_n --&gt; CS
+R/W + FDC_PIO + FDC_DMA + DTC_n --&gt; FDC_RD_n --&gt; RD
+R/W + FDC_PIO + FDC_DMA + DTC_n --&gt; FDC_WR_n --&gt; WR
 MFP_CLK_5 --&gt; response sequencer --&gt; FDC_DTACK_n
 PERIPH_RESET_n --&gt; inverter -------&gt; RESET
 INT --------------------------------&gt; MC68901 GPIP5
+
+MC68450 channel 1
+
+DRQ --&gt; inverter --&gt; REQ1_n -------&gt; MC68450 pin 4
+ACK1_n ---------------------+------&gt; DACK
+                            +--&gt; FDC_DMA strobe and buffer terms
+ACK1_n + DONE_n + DTC_n --&gt; FDC_TC_n --&gt; TC
 
 24 MHz crystal ---------------------&gt; X1, X2
 
@@ -159,8 +177,11 @@ INT --------------------------------&gt; MC68901 GPIP5
           <tbody>
             <tr>
               <td><code>D7..D0</code></td>
-              <td>82077AA-1 <code>DB7..DB0</code></td>
-              <td>Transfers commands, status, and disk data.</td>
+              <td>U_FDC_DATA B port</td>
+              <td>
+                Carries commands, status, and disk data through the added byte
+                buffer.
+              </td>
             </tr>
             <tr>
               <td><code>A3..A1</code></td>
@@ -169,8 +190,10 @@ INT --------------------------------&gt; MC68901 GPIP5
             </tr>
             <tr>
               <td><code>R/W</code></td>
-              <td>U_FDC_CTRL and U_FDC_INV</td>
-              <td>Selects a controller read or write.</td>
+              <td>U_FDC_CTRL, U_FDC_DMA, and U_FDC_INV</td>
+              <td>
+                Selects a controller read or write in both transfer modes.
+              </td>
             </tr>
             <tr>
               <td><code>IO1_n</code></td>
@@ -180,7 +203,7 @@ INT --------------------------------&gt; MC68901 GPIP5
             <tr>
               <td><code>LDS_n</code></td>
               <td>U_FDC_REQ</td>
-              <td>Restricts the interface to the lower byte lane.</td>
+              <td>Restricts programmed I/O to the lower byte lane.</td>
             </tr>
             <tr>
               <td><code>MFP_CLK_5</code></td>
@@ -192,48 +215,144 @@ INT --------------------------------&gt; MC68901 GPIP5
               <td>U_FDC_CTRL output</td>
               <td>Returns completion to the motherboard tree.</td>
             </tr>
+            <tr>
+              <td><code>ACK1_n</code></td>
+              <td>82077AA-1 <code>DACK</code> and U_FDC_INV</td>
+              <td>Marks a channel-1 transfer and enables the FIFO.</td>
+            </tr>
+            <tr>
+              <td><code>DTC_n</code></td>
+              <td>U_FDC_DMA and U_FDC_REQ</td>
+              <td>Ends the DMA strobe and qualifies terminal count.</td>
+            </tr>
+            <tr>
+              <td><code>DONE_n</code></td>
+              <td>U_FDC_REQ</td>
+              <td>Marks the last operand of the block operation.</td>
+            </tr>
+            <tr>
+              <td><code>REQ1_n</code></td>
+              <td>U_FDC_INV output from 82077AA-1 <code>DRQ</code></td>
+              <td>Requests channel-1 service.</td>
+            </tr>
           </tbody>
         </table>
 
         <h3>Cycle Qualification</h3>
         <p>
-          One SN74F02N gate asserts <code>FDC_CYCLE</code> only while slot 1 and
-          the lower byte lane are selected.
+          One SN74F02N gate asserts <code>FDC_PIO</code> only while slot 1 and
+          the lower byte lane are selected. One SN74F04N inverter turns the
+          acknowledge into the active-high <code>FDC_DMA</code>.
         </p>
-        <pre><code>FDC_CYCLE = NOT (IO1_n OR LDS_n)</code></pre>
+        <pre><code>FDC_PIO = NOT (IO1_n OR LDS_n)
+FDC_DMA = NOT ACK1_n</code></pre>
         <p>
           An upper-byte-only access reaches the motherboard timeout. A word
           access completes because it includes the lower lane, but only
           <code>D7..D0</code> carry valid controller data. Firmware shall use
-          byte accesses at odd addresses.
+          byte accesses at odd addresses. The two qualifiers never overlap: the
+          processor cannot run a slot-1 cycle while the MC68450 owns the bus.
         </p>
 
         <h3>Read and Write Strobes</h3>
         <p>
           U_FDC_INV produces <code>FDC_RW_n</code> and <code>FDC_CS_n</code>.
-          Two U_FDC_CTRL NAND gates convert the qualified processor cycle into
-          the controller's active-low strobes.
+          Two U_FDC_CTRL NAND gates form the programmed-I/O strobe terms and two
+          U_FDC_DMA gates form the DMA terms. U_FDC_GATE combines each pair.
+          Chip select stays inactive during DMA, which Intel section 2.3 permits
+          because <code>DACK</code> alone enables the FIFO and the address
+          inputs need not be valid.
         </p>
         <pre><code>FDC_RW_n = NOT R/W
-FDC_CS_n = NOT FDC_CYCLE
-FDC_RD_n = NOT (FDC_CYCLE AND R/W)
-FDC_WR_n = NOT (FDC_CYCLE AND FDC_RW_n)</code></pre>
+FDC_CS_n = NOT FDC_PIO
+
+N_PIO_RD = NOT (FDC_PIO AND R/W)
+N_PIO_WR = NOT (FDC_PIO AND FDC_RW_n)
+N_DMA_RD = NOT (FDC_DMA AND FDC_RW_n AND DTC_n)
+N_DMA_WR = NOT (FDC_DMA AND R/W AND DTC_n)
+
+FDC_RD_n = N_PIO_RD AND N_DMA_RD
+FDC_WR_n = N_PIO_WR AND N_DMA_WR</code></pre>
+        <p>
+          During <code>ACK1_n</code> the single-address
+          <code>R/W</code> describes memory rather than the controller, so the
+          DMA terms invert the programmed-I/O reading. A memory write reads the
+          FIFO and a memory read writes it. <code>DTC_n</code> ends the DMA
+          strobe one MC68450 state before the controller negates its data
+          strobes, which keeps the strobe trailing edge inside the interval
+          where <code>DACK</code> is still asserted and DRAM data is still
+          driven.
+        </p>
+
+        <h3>Byte Buffer</h3>
+        <p>
+          <code>U_FDC_DATA</code> is an <code>SN74HCT245N</code> between the
+          controller and the processor data bus. Its A port takes
+          <code>DB7..DB0</code> and its B port takes system <code>D7..D0</code>.
+          The buffer isolates the controller from the two masters and gives the
+          DMA path a defined direction.
+        </p>
+        <pre><code>FDC_BUF_OE_n  = NOT (FDC_PIO OR FDC_DMA)
+FDC_RD_RAW_n  = N_PIO_RD AND NOT (FDC_DMA AND FDC_RW_n)
+FDC_BUF_DIR   = NOT FDC_RD_RAW_n</code></pre>
+        <p>
+          <code>FDC_BUF_DIR</code> high sends A to B, out of the controller. It
+          follows the same direction rule as the strobes but omits the
+          <code>DTC_n</code> term, so the buffer does not turn round while the
+          MC68450 still drives its data strobes. The buffer stays disabled
+          whenever neither qualifier is active, so the controller never loads
+          the bus during another master's cycle.
+        </p>
+
+        <h3>Request and Terminal Count</h3>
+        <p>
+          The 82077AA-1 drives <code>DRQ</code> active high in PS/2 mode. One
+          U_FDC_INV gate turns it into active-low <code>REQ1_n</code>. A 10 kohm
+          pull-down at <code>DRQ</code> and a 10 kohm pull-up at
+          <code>REQ1_n</code> hold the request inactive if the controller
+          three-states its output during reset.
+        </p>
+        <pre><code>REQ1_n   = NOT DRQ
+TC_A     = NOT (DONE_n OR DTC_n)
+FDC_TC_n = NOT (FDC_DMA AND TC_A)
+         = ACK1_n OR DONE_n OR DTC_n</code></pre>
+        <p>
+          <code>DTC_n</code> marks a successful bus cycle and
+          <code>DONE_n</code> marks the last operand of the block operation.
+          Both are needed: <code>DTC_n</code> alone would pulse on every
+          transfer, and shared <code>DONE_n</code> alone would reach the
+          controller during another channel's final operand. Qualifying with
+          <code>FDC_DMA</code> restricts terminal count to channel 1, and
+          requiring <code>DTC_n</code> keeps a failed cycle from ending the disk
+          command.
+        </p>
+        <p>
+          Channel 1 uses one unchained, physically contiguous buffer per
+          command, so the block ends exactly where the disk command ends. A
+          chained descriptor boundary would assert <code>DONE_n</code> before
+          the command's last byte, which is why
+          <a href="dma.html#descriptors">DMA Controller</a> forbids array
+          chaining on this channel and gives the BIOS a bounce buffer instead.
+        </p>
 
         <h3>Fixed Completion Response</h3>
         <p>
           U_FDC_SEQ is a CD74HCT164E clocked at 5 MHz. Its serial inputs are
-          high and its active-low clear connects to <code>FDC_CYCLE</code>.
-          Three rising clock edges shift a high level to QC. This holds
+          high and its active-low clear connects to <code>FDC_PIO</code>. Three
+          rising clock edges shift a high level to QC. This holds
           <code>FDC_RD_n</code> or <code>FDC_WR_n</code> active for at least two
           complete 200 ns clock periods before the adapter returns completion.
         </p>
         <pre><code>FDC_ACK_READY = U_FDC_SEQ.QC
-FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
+FDC_DTACK_n   = NOT (FDC_PIO AND FDC_ACK_READY)</code></pre>
         <p>
           Releasing either <code>IO1_n</code> or <code>LDS_n</code> clears the
           sequencer asynchronously, negates the selected host strobe, and
           releases <code>FDC_DTACK_n</code>. A new access starts from the
-          cleared state.
+          cleared state. The sequencer takes no part in a DMA cycle: the
+          addressed DRAM supplies completion, this adapter contributes no
+          <code>DTACK</code>, and channel 1 is programmed for the
+          acknowledge-only protocol, so it needs no READY input either.
         </p>
       </section>
       <section id="register-map">
@@ -344,8 +463,9 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
         <pre><code>FDC_RESET = NOT PERIPH_RESET_n</code></pre>
         <p>
           Reset stops an active disk command and can corrupt a sector if it
-          occurs during a write. Firmware must reinitialize the data rate, FIFO,
-          mechanical timing, and non-DMA mode after every reset.
+          occurs during a write. Firmware must reinitialize the data rate, FIFO
+          threshold, mechanical timing, and DMA mode after every reset, and must
+          abort any channel-1 operation before the controller is reset.
         </p>
 
         <h3>PS/2 Mode</h3>
@@ -361,9 +481,14 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
         <p>
           <code>PLL0</code> connects to +5 V for floppy operation.
           <code>DRV2</code> also connects to +5 V so Status Register A reports
-          that the second drive is installed. <code>DACK</code> and
-          <code>TC</code> connect to +5 V, their inactive level in PS/2 mode.
-          <code>DRQ</code> remains unconnected.
+          that the second drive is installed. Revision 2.1 connects
+          <code>DACK</code> to <code>ACK1_n</code>, <code>TC</code> to
+          <code>FDC_TC_n</code>, and <code>DRQ</code> to the inverter that makes
+          <code>REQ1_n</code>. In PS/2 mode <code>TC</code> is active low and
+          the DOR DMA-gate bit does not affect INT, DRQ, TC, or DACK, so no
+          gating strap is needed. Both control inputs idle high: the MC68450
+          drives <code>ACK1_n</code> inactive and <code>FDC_TC_n</code> follows
+          it.
         </p>
       </section>
       <section id="drive-interface">
@@ -703,7 +828,7 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
         </p>
       </section>
       <section id="interrupts">
-        <h2>9. Interrupts and Programmed I/O</h2>
+        <h2>9. Interrupts and Transfer Modes</h2>
         <p>
           The 82077AA-1 push-pull <code>INT</code> output connects directly to
           MC68901 GPIP5 as <code>FDC_INT</code>. The MFP detects its rising edge
@@ -711,27 +836,44 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
           interrupt acknowledge. No pull-up is fitted.
         </p>
         <p>
-          Non-DMA mode uses INT and the Main Status Register's RQM bit for FIFO
-          service. During a read, INT rises when the FIFO reaches its programmed
-          service level or contains the last bytes of a sector. During a write,
-          INT rises when the FIFO can accept data. It also rises when a seek or
-          recalibrate completes and when a data command enters its result phase.
+          SPECIFY with the ND bit clear puts the execution phase in DMA mode.
+          The controller then raises <code>DRQ</code> instead of INT for FIFO
+          service, and INT marks the end of the execution phase. A seek or
+          recalibrate completion and a data-command result phase still raise
+          INT, so the handler keeps both paths.
         </p>
         <p>
           The interrupt handler reads the Main Status Register before choosing
-          an action. When RQM and NON-DMA are set, it transfers bytes in the
-          direction selected by DIO until RQM clears. A seek or recalibrate
-          completion requires Sense Interrupt Status. A data-command result
-          phase requires the command's complete result-byte sequence. The
-          handler must not issue Sense Interrupt Status for a FIFO data request.
+          an action. A seek or recalibrate completion requires Sense Interrupt
+          Status. A data-command result phase requires the command's complete
+          result-byte sequence, read through programmed I/O. The handler must
+          not issue Sense Interrupt Status for a FIFO data request.
         </p>
         <p>
           The CONFIGURE command enables the FIFO, disables legacy drive polling,
-          enables implied seeks, and selects an eight-byte threshold. At 500
-          kbit/s the controller data sheet gives about 126.5 us between an
-          eight-byte service request and FIFO overrun or underrun. The handler
-          still transfers until RQM clears instead of assuming that every
-          interrupt represents exactly eight bytes.
+          enables implied seeks, and selects an eight-byte threshold. Intel
+          Table 2-5 on page 11 gives
+          <code>8 x 16 us - 1.5 us = 126.5 us</code> between an eight-byte
+          service request and FIFO overrun or underrun at 500 kbit/s. That
+          figure is the whole allowance, not the 256 us the full FIFO would
+          hold. <a href="dma.html#timing">DMA Controller</a>
+          proves the worst-case channel-1 service bound of 61.45 us against it
+          and keeps the 65.05 us margin.
+        </p>
+        <p>
+          Two conditions remove <code>DRQ</code>. After <code>DACK</code> goes
+          active for the last byte of a transfer the controller drops
+          <code>DRQ</code> within 75 ns, and within 100 ns of the strobe; it
+          also drops <code>DRQ</code> when TC is accepted, within 150 ns. A
+          channel-1 bus cycle lasts at least four DMA clocks, or 600 ns, so the
+          MC68450 samples a withdrawn request well before it could start an
+          extra transfer.
+        </p>
+        <p>
+          Programmed I/O through the FIFO remains possible for diagnostics: set
+          ND in SPECIFY, and the controller returns to INT and RQM service
+          without any board change. The DMA path adds no state that firmware
+          must clear first beyond aborting the channel.
         </p>
       </section>
       <section id="firmware">
@@ -756,9 +898,10 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             eight-byte threshold, and starts write precompensation at track 0.
           </li>
           <li>
-            Issue SPECIFY bytes <code>$03, $DF, $11</code>. At 500 kbit/s this
+            Issue SPECIFY bytes <code>$03, $DF, $10</code>. At 500 kbit/s this
             selects a 3 ms step interval, 240 ms head-unload time, 16 ms
-            head-load time, and non-DMA operation.
+            head-load time, and DMA operation. Revision 2.0 used
+            <code>$11</code> for non-DMA service; only the ND bit changes.
           </li>
           <li>
             Recalibrate drive 0 and drive 1 separately. Complete each operation
@@ -788,7 +931,6 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
 
         <h3>Full-Sector Transfers</h3>
         <p>
-          The board does not generate DMA acknowledge or terminal count.
           Firmware transfers complete 512-byte sectors and uses the command's
           EOT parameter to enter the result phase normally. For one sector, EOT
           equals the requested sector number. Multi-sector operations may end at
@@ -796,11 +938,62 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
           contract.
         </p>
         <p>
-          Before each FIFO access, firmware shall require RQM to be one and DIO
-          to match the transfer direction. Every wait for RQM, INT, index, seek
+          Command bytes and result bytes stay in programmed I/O. Before each of
+          those FIFO accesses, firmware shall require RQM to be one and DIO to
+          match the transfer direction. Every wait for RQM, INT, index, seek
           completion, or result bytes needs a finite software timeout. A timeout
           resets and reinitializes the controller before another command is
           attempted.
+        </p>
+
+        <h3>Channel 1 Operation</h3>
+        <ol>
+          <li>
+            Reserve channel 1 through the BIOS gate. Record the owner, the
+            drive, the command, and the cleanup action before starting.
+          </li>
+          <li>
+            Use one physically contiguous, pinned buffer for the whole command
+            and program a single unchained operation. When the caller's pages
+            are not contiguous, copy through a contiguous bounce buffer and
+            account for that pass in the transfer cost.
+          </li>
+          <li>
+            Program the channel for an 8-bit implicitly addressed device with
+            acknowledge only, external burst requests, byte operands, memory
+            address count up, and <code>MFCR = $05</code>. The operand count
+            equals the command's byte count, so <code>DONE_n</code> falls on the
+            command's last byte.
+          </li>
+          <li>
+            Start the channel before issuing the disk command, then write the
+            command bytes. Respect the seven-clock register-access guard after
+            the START write, including inside the level-1 handler.
+          </li>
+          <li>
+            Treat the controller's INT for the result phase and the MC68450
+            channel completion as separate events. Read the result bytes, then
+            compare the transferred count against the channel's memory transfer
+            count.
+          </li>
+          <li>
+            On a DMA error or abort, stop the channel first, then recover the
+            controller: read any pending result bytes, issue Sense Interrupt
+            Status as required, and reset the controller if the command cannot
+            be drained. The FIFO may already have advanced past the byte that
+            failed, so the sector is indeterminate and the transfer must be
+            repeated.
+          </li>
+          <li>
+            Release the pinned buffer and the channel record only after the
+            controller has stopped requesting service and the channel shows
+            inactive.
+          </li>
+        </ol>
+        <p>
+          DMA removes the per-byte processor service work. It does not raise the
+          media rate: a 1.44 MB drive still delivers 500 kbit/s, so a full-track
+          read takes the same time it takes under programmed I/O.
         </p>
 
         <h3>Required 1.44 MB Parameters</h3>
@@ -881,7 +1074,7 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             <tr>
               <td>3</td>
               <td>DACK</td>
-              <td>+5 V</td>
+              <td>MC68450 <code>ACK1_n</code></td>
             </tr>
             <tr>
               <td>4, 5, 6</td>
@@ -899,7 +1092,7 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             <tr>
               <td>11, 13, 14, 15, 17, 19, 20, 22</td>
               <td>DB0..DB7</td>
-              <td>CPU <code>D0..D7</code>, in order</td>
+              <td><code>U_FDC_DATA</code> A1..A8 pins 2 through 9, in order</td>
             </tr>
             <tr>
               <td>18, 40, 60, 68</td>
@@ -919,12 +1112,12 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             <tr>
               <td>24</td>
               <td>DRQ</td>
-              <td>Not connected</td>
+              <td><code>U_FDC_INV</code> pin 9, with a 10 kohm pull-down</td>
             </tr>
             <tr>
               <td>25</td>
               <td>TC</td>
-              <td>+5 V</td>
+              <td><code>FDC_TC_n</code> from <code>U_FDC_DMA</code> pin 8</td>
             </tr>
             <tr>
               <td>27</td>
@@ -1020,17 +1213,43 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             <tr>
               <td><code>U_FDC_REQ</code></td>
               <td>SN74F02N</td>
-              <td>Lower-byte cycle qualification.</td>
+              <td>
+                Lower-byte cycle qualification, buffer enable, and the
+                terminal-count product.
+              </td>
             </tr>
             <tr>
               <td><code>U_FDC_INV</code></td>
               <td>SN74F04N</td>
-              <td>R/W and peripheral-reset inversion.</td>
+              <td>
+                R/W, reset, chip select, request, acknowledge, and buffer
+                direction inversion.
+              </td>
             </tr>
             <tr>
               <td><code>U_FDC_CTRL</code></td>
               <td>SN74F00N</td>
-              <td>Read strobe, write strobe, and completion gate.</td>
+              <td>
+                Programmed-I/O strobe terms, completion gate, and the
+                untermimated DMA read term.
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_FDC_DMA</code></td>
+              <td>SN74F10N</td>
+              <td>
+                DTC-terminated DMA strobe terms and qualified terminal count.
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_FDC_GATE</code></td>
+              <td>SN74F08N</td>
+              <td>Combines each programmed-I/O and DMA strobe pair.</td>
+            </tr>
+            <tr>
+              <td><code>U_FDC_DATA</code></td>
+              <td>SN74HCT245N</td>
+              <td>Byte buffer between the controller and the processor bus.</td>
             </tr>
             <tr>
               <td><code>U_FDC_SEQ</code></td>
@@ -1054,7 +1273,17 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             <tr>
               <td>U_FDC_REQ gate 1</td>
               <td>Pin 2: <code>IO1_n</code>; pin 3: <code>LDS_n</code></td>
-              <td>Pin 1: <code>FDC_CYCLE</code></td>
+              <td>Pin 1: <code>FDC_PIO</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_REQ gate 2</td>
+              <td>Pin 5: <code>FDC_PIO</code>; pin 6: <code>FDC_DMA</code></td>
+              <td>Pin 4: <code>FDC_BUF_OE_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_REQ gate 3</td>
+              <td>Pin 9: <code>DONE_n</code>; pin 10: <code>DTC_n</code></td>
+              <td>Pin 8: <code>TC_A</code></td>
             </tr>
             <tr>
               <td>U_FDC_INV gate 1</td>
@@ -1068,42 +1297,111 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             </tr>
             <tr>
               <td>U_FDC_INV gate 3</td>
-              <td>Pin 5: <code>FDC_CYCLE</code></td>
+              <td>Pin 5: <code>FDC_PIO</code></td>
               <td>Pin 6: <code>FDC_CS_n</code></td>
             </tr>
             <tr>
+              <td>U_FDC_INV gate 4</td>
+              <td>Pin 9: 82077AA-1 <code>DRQ</code></td>
+              <td>Pin 8: <code>REQ1_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_INV gate 5</td>
+              <td>Pin 11: <code>ACK1_n</code></td>
+              <td>Pin 10: <code>FDC_DMA</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_INV gate 6</td>
+              <td>Pin 13: <code>FDC_RD_RAW_n</code></td>
+              <td>Pin 12: <code>FDC_BUF_DIR</code></td>
+            </tr>
+            <tr>
               <td>U_FDC_CTRL gate 1</td>
-              <td>
-                Pin 1: <code>FDC_CYCLE</code>; pin 2: CPU <code>R/W</code>
-              </td>
-              <td>Pin 3: <code>FDC_RD_n</code></td>
+              <td>Pin 1: <code>FDC_PIO</code>; pin 2: CPU <code>R/W</code></td>
+              <td>Pin 3: <code>N_PIO_RD</code></td>
             </tr>
             <tr>
               <td>U_FDC_CTRL gate 2</td>
-              <td>
-                Pin 4: <code>FDC_CYCLE</code>; pin 5:
-                <code>FDC_RW_n</code>
-              </td>
-              <td>Pin 6: <code>FDC_WR_n</code></td>
+              <td>Pin 4: <code>FDC_PIO</code>; pin 5: <code>FDC_RW_n</code></td>
+              <td>Pin 6: <code>N_PIO_WR</code></td>
             </tr>
             <tr>
               <td>U_FDC_CTRL gate 3</td>
               <td>
-                Pin 9: <code>FDC_CYCLE</code>; pin 10:
+                Pin 9: <code>FDC_PIO</code>; pin 10:
                 <code>FDC_ACK_READY</code>
               </td>
               <td>Pin 8: <code>FDC_DTACK_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_CTRL gate 4</td>
+              <td>
+                Pin 12: <code>FDC_DMA</code>; pin 13: <code>FDC_RW_n</code>
+              </td>
+              <td>Pin 11: <code>N_DMA_RD_RAW</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_DMA gate 1</td>
+              <td>
+                Pin 1: <code>FDC_DMA</code>; pin 2: <code>FDC_RW_n</code>; pin
+                13: <code>DTC_n</code>
+              </td>
+              <td>Pin 12: <code>N_DMA_RD</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_DMA gate 2</td>
+              <td>
+                Pin 3: <code>FDC_DMA</code>; pin 4: CPU <code>R/W</code>; pin 5:
+                <code>DTC_n</code>
+              </td>
+              <td>Pin 6: <code>N_DMA_WR</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_DMA gate 3</td>
+              <td>
+                Pin 9: <code>FDC_DMA</code>; pin 10: <code>TC_A</code>; pin 11:
+                +5 V
+              </td>
+              <td>Pin 8: <code>FDC_TC_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_GATE gate 1</td>
+              <td>
+                Pin 1: <code>N_PIO_RD</code>; pin 2: <code>N_DMA_RD</code>
+              </td>
+              <td>Pin 3: <code>FDC_RD_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_GATE gate 2</td>
+              <td>
+                Pin 4: <code>N_PIO_WR</code>; pin 5: <code>N_DMA_WR</code>
+              </td>
+              <td>Pin 6: <code>FDC_WR_n</code></td>
+            </tr>
+            <tr>
+              <td>U_FDC_GATE gate 3</td>
+              <td>
+                Pin 9: <code>N_PIO_RD</code>; pin 10: <code>N_DMA_RD_RAW</code>
+              </td>
+              <td>Pin 8: <code>FDC_RD_RAW_n</code></td>
             </tr>
           </tbody>
         </table>
         <p>
           Every 14-pin gate package uses pin 14 for +5 V and pin 7 for ground.
-          Ground U_FDC_REQ pins 5, 6, 8, 9, 11, and 12; U_FDC_INV pins 9, 11,
-          and 13; and U_FDC_CTRL pins 12 and 13. Leave their unused outputs
-          open. U_FDC_SEQ pin 14 connects to +5 V and pin 7 to ground. Pins 1
-          and 2 connect to +5 V, pin 8 to <code>MFP_CLK_5</code>, pin 9 to
-          <code>FDC_CYCLE</code>, and pin 5 produces <code>FDC_ACK_READY</code>.
-          Its other outputs remain open.
+          Ground the unused inputs and leave the unused outputs open: U_FDC_REQ
+          pins 12 and 13, with pin 11 open, and U_FDC_GATE pins 12 and 13, with
+          pin 11 open. U_FDC_SEQ pin 14 connects to +5 V and pin 7 to ground.
+          Pins 1 and 2 connect to +5 V, pin 8 to <code>MFP_CLK_5</code>, pin 9
+          to <code>FDC_PIO</code>, and pin 5 produces
+          <code>FDC_ACK_READY</code>. Its other outputs remain open.
+        </p>
+        <p>
+          <code>U_FDC_DATA</code> uses pin 20 for +5 V and pin 10 for ground.
+          Pin 1 takes <code>FDC_BUF_DIR</code> and pin 19 takes
+          <code>FDC_BUF_OE_n</code>. A1 through A8, pins 2 through 9, face the
+          controller's <code>DB0..DB7</code>. B1 through B8, pins 18 down to 11,
+          face system <code>D0..D7</code>.
         </p>
       </section>
       <section id="timing">
@@ -1139,7 +1437,10 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
             <tr>
               <td>Read data valid from RD</td>
               <td>80 ns maximum</td>
-              <td>At least 320 ns remains before completion can assert.</td>
+              <td>
+                At least 320 ns remains before completion can assert, and the
+                added HCT245 contributes at most 28 ns of that budget.
+              </td>
             </tr>
             <tr>
               <td>Write-data setup to WR completion</td>
@@ -1161,6 +1462,123 @@ FDC_DTACK_n   = NOT (FDC_CYCLE AND FDC_ACK_READY)</code></pre>
         <p>
           The sequencer delay is 400 to 600 ns from cycle qualification before
           gate delay, below the motherboard's 51.1 us normal-cycle timeout.
+        </p>
+
+        <h3>Single-Address DMA Timing</h3>
+        <p>
+          Channel 1 uses the acknowledge-only protocol, so the MC68450 state
+          sequence is fixed. On a device-to-memory transfer the controller
+          asserts <code>AS_n</code> and <code>R/W</code> in S2, asserts
+          <code>ACK1_n</code>, <code>HIBYTE_n</code>, and any
+          <code>DONE_n</code> in S3, asserts the data strobes in S5, asserts
+          <code>DTC_n</code> in S8, and negates <code>AS_n</code> and the data
+          strobes in S9. On a memory-to-device transfer it asserts
+          <code>AS_n</code>, the data strobes, <code>ACK1_n</code>, and any
+          <code>DONE_n</code> together in S2, asserts <code>DTC_n</code> in S6,
+          and negates <code>AS_n</code> and the data strobes in S7. Each state
+          is half a DMA clock, so one state is 74.99 ns at the +100 ppm limit.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            82077AA-1 DMA-cycle requirements against the MC68450 sequence
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Parameter</th>
+              <th scope="col">Controller requirement</th>
+              <th scope="col">Design behavior</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>DACK setup to RD or WR, t25</td>
+              <td>5 ns minimum</td>
+              <td>
+                The strobe comes from <code>ACK1_n</code> through an inverter
+                and two gates, so it follows DACK by at least 10 ns.
+              </td>
+            </tr>
+            <tr>
+              <td>DACK hold from RD or WR, t26</td>
+              <td>0 ns minimum</td>
+              <td>
+                <code>DTC_n</code> ends the strobe in S8 or S6, three states
+                before <code>ACK1_n</code> rises: 224.98 ns of hold.
+              </td>
+            </tr>
+            <tr>
+              <td>RD pulse width, t8</td>
+              <td>90 ns minimum</td>
+              <td>
+                S3 to S8 is five states, 374.96 ns, less the gate delays at each
+                edge.
+              </td>
+            </tr>
+            <tr>
+              <td>WR pulse width, t16</td>
+              <td>90 ns minimum</td>
+              <td>S2 to S6 is four states, 299.97 ns.</td>
+            </tr>
+            <tr>
+              <td>Read data valid from RD, t10</td>
+              <td>80 ns maximum</td>
+              <td>
+                RD falls about 10 ns after S3, so controller data is valid by 90
+                ns. The data strobes do not assert until S5, 149.99 ns later,
+                and the DRAM controller then adds two 20 MHz synchronizer stages
+                before CAS.
+              </td>
+            </tr>
+            <tr>
+              <td>Write-data setup to WR, t19</td>
+              <td>70 ns minimum</td>
+              <td>
+                DRAM read data is on the bus well before S6 and the buffer holds
+                its direction until <code>ACK1_n</code> rises.
+              </td>
+            </tr>
+            <tr>
+              <td>Write-data hold from WR, t20</td>
+              <td>0 ns minimum</td>
+              <td>
+                The strobe ends in S6 while <code>AS_n</code> and the data
+                strobes stay asserted through S7.
+              </td>
+            </tr>
+            <tr>
+              <td>Command-inactive interval, t11 and t18</td>
+              <td>60 ns minimum</td>
+              <td>
+                The MC68450 gives at least one state between the end of one
+                acknowledge and the start of the next. Confirm the measured
+                back-to-back interval on the board.
+              </td>
+            </tr>
+            <tr>
+              <td>Terminal-count width, t28</td>
+              <td>50 ns minimum</td>
+              <td>
+                <code>FDC_TC_n</code> follows <code>DTC_n</code>, three states
+                or 224.98 ns, entirely inside the DACK interval.
+              </td>
+            </tr>
+            <tr>
+              <td>DACK or RD to DRQ inactive, t23 and t24</td>
+              <td>75 ns and 100 ns maximum</td>
+              <td>
+                A channel-1 bus cycle is at least four DMA clocks, 599.94 ns, so
+                the withdrawn request is visible before the next request sample.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          An even memory byte uses <code>UDS_n</code> with the motherboard
+          HIBYTE transceiver, which moves <code>D7..D0</code> to
+          <code>D15..D8</code> and back. An odd memory byte uses
+          <code>LDS_n</code> and leaves HIBYTE inactive. The controller stays on
+          <code>D7..D0</code> in both cases, so this adapter needs no lane logic
+          of its own.
         </p>
 
         <h3>Completion Release</h3>
@@ -1200,8 +1618,12 @@ board allowance              86.8 ns</code></pre>
           <tbody>
             <tr>
               <td><code>D7..D0</code></td>
-              <td>One 82077AA-1 bidirectional pin, 20 pF maximum</td>
-              <td>Include in the assembled processor-bus measurement.</td>
+              <td>One SN74HCT245N B-port pin, 15 pF maximum</td>
+              <td>
+                Revision 2.1 replaces the direct 20 pF controller pin with the
+                buffer port. Include it in the assembled processor-bus
+                measurement.
+              </td>
             </tr>
             <tr>
               <td><code>A3..A1</code></td>
@@ -1225,6 +1647,30 @@ board allowance              86.8 ns</code></pre>
               <td>Drive return signals</td>
               <td>10 kohm pull-up and one controller input per signal</td>
               <td>Verify inactive levels and selected-drive edges at J_FDC.</td>
+            </tr>
+            <tr>
+              <td><code>ACK1_n</code></td>
+              <td>One 82077AA-1 input and one SN74F04N input</td>
+              <td>
+                Count both against the MC68450 acknowledge drive in
+                <a href="dma.html#electrical">DMA Controller</a>.
+              </td>
+            </tr>
+            <tr>
+              <td><code>DTC_n</code> and <code>DONE_n</code></td>
+              <td>Two SN74F10N inputs and one SN74F02N input</td>
+              <td>
+                Add them to the shared completion nets and their pull-up
+                budgets.
+              </td>
+            </tr>
+            <tr>
+              <td><code>REQ1_n</code></td>
+              <td>One MC68450 input, 10 kohm pull-up</td>
+              <td>
+                The SN74F04N sinks the pull-up current; check the low level at
+                the controller pin.
+              </td>
             </tr>
           </tbody>
         </table>
@@ -1273,12 +1719,37 @@ board allowance              86.8 ns</code></pre>
             <tr>
               <td>1</td>
               <td><code>U_FDC_INV</code>, SN74F04N</td>
-              <td>R/W, chip-select, and reset inversion.</td>
+              <td>
+                R/W, chip-select, reset, request, acknowledge, and buffer
+                direction inversion.
+              </td>
             </tr>
             <tr>
               <td>1</td>
               <td><code>U_FDC_CTRL</code>, SN74F00N</td>
-              <td>Host strobes and completion.</td>
+              <td>Programmed-I/O strobe terms and completion.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_DMA</code>, SN74F10N</td>
+              <td>DMA strobe terms and qualified terminal count.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_GATE</code>, SN74F08N</td>
+              <td>Strobe and buffer-direction combining.</td>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td><code>U_FDC_DATA</code>, SN74HCT245N</td>
+              <td>Controller byte buffer.</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>10 kohm, 5%</td>
+              <td>
+                <code>DRQ</code> pull-down and <code>REQ1_n</code> pull-up.
+              </td>
             </tr>
             <tr>
               <td>1</td>
@@ -1356,7 +1827,7 @@ board allowance              86.8 ns</code></pre>
               <td>AVCC supply isolation.</td>
             </tr>
             <tr>
-              <td>13</td>
+              <td>16</td>
               <td>100 nF / 50 V X7R</td>
               <td>IC bypassing and post-fuse rail bypassing.</td>
             </tr>
@@ -1423,6 +1894,17 @@ board allowance              86.8 ns</code></pre>
           <li>
             Measure the routed <code>FDC_DTACK_n</code> release path and keep
             its board contribution below 86.8 ns.
+          </li>
+          <li>
+            Put <code>U_FDC_DATA</code> between the processor bus and U_FDC pins
+            11 through 22. Keep both port routes short so the buffer adds no
+            extra stub to either bus.
+          </li>
+          <li>
+            Group <code>U_FDC_DMA</code>, <code>U_FDC_GATE</code>, and the two
+            10 kohm request resistors beside <code>U_FDC_CTRL</code>. Keep
+            <code>ACK1_n</code>, <code>DTC_n</code>, <code>DONE_n</code>, and
+            <code>REQ1_n</code> away from the drive cable and the crystal.
           </li>
         </ul>
       </section>
@@ -1494,6 +1976,47 @@ board allowance              86.8 ns</code></pre>
               </td>
             </tr>
             <tr>
+              <td>DMA strobes</td>
+              <td>
+                <code>ACK1_n</code> produces the direction-correct RD or WR
+                strobe with the measured setup, width, and DACK hold from the
+                DMA timing table, in both byte lanes.
+              </td>
+            </tr>
+            <tr>
+              <td>Terminal count</td>
+              <td>
+                <code>FDC_TC_n</code> pulses only on channel 1's last successful
+                operand, overlaps DACK, and exceeds 50 ns. Another channel's
+                <code>DONE_n</code> produces no pulse, and a failed cycle
+                produces none either.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA transfers</td>
+              <td>
+                Read, write, and verify of every sector on a 1.44 MB disk
+                complete under channel-1 DMA, at both even and odd buffer start
+                addresses, with the transferred count matching the command.
+              </td>
+            </tr>
+            <tr>
+              <td>Service latency</td>
+              <td>
+                Full-track transfers complete while IDE and both expansion
+                channels run their heaviest traffic, with no overrun or underrun
+                reported in the result bytes.
+              </td>
+            </tr>
+            <tr>
+              <td>Abort recovery</td>
+              <td>
+                Aborting the channel mid-command leaves the controller
+                recoverable by the documented sequence, and the next command
+                succeeds.
+              </td>
+            </tr>
+            <tr>
               <td>Power protection</td>
               <td>
                 Both drives start together without rail collapse. A branch fault
@@ -1518,7 +2041,7 @@ board allowance              86.8 ns</code></pre>
           </thead>
           <tbody>
             <tr>
-              <td><code>FDC_CYCLE</code></td>
+              <td><code>FDC_PIO</code></td>
               <td>U_FDC_REQ</td>
               <td>U_FDC_INV, U_FDC_CTRL, and U_FDC_SEQ clear.</td>
             </tr>
@@ -1530,17 +2053,60 @@ board allowance              86.8 ns</code></pre>
             <tr>
               <td><code>FDC_RW_n</code></td>
               <td>U_FDC_INV</td>
-              <td>U_FDC_CTRL write-strobe gate.</td>
+              <td>U_FDC_CTRL and U_FDC_DMA strobe gates.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_DMA</code></td>
+              <td>U_FDC_INV from <code>ACK1_n</code></td>
+              <td>U_FDC_REQ, U_FDC_CTRL, and U_FDC_DMA.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>N_PIO_RD</code>, <code>N_PIO_WR</code>,
+                <code>N_DMA_RD_RAW</code>
+              </td>
+              <td>U_FDC_CTRL</td>
+              <td>U_FDC_GATE strobe and direction combining.</td>
+            </tr>
+            <tr>
+              <td><code>N_DMA_RD</code>, <code>N_DMA_WR</code></td>
+              <td>U_FDC_DMA</td>
+              <td>U_FDC_GATE strobe combining.</td>
             </tr>
             <tr>
               <td><code>FDC_RD_n</code></td>
-              <td>U_FDC_CTRL</td>
+              <td>U_FDC_GATE</td>
               <td>U_FDC RD.</td>
             </tr>
             <tr>
               <td><code>FDC_WR_n</code></td>
-              <td>U_FDC_CTRL</td>
+              <td>U_FDC_GATE</td>
               <td>U_FDC WR.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_RD_RAW_n</code></td>
+              <td>U_FDC_GATE</td>
+              <td>U_FDC_INV buffer-direction inverter.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_BUF_OE_n</code>, <code>FDC_BUF_DIR</code></td>
+              <td>U_FDC_REQ and U_FDC_INV</td>
+              <td>U_FDC_DATA enable and direction.</td>
+            </tr>
+            <tr>
+              <td><code>REQ1_n</code></td>
+              <td>U_FDC_INV from U_FDC DRQ</td>
+              <td>MC68450 channel-1 request input.</td>
+            </tr>
+            <tr>
+              <td><code>TC_A</code></td>
+              <td>U_FDC_REQ from <code>DONE_n</code> and <code>DTC_n</code></td>
+              <td>U_FDC_DMA terminal-count gate.</td>
+            </tr>
+            <tr>
+              <td><code>FDC_TC_n</code></td>
+              <td>U_FDC_DMA</td>
+              <td>U_FDC TC.</td>
             </tr>
             <tr>
               <td><code>FDC_ACK_READY</code></td>
@@ -1613,6 +2179,9 @@ board allowance              86.8 ns</code></pre>
             <a href="datasheets/sn74f00.pdf"><cite>SN74F00</cite></a
             >, <a href="datasheets/sn74f02.pdf"><cite>SN74F02</cite></a
             >, <a href="datasheets/sn74f04.pdf"><cite>SN74F04</cite></a
+            >, <a href="datasheets/sn74f08.pdf"><cite>SN74F08</cite></a
+            >, <a href="datasheets/sn74f10.pdf"><cite>SN74F10</cite></a
+            >, <a href="datasheets/sn74hct245.pdf"><cite>SN74HCT245</cite></a
             >, and
             <a href="datasheets/cd74hc164.pdf"><cite>CD74HCT164</cite></a>
             data sheets.
@@ -1622,6 +2191,16 @@ board allowance              86.8 ns</code></pre>
             <a href="datasheets/fairchild-fast-1980.pdf"
               ><cite>FAST Data Book</cite></a
             >, 1980. Family-date reference for the selected FAST gates.
+          </li>
+          <li>
+            Motorola,
+            <a
+              href="datasheets/MC68450_Direct_Memory_Access_Controller_DMAC_Jul89.pdf"
+              ><cite>MC68450 Direct Memory Access Controller</cite></a
+            >, section 4.3.2 on pp. 4-12 through 4-16 for the single-address
+            state sequence, and section 5.4.1.1 for the acknowledge-only device
+            protocol. Channel assignment, priority, and the service-latency
+            budget are in <a href="dma.html">DMA Controller</a>.
           </li>
           <li>
             Littelfuse,

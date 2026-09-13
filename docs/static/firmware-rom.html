@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Firmware ROM, Revision 2.1</title>
+    <title>68EC000 Computer - Firmware ROM, Revision 2.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,20 +13,20 @@
         <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.1 follows memory map 2.1. The vector table gains the IDE
-        level-2 autovector, and the BIOS call gate must expose storage services
-        without giving user code direct access to I/O slot 11. Revision 2.0 made
-        the firmware EEPROM and its boot alias supervisor only, so application
-        code reads neither. That revision added section 13, which defines the
-        <code>TRAP</code> entry that application code uses instead, and the
-        argument checks that entry needs now that callers run in a translated
-        address space. The EEPROM wiring, read timing, and completion logic
-        carry over from revision 1.0 unchanged.
+        Revision 2.2 follows memory map 2.2. The vector table gains the DMA
+        level-1 autovector, and the BIOS call gate gains the rules that make it
+        the only writer of MC68450 channel programs: physical-range validation,
+        buffer pinning, per-channel ownership, and error handling that
+        terminates the program that asked for the transfer rather than the one
+        that happens to be running. The IDE sector swap loop goes away with the
+        crossed byte lanes. Revision 2.1 added the IDE level-2 autovector and
+        its storage services. The EEPROM wiring, read timing, and completion
+        logic carry over from revision 1.0 unchanged.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.1 pre-layout design; assembled-board measurements and
+          Revision 2.2 pre-layout design; assembled-board measurements and
           firmware-image checks remain
         </dd>
         <dt>Privilege</dt>
@@ -1736,10 +1736,15 @@ ROM1_LO[i] = F[0x10001 + 2*i]
         <p>
           IDE BIOS services enumerate ATA and ATAPI devices, report media and
           capacity, and transfer blocks through checked caller buffers. The BIOS
-          keeps device selection, task-file commands, PIO word swapping, packet
-          commands, and timeouts inside supervisor code. The
+          keeps device selection, task-file commands, packet commands, and
+          timeouts inside supervisor code. The
           <a href="ide.html#firmware">IDE firmware rules</a> define the host
-          sequence.
+          sequence. The crossed ATA byte lanes put sector byte zero at the lower
+          memory address, so revision 2.2 drops the per-word sector swap and
+          swaps only the IDENTIFY numeric fields it interprets. Floppy services
+          keep the same shape, with the
+          <a href="floppy.html#firmware">floppy firmware contract</a> holding
+          the command sequence.
         </p>
 
         <p>
@@ -1749,6 +1754,121 @@ ROM1_LO[i] = F[0x10001 + 2*i]
           which is a hole the size of memory. Rule two is the one that closes
           it.
         </p>
+
+        <h3>DMA Ownership</h3>
+        <p>
+          The BIOS is the only writer of MC68450 registers. Region-7 protection
+          keeps user code out of the register window, but that protection says
+          nothing about where a channel points: the controller drives supervisor
+          data function codes, so paging leaves its addresses untranslated and
+          every physical byte of DRAM is reachable. A storage service that
+          accepted a caller's address and programmed it into a memory address
+          register would hand that caller the whole of main memory. Hardware
+          bounds the damage to exactly that: the ownership interlocks in
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Bus and Address Decode</a
+          >
+          and <a href="paging.html#table-aperture">Paging</a> keep a DMA cycle
+          out of I/O space, the firmware ROM, and the page table. Inside main
+          memory the checks below are the only thing between a caller and
+          another program's pages.
+        </p>
+        <ul>
+          <li>
+            Translate the caller's buffer as
+            <a href="#bios-call-gate">Argument Checking</a> requires, then keep
+            the resulting physical frame list. The channel is programmed from
+            that list, never from the caller's number.
+          </li>
+          <li>
+            Reject any physical range that leaves DRAM, wraps past
+            <code>$3FFFFF</code>, or reaches below <code>$020000</code> for a
+            user owner. That low region holds the vector table and BIOS private
+            memory. Reject every I/O, ROM, page-table aperture, and VGA target
+            outright.
+          </li>
+          <li>
+            Reject a direction, operand size, alignment, count, or descriptor
+            count that the device contract does not allow. A word channel needs
+            even addresses at both ends.
+          </li>
+          <li>
+            Pin every data frame and descriptor frame for the life of the
+            transfer, and keep the descriptor array in BIOS memory where the
+            caller cannot rewrite it after the check.
+          </li>
+          <li>
+            Record the channel, the owning process, the device operation, and
+            the cleanup action before writing CCR. Nothing else may claim a busy
+            channel.
+          </li>
+          <li>
+            Program <code>MFCR</code> and <code>BFCR</code> to supervisor data,
+            <code>$05</code>, and <code>DFCR</code> to <code>$05</code> when the
+            dual-address endpoint is memory. CPU space, <code>$07</code>, is
+            never used.
+          </li>
+          <li>
+            Write SCR and CCR as separate byte accesses, and leave every DMAC
+            register alone for seven DMA clocks, 1.10 microseconds at the
+            fastest clock, after the START write. The level-1 handler observes
+            the same guard.
+          </li>
+        </ul>
+        <p>
+          A memory copy borrows an expansion channel under that slot's DMA lock,
+          programs it at priority 3, and restores the slot's device
+          configuration before releasing both. Copies run one chunk at a time
+          with maximum-rate auto-request, so GCR keeps its reset value and no
+          channel uses limited-rate auto-request.
+        </p>
+        <p>
+          Copy on the processor whenever the caller waits for the result. A
+          <code>MOVE.L</code> loop moves 4 bytes per 2.0 us against the
+          controller's 2 bytes per 1.5 us, so the channel earns its place only
+          when the processor has other work to do meanwhile. The errata and the
+          arithmetic are in <a href="dma.html#errata">DMA Controller</a>.
+        </p>
+
+        <h3>DMA Errors</h3>
+        <p>
+          A DMA fault does not reach the processor as a bus error. The
+          motherboard gates <code>CPU_BERR_n</code> off during DMA ownership and
+          sends the fault to the MC68450 BEC pins instead. The controller aborts
+          that channel, suppresses <code>DTC_n</code>, and raises its level-1
+          interrupt. The program that owns the transfer is almost never the
+          program that happens to be current when the interrupt arrives, so the
+          handler acts on the recorded owner.
+        </p>
+        <ol>
+          <li>
+            Poll all four channels. Capture CSR and CER for each before clearing
+            anything, because clearing is write-one-to-clear and destroys the
+            cause.
+          </li>
+          <li>
+            Stop the device before releasing anything: end ATA or FDC strobes,
+            confirm the channel shows inactive, and recover the peripheral
+            command. A suppressed <code>DTC_n</code> does not undo a strobe the
+            device already took, so the transfer is indeterminate and has to be
+            repeated rather than resumed.
+          </li>
+          <li>
+            Release the pinned frames and the channel record only after the
+            controller has stopped accessing them.
+          </li>
+          <li>
+            Terminate the recorded owner and report the cause. A failure on a
+            BIOS-owned or kernel-owned transfer is a system fault: write a code
+            to the debug display at <code>$E80003</code> and halt, as for any
+            supervisor-mode bus error.
+          </li>
+          <li>
+            Recheck pending status and repeat until <code>IRQ_n</code> releases.
+            The motherboard autovector terminates the acknowledge; it clears
+            nothing in the controller.
+          </li>
+        </ol>
 
         <h3>Vector Table</h3>
         <p>
@@ -1760,7 +1880,7 @@ ROM1_LO[i] = F[0x10001 + 2*i]
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            BIOS vectors required by revision 2.1
+            BIOS vectors required by revision 2.2
           </caption>
           <thead>
             <tr>
@@ -1786,6 +1906,15 @@ ROM1_LO[i] = F[0x10001 + 2*i]
               <td>
                 Terminate the program. A user-mode
                 <code>MOVE to SR</code> or <code>STOP</code> lands here.
+              </td>
+            </tr>
+            <tr>
+              <td>25, level-1 autovector</td>
+              <td><code>$000064</code></td>
+              <td>
+                Service the MC68450: poll all four channels, capture CSR and
+                CER, recover the device, and terminate the recorded owner on an
+                error.
               </td>
             </tr>
             <tr>
@@ -1839,6 +1968,13 @@ ROM1_LO[i] = F[0x10001 + 2*i]
           means the BIOS itself addressed something that does not answer. Treat
           it as a firmware fault: write a code to the debug display at
           <code>$E80003</code> and halt rather than continue.
+        </p>
+        <p>
+          No vector-2 exception can come from a DMA cycle. The motherboard
+          routes a fault taken during DMA ownership to the MC68450 BEC pins and
+          holds <code>CPU_BERR_n</code> inactive, so the classification above
+          covers processor cycles only. DMA faults arrive at level 1 and follow
+          <a href="#bios-call-gate">DMA Errors</a>.
         </p>
         <p>
           Sources:

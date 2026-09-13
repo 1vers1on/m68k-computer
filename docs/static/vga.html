@@ -748,8 +748,9 @@ VGA_DTACK_n   = NOT (VGA_AS_ACTIVE AND VGA_ACK_READY)</code></pre>
               <td><code>AEN</code></td>
               <td>Ground</td>
               <td>
-                A high level makes the controller ignore I/O cycles. This board
-                has no DMA.
+                A high level makes the controller ignore I/O cycles. The ISA
+                DMA-active meaning does not apply here: the motherboard MC68450
+                has no VGA channel and the BIOS rejects DMA to the aperture.
               </td>
             </tr>
             <tr>

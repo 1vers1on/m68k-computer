@@ -12,7 +12,8 @@ A 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 | Firmware         | 128 KiB, 16-bit-wide, read-only EEPROM storage in four AT28C256-15PU parts                   |
 | Video            | Cirrus Logic CL-GD5428 VGA controller with 2 MiB VRAM and DE-15 output                       |
 | Floppy           | Intel 82077AA-1 controller and two Mitsumi D359M3D 3.5-inch 1.44 MB drives                   |
-| IDE              | Two-device 16-bit parallel ATA interface, PIO mode 0, with ATA and ATAPI support             |
+| IDE              | Two-device 16-bit parallel ATA interface, PIO mode 0 and DMA, with ATA and ATAPI support     |
+| DMA              | MC68450L8 controller with channels for IDE, floppy, and both expansion slots                 |
 | Sound            | Yamaha YMF262 OPL3, two YAC512 DACs, stereo amplifier, volume control, and 3.5 mm output     |
 | Serial and input | MC68901 MFP with RS-232 on a DE-9 DTE connector and a bidirectional PS/2 keyboard port       |
 | MIDI             | MC6850 ACIA at 31.25 kbit/s with isolated MIDI IN, MIDI OUT, and hardware THRU               |
@@ -23,7 +24,7 @@ A 10 MHz, 16-bit computer built around the Motorola MC68EC000FN10.
 
 ## Documentation
 
-Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, IDE and floppy storage, peripherals, video, audio, parallel I/O, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
+Open the [documentation index](docs/static/index.html) in a browser for the complete design set. It covers the address decoder, clock and reset circuits, DRAM controller, firmware ROM, interrupts, the DMA controller, IDE and floppy storage, peripherals, video, audio, parallel I/O, and expansion interface. [docs/README.md](docs/README.md) explains the document set, formatting commands, and license terms.
 
 ## Repository layout
 

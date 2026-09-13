@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Clock and Reset, Revision 2.1</title>
+    <title>68EC000 Computer - Clock and Reset, Revision 2.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -17,23 +17,24 @@
       </p>
 
       <p>
-        Revision 2.1 follows memory map 2.1. The IDE adapter adds two input
-        loads to <code>PERIPH_RESET_n</code> and buffers that reset onto the ATA
-        cable. Revision 2.0 added two loads to <code>RESET_n</code>. Pin 13 of
-        <code>U_OVERLAY</code> is the asynchronous clear of the VGA-grant
-        flip-flop, so a board reset closes the granted display window alongside
-        re-enabling the boot overlay. <code>U_PAGE_MMU</code> takes the second,
-        which clears the context register and the translation enable bit and
-        brings the machine up with the
-        <a href="paging.html">page unit</a> transparent. Both are CMOS and draw
-        10 uA apiece. The clock tree, the reset conditioner, and every timing
-        figure carry over from revision 1.1 unchanged.
+        Revision 2.2 adds the continuously running 6.6667 MHz DMA clock and
+        routes both reset domains to the MC68450 BEC reset encoder. Revision 2.1
+        added two input loads to <code>PERIPH_RESET_n</code> and buffers that
+        reset onto the ATA cable. Revision 2.0 added two loads to
+        <code>RESET_n</code>. Pin 13 of <code>U_OVERLAY</code> is the
+        asynchronous clear of the VGA-grant flip-flop, so a board reset closes
+        the granted display window alongside re-enabling the boot overlay.
+        <code>U_PAGE_MMU</code> takes the second, which clears the context
+        register and the translation enable bit and brings the machine up with
+        the <a href="paging.html">page unit</a> transparent. Both are CMOS and
+        draw 10 uA apiece. The clock tree, the reset conditioner, and every
+        timing figure carry over from revision 1.1 unchanged.
       </p>
 
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.1 pre-layout design; loaded clock waveforms, reset edges,
+          Revision 2.2 pre-layout design; loaded clock waveforms, reset edges,
           and supply-ramp behavior remain to be measured on the assembled board
         </dd>
 
@@ -91,6 +92,7 @@
         <li>
           <a href="#post-layout-verification">Post-Layout Verification</a>
         </li>
+        <li><a href="#dma-clock-reset">DMA Clock and Reset</a></li>
         <li><a href="#sources">Sources</a></li>
       </ol>
     </nav>
@@ -1124,10 +1126,10 @@ U_CPU_CLK second stage (2Q, pin 9)
         <p>
           A second <code>CD74ACT244E</code>, <code>U_IO_CLK_BUF</code>, serves
           the I/O side. It produces <code>PIT_CLK</code> and
-          <code>TIMEOUT_CLK</code> and holds five spare channels for later I/O
-          slots. Every subsystem clock derived from the 10 MHz net leaves a
-          buffer rather than the divider, and <code>CPU_CLK_10</code> drives
-          three inputs and nothing else.
+          <code>TIMEOUT_CLK</code>, supplies <code>DMA_CLK</code>, and holds
+          four spare channels for later I/O slots. Every subsystem clock derived
+          from the 10 MHz net leaves a buffer rather than the divider, and
+          <code>CPU_CLK_10</code> drives three inputs and nothing else.
         </p>
 
         <h3>MASTER_CLK_40 Loading</h3>
@@ -1399,8 +1401,14 @@ C_trace + C_pads + C_socket + C_adapter + C_probe &lt;= 10 pF</code></pre>
               <td><code>U_TIMEOUT</code> pin 10</td>
             </tr>
             <tr>
-              <td>8, 11, 13, 15, 17</td>
-              <td>12, 9, 7, 5, 3</td>
+              <td>8</td>
+              <td>12</td>
+              <td><code>DMA_CLK</code></td>
+              <td>MC68450 pin 19</td>
+            </tr>
+            <tr>
+              <td>11, 13, 15, 17</td>
+              <td>9, 7, 5, 3</td>
               <td>Spare</td>
               <td>
                 Inputs tied to ground and outputs left open. Any future I/O
@@ -4820,8 +4828,29 @@ t(0.8 V to 2.0 V) = Rmax * Ctotal * ln((Vfinal - 0.8) / (Vfinal - 2.0))</code></
         </p>
       </section>
 
+      <section id="dma-clock-reset">
+        <h2>15. DMA Clock and Reset</h2>
+        <p>
+          Two SN74F74N packages and one SN74F02N form a self-recovering mod-3
+          counter followed by a toggle stage. The state equations, exact pins,
+          5.3 ns feedback margin, 67.8 ns conservative short phase, and
+          MASTER_CLK_40 loading are in
+          <a href="dma.html#clock">DMA Controller</a>. The divider has no reset
+          input and is never gated.
+        </p>
+        <p>
+          <code>DMA_RESET_n = RESET_n AND PERIPH_RESET_n</code>. The DMA BEC
+          encoder drives code 000 whenever either reset source is active. The
+          running clock lets the MC68450 debounce reset while the CPU owns the
+          bus. Power-on reset exceeds 100 ms and warm peripheral reset exceeds
+          ten DMA clocks. The CPU clock remains an overclock assumption at the
+          oscillator's positive tolerance; it is not a guaranteed 10 MHz
+          maximum.
+        </p>
+      </section>
+
       <section id="sources">
-        <h2>15. Sources</h2>
+        <h2>16. Sources</h2>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>

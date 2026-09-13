@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Expansion Slots, Revision 2.1</title>
+    <title>68EC000 Computer - Expansion Slots, Revision 2.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,22 +14,25 @@
         requirements. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 2.1 follows memory map 2.1. <code>U_EXP_RW_BUF</code> removes
-        four direct loads from processor <code>R_W</code> to make room for the
-        IDE interface. Two buffer channels create <code>EXP1_RW</code> and
-        <code>EXP2_RW</code>. Each branch drives one slot's control buffer and
-        two data-transceiver DIR inputs. Each slot's I/O window sits in the
-        protected I/O region and answers supervisor cycles only, while its 2 MiB
-        memory window stays open to user-mode code and is not paged. Card
-        drivers therefore run as BIOS code or as supervisor-mode extensions. No
-        connector contact, signal, window, or electrical rule changes, but the
-        unimplemented regions that a future third and fourth window might have
-        used are now the page-table aperture.
+        Revision 2.2 gives each slot five new contacts so a card can request
+        motherboard DMA service on MC68450 channel 2 or channel 3. Cards still
+        cannot arbitrate for the bus or drive the address lines. The five
+        contacts come from former ground positions in rows a and c, so this is a
+        connector revision and a revision 2.1 card is compatible only if it left
+        those positions unconnected. Revision 2.1 added
+        <code>U_EXP_RW_BUF</code>, which removes four direct loads from
+        processor <code>R_W</code>; two buffer channels create
+        <code>EXP1_RW</code> and <code>EXP2_RW</code>, and each branch drives
+        one slot's control buffer and two data-transceiver DIR inputs. Each
+        slot's I/O window sits in the protected I/O region and answers
+        supervisor cycles only, while its 2 MiB memory window stays open to
+        user-mode code and is not paged. Card drivers therefore run as BIOS code
+        or as supervisor-mode extensions.
       </p>
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.1 pre-layout design; board layout and assembled-system
+          Revision 2.2 pre-layout design; board layout and assembled-system
           checks remain
         </dd>
         <dt>Privilege</dt>
@@ -43,7 +46,11 @@
         <dt>Power</dt>
         <dd>+5 V at 1.0 A and +12 V at 0.4 A maximum per slot</dd>
         <dt>Bus mastering</dt>
-        <dd>Not supported</dd>
+        <dd>Card bus mastering not supported</dd>
+        <dt>DMA</dt>
+        <dd>
+          Motherboard MC68450 service: slot 1 on channel 2, slot 2 on channel 3
+        </dd>
       </dl>
     </header>
     <nav aria-label="On this page">
@@ -57,6 +64,7 @@
         <li><a href="#buffers">Address and Control Buffers</a></li>
         <li><a href="#data">Data Bus</a></li>
         <li><a href="#completion">Cycle Completion</a></li>
+        <li><a href="#dma">DMA Service</a></li>
         <li><a href="#interrupts">Interrupts</a></li>
         <li><a href="#clock-reset">Clock and Reset</a></li>
         <li><a href="#power">Power Distribution</a></li>
@@ -89,8 +97,11 @@
         <p>
           The motherboard buffers every outgoing signal and gives each slot its
           own data transceivers. Cards cannot request the bus, become bus
-          master, or perform DMA. An empty or nonresponding slot produces a bus
-          error through the existing 51.1 microsecond minimum timeout.
+          master, or drive the address and function-code lines. A card can ask
+          the motherboard MC68450 to move bytes between the card and physical
+          DRAM; <a href="#dma">section 10</a> gives that contract. An empty or
+          nonresponding slot produces a bus error through the existing 51.1
+          microsecond minimum timeout.
         </p>
       </section>
       <section id="addresses">
@@ -146,10 +157,13 @@
           >.
         </p>
         <p>
-          A card cannot bypass the protection, because the slots have no bus
-          mastering. A card that could drive the address bus would see no
-          <code>FC2</code> test at all, which is one more reason the interface
-          leaves <code>/BR</code> and <code>/BGACK</code> off the connector.
+          A card cannot bypass the protection, because no card drives the
+          address bus. A card that could would see no <code>FC2</code> test at
+          all, which is one more reason the interface leaves
+          <code>/BR</code> and <code>/BGACK</code> off the connector.
+          Motherboard DMA service does not weaken this: the MC68450 drives the
+          address itself, under a channel program that only the BIOS writes, and
+          the BIOS validates every physical range before it starts.
         </p>
         <p>
           <code>EXP_MEM5_n</code> and <code>EXP_MEM6_n</code> no longer select
@@ -235,7 +249,13 @@ J_EXP2 CARD_DTACK_n --+
 
 J_EXP1 EXP_IRQ_n -----+
                        +-- wired-OR --&gt; level-3 interrupt
-J_EXP2 EXP_IRQ_n -----+</code></pre>
+J_EXP2 EXP_IRQ_n -----+
+
+J_EXP1 CARD_DMA_REQ_n / READY_n --&gt; MC68450 REQ2 / PCL2
+J_EXP2 CARD_DMA_REQ_n / READY_n --&gt; MC68450 REQ3 / PCL3
+ACK2_n, ACK3_n --&gt; spare HCT244 channel --&gt; CARD_DMA_ACK_n
+ACKx_n + DTC_n / DONE_n --&gt; U_EXP_DMA_OR --&gt; per-slot DTC / DONE
+ACKx_n + DTACK_n + CARD_DMA_READY_n --&gt; F00, F08 --&gt; PCL2 / PCL3</code></pre>
         <p>
           Separate drivers remove one card's connector and trace capacitance
           from the other card's signal path. The processor-side ports of the
@@ -305,6 +325,28 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
               <td><code>EXP_IRQ_n</code></td>
               <td>Open-collector output</td>
               <td>Shared level-sensitive interrupt request.</td>
+            </tr>
+            <tr>
+              <td>
+                <code>CARD_DMA_REQ_n</code>, <code>CARD_DMA_READY_n</code>
+              </td>
+              <td>Open-collector output</td>
+              <td>
+                Per-slot DMA request and ready. See
+                <a href="#dma">section 10</a>.
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <code>CARD_DMA_ACK_n</code>, <code>CARD_DMA_DTC_n</code>,
+                <code>CARD_DMA_DONE_n</code>
+              </td>
+              <td>Input</td>
+              <td>
+                Per-slot acknowledge, successful-transfer, and end-of-block
+                signals. <code>R_W</code> describes memory while the acknowledge
+                is low.
+              </td>
             </tr>
           </tbody>
         </table>
@@ -489,7 +531,7 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
               <th scope="row">26</th>
               <td><code>EXP_IRQ_n</code></td>
               <td>GND</td>
-              <td>GND</td>
+              <td><code>CARD_DMA_REQ_n</code></td>
             </tr>
             <tr>
               <th scope="row">27</th>
@@ -505,9 +547,9 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
             </tr>
             <tr>
               <th scope="row">29</th>
+              <td><code>CARD_DMA_ACK_n</code></td>
               <td>GND</td>
-              <td>GND</td>
-              <td>GND</td>
+              <td><code>CARD_DMA_READY_n</code></td>
             </tr>
             <tr>
               <th scope="row">30</th>
@@ -523,16 +565,19 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
             </tr>
             <tr>
               <th scope="row">32</th>
+              <td><code>CARD_DMA_DTC_n</code></td>
               <td>GND</td>
-              <td>GND</td>
-              <td>GND</td>
+              <td><code>CARD_DMA_DONE_n</code></td>
             </tr>
           </tbody>
         </table>
         <p>
           Row b is ground at every position. Six contacts carry +5 V, four carry
-          +12 V, and 37 carry ground. Parallel every contact assigned to the
-          same rail on both boards.
+          +12 V, and 32 carry ground. Revision 2.2 took the five remaining
+          ground contacts, a29, a32, c26, c29, and c32, for the DMA handshake in
+          <a href="#dma">section 10</a>, so row b is now the only return path.
+          Parallel every contact assigned to the same rail on both boards and
+          tie every row-b contact to the ground plane.
         </p>
       </section>
       <section id="buffers">
@@ -574,7 +619,10 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
             <tr>
               <td>Address high</td>
               <td>8</td>
-              <td>Ground input; leave output open</td>
+              <td>
+                <code>ACK2_n</code> or <code>ACK3_n</code>, producing
+                <code>CARD_DMA_ACK_n</code>
+              </td>
             </tr>
             <tr>
               <td>Control</td>
@@ -589,7 +637,8 @@ J_EXP2 EXP_IRQ_n -----+</code></pre>
         </table>
         <p>
           Put a 33 ohm series resistor between every HCT244 output and its
-          connector contact. These 31 resistors per slot provide source damping
+          connector contact, and between each <code>U_EXP_DMA_OR</code> output
+          and its contact. These 34 resistors per slot provide source damping
           and limit current during accidental contention.
         </p>
       </section>
@@ -690,8 +739,343 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
           <code>SN74LS07N</code> channel meets this rule.
         </p>
       </section>
+      <section id="dma">
+        <h2>10. DMA Service</h2>
+        <p>
+          A card cannot arbitrate for the bus, drive the address or
+          function-code lines, or become a master. Revision 2.2 gives it a
+          different thing: it can ask the motherboard MC68450 to move a byte
+          between the card and physical DRAM. Slot 1 uses channel 2 and slot 2
+          uses channel 3. The controller drives the address, the strobes, and
+          the acknowledge; the card only raises a request and accepts or
+          supplies one byte per acknowledge.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Per-slot DMA contacts added in revision 2.2
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Contact</th>
+              <th scope="col">Signal</th>
+              <th scope="col">Direction at card</th>
+              <th scope="col">Rule</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>c26</td>
+              <td><code>CARD_DMA_REQ_n</code></td>
+              <td>Open-collector output</td>
+              <td>
+                Pull low to request one transfer and hold it low until
+                <code>CARD_DMA_ACK_n</code> asserts. A 2.2 kohm motherboard
+                pull-up holds it inactive. Sink at least 4 mA at 0.4 V.
+              </td>
+            </tr>
+            <tr>
+              <td>a29</td>
+              <td><code>CARD_DMA_ACK_n</code></td>
+              <td>Input</td>
+              <td>
+                Active-low acknowledge from the channel assigned to this slot.
+                It selects the card's DMA port; no address is valid during it.
+              </td>
+            </tr>
+            <tr>
+              <td>c29</td>
+              <td><code>CARD_DMA_READY_n</code></td>
+              <td>Open-collector output</td>
+              <td>
+                Pull low when the card has data on the bus, or can accept it. A
+                2.2 kohm motherboard pull-up holds it inactive.
+              </td>
+            </tr>
+            <tr>
+              <td>a32</td>
+              <td><code>CARD_DMA_DTC_n</code></td>
+              <td>Input</td>
+              <td>
+                Active-low pulse marking a successful transfer. This, not the
+                acknowledge, is what advances a card FIFO or pointer.
+              </td>
+            </tr>
+            <tr>
+              <td>c32</td>
+              <td><code>CARD_DMA_DONE_n</code></td>
+              <td>Input</td>
+              <td>
+                Active-low during the last transfer of the current descriptor.
+                Combined with <code>CARD_DMA_DTC_n</code> it marks the end of a
+                block.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <pre><code>CARD_DMA_REQ_n   -&gt; MC68450 REQ2 or REQ3
+CARD_DMA_READY_n -&gt; MC68450 PCL2 or PCL3
+CARD_DMA_ACK_n   = ACK2_n or ACK3_n
+CARD_DMA_DTC_n   = ACKx_n OR DTC_n
+CARD_DMA_DONE_n  = ACKx_n OR DONE_n</code></pre>
+        <p>
+          Qualifying the two motherboard outputs with the slot's own acknowledge
+          keeps another channel's completion off this connector. The shared
+          open-drain <code>DONE_n</code> net and the three-stated
+          <code>DTC_n</code> net never reach a card directly.
+        </p>
+
+        <h3>Transfer Contract</h3>
+        <p>
+          Each transfer moves one byte on <code>D7..D0</code>. An even memory
+          address asserts <code>UDS_n</code> and the motherboard HIBYTE
+          transceiver bridges the lanes; an odd address asserts
+          <code>LDS_n</code>. The card stays on the lower lane in both cases and
+          shall not decode the strobes to choose a lane of its own. A 16-bit
+          card must still present its DMA port as eight bits, because
+          single-address operand size has to equal the device port size.
+        </p>
+        <p>
+          During the acknowledge, <code>R_W</code> describes memory rather than
+          the card. <code>R_W</code> low means the controller is writing memory,
+          so the card drives <code>D7..D0</code>. <code>R_W</code> high means
+          the controller is reading memory, so the card accepts
+          <code>D7..D0</code>. This inverts the reading a card uses for its
+          ordinary selected cycles, and a card that reuses one direction term
+          for both will drive against the bus.
+        </p>
+        <ol>
+          <li>
+            The card pulls <code>CARD_DMA_REQ_n</code> low and holds it until
+            the acknowledge asserts. Releasing early can lose the transfer.
+          </li>
+          <li>
+            The motherboard asserts <code>CARD_DMA_ACK_n</code>. The card then
+            drives or prepares to accept one byte.
+          </li>
+          <li>
+            The card pulls <code>CARD_DMA_READY_n</code> low within 32
+            microseconds of the acknowledge. On a card-to-memory transfer it
+            shall not assert ready before its data is valid on the bus. The
+            motherboard bus timeout remains the outer limit, and a card that
+            never answers takes a bus error.
+          </li>
+          <li>
+            <code>CARD_DMA_DTC_n</code> pulses once the cycle has completed
+            successfully. The card advances its FIFO or pointer on this pulse
+            only. An acknowledge without a following
+            <code>CARD_DMA_DTC_n</code> means the cycle faulted and the byte did
+            not move.
+          </li>
+          <li>
+            <code>CARD_DMA_DONE_n</code> accompanies the last transfer of the
+            descriptor. A card that needs an end-of-block signal shall qualify
+            it with <code>CARD_DMA_DTC_n</code>.
+          </li>
+          <li>
+            The card releases <code>CARD_DMA_READY_n</code> after the
+            acknowledge negates, and may raise a new request.
+          </li>
+        </ol>
+        <p>
+          Channels 2 and 3 use the acknowledge-and-ready protocol, so the
+          MC68450 also samples the ready input during its descriptor fetches,
+          when no acknowledge is asserted. Motherboard logic supplies that ready
+          from <code>DTACK_n</code> whenever the slot's acknowledge is inactive,
+          exactly as manual Figure 4-12 requires. A card sees nothing of those
+          cycles and shall not drive the bus while its acknowledge is high.
+        </p>
+
+        <h3>Limits</h3>
+        <p>
+          Both expansion channels share one priority level below the floppy, so
+          the controller alternates between them in round robin. The floppy
+          keeps the highest priority because its FIFO has a hard service
+          deadline. An expansion card therefore cannot assume a bounded
+          request-to-acknowledge interval better than the budget in
+          <a href="dma.html#timing">DMA Controller</a>, and the 32 microsecond
+          ready limit above is what keeps one card out of another device's
+          deadline.
+        </p>
+        <p>
+          The BIOS owns every channel program. A card driver asks for a transfer
+          through a BIOS call gate, which validates the physical range,
+          direction, and count, pins the buffer, and records the owning process.
+          A card cannot reach a page-table entry, an I/O register, or another
+          process's memory: the controller drives supervisor data function codes
+          at addresses the BIOS has already checked, and three hardware
+          interlocks stop a DMA cycle leaving main memory even when that check
+          is wrong.
+        </p>
+        <p>
+          The BIOS may also borrow either channel for a memory copy, which
+          reprograms it for dual-address transfers between two DRAM ranges. A
+          slot's channel is available for that only while the slot's driver
+          holds no claim on it, so the driver takes the slot's DMA lock whenever
+          the card may raise a request and releases it when the card is
+          quiescent. A card that requests service on a borrowed channel gets
+          nothing back and no error, and would starve its own FIFO. The lock is
+          part of the driver contract.
+        </p>
+        <p>
+          The five contacts come from the ground positions in rows a and c, so a
+          revision 2.2 motherboard leaves 32 ground contacts, all in row b,
+          instead of 37. Every card and the motherboard shall tie each row-b
+          contact to its ground plane with a short via so the power contacts at
+          positions 27 through 31 keep a low-impedance return.
+        </p>
+        <p>
+          A revision 2.1 card still works in a revision 2.2 slot only if it
+          leaves those five contacts unconnected. A card that bonded them to its
+          ground plane will short two motherboard outputs and load two pull-ups,
+          so check the card's connector assignment before fitting it.
+        </p>
+
+        <h3>Motherboard Glue</h3>
+        <p>
+          <code>U_EXP_DMA_OR</code>, an <code>SN74F32N</code>, qualifies both
+          broadcast completion signals with each slot's own acknowledge. All
+          four gates are used.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_EXP_DMA_OR SN74F32N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Gate</th>
+              <th scope="col">Inputs</th>
+              <th scope="col">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1: pins 1, 2 to 3</td>
+              <td><code>ACK2_n</code>, <code>DTC_n</code></td>
+              <td>Slot 1 <code>CARD_DMA_DTC_n</code></td>
+            </tr>
+            <tr>
+              <td>2: pins 4, 5 to 6</td>
+              <td><code>ACK2_n</code>, <code>DONE_n</code></td>
+              <td>Slot 1 <code>CARD_DMA_DONE_n</code></td>
+            </tr>
+            <tr>
+              <td>3: pins 9, 10 to 8</td>
+              <td><code>ACK3_n</code>, <code>DTC_n</code></td>
+              <td>Slot 2 <code>CARD_DMA_DTC_n</code></td>
+            </tr>
+            <tr>
+              <td>4: pins 12, 13 to 11</td>
+              <td><code>ACK3_n</code>, <code>DONE_n</code></td>
+              <td>Slot 2 <code>CARD_DMA_DONE_n</code></td>
+            </tr>
+            <tr>
+              <td>Power</td>
+              <td>Pin 14 to +5 V</td>
+              <td>Pin 7 to ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The acknowledge itself reaches the connector through the spare eighth
+          channel of each slot's address-high HCT244, which revision 2.1 left
+          grounded. Every outgoing card signal therefore still comes from a
+          buffer rather than from a shared motherboard net, and each of the
+          three new outputs takes a 33 ohm series resistor like the rest.
+        </p>
+        <p>
+          <code>CARD_DMA_REQ_n</code> runs from the connector straight to the
+          MC68450 <code>REQ2</code> or <code>REQ3</code> pin, with a 2.2 kohm
+          motherboard pull-up at the controller end.
+          <code>CARD_DMA_READY_n</code> reaches <code>PCL2</code> or
+          <code>PCL3</code> through the ready circuit below, and carries the
+          same pull-up at the connector. Both values come from the release-time
+          and sink-current work in
+          <a href="dma.html#electrical">DMA Controller</a>; cards fit no pull-up
+          of their own.
+        </p>
+        <p>
+          Channels 2 and 3 use array chaining, and manual Figure 4-12 requires
+          the ready input to be asserted during the controller's own chain-table
+          accesses, when no acknowledge is active. Two gate packages build the
+          circuit that figure specifies.
+        </p>
+        <pre><code>DTACK_ACT     = NOT DTACK_n
+EXPx_PCL_TERM = NOT (ACKx_n AND DTACK_ACT)
+PCLx_n        = EXPx_CARD_READY_n AND EXPx_PCL_TERM</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_EXP_DMA_NAND SN74F00N and U_EXP_DMA_AND SN74F08N connections
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Gate</th>
+              <th scope="col">Inputs</th>
+              <th scope="col">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NAND 1: pins 1, 2 to 3</td>
+              <td>Both to <code>DTACK_n</code></td>
+              <td><code>DTACK_ACT</code></td>
+            </tr>
+            <tr>
+              <td>NAND 2: pins 4, 5 to 6</td>
+              <td><code>ACK2_n</code>, <code>DTACK_ACT</code></td>
+              <td><code>EXP1_PCL_TERM</code></td>
+            </tr>
+            <tr>
+              <td>NAND 3: pins 9, 10 to 8</td>
+              <td><code>ACK3_n</code>, <code>DTACK_ACT</code></td>
+              <td><code>EXP2_PCL_TERM</code></td>
+            </tr>
+            <tr>
+              <td>NAND 4: pins 12, 13 to 11</td>
+              <td>Ground both</td>
+              <td>Open</td>
+            </tr>
+            <tr>
+              <td>AND 1: pins 1, 2 to 3</td>
+              <td>
+                <code>EXP1_CARD_READY_n</code>, <code>EXP1_PCL_TERM</code>
+              </td>
+              <td><code>PCL2_n</code></td>
+            </tr>
+            <tr>
+              <td>AND 2: pins 4, 5 to 6</td>
+              <td>
+                <code>EXP2_CARD_READY_n</code>, <code>EXP2_PCL_TERM</code>
+              </td>
+              <td><code>PCL3_n</code></td>
+            </tr>
+            <tr>
+              <td>AND 3 and 4</td>
+              <td>Ground pins 9, 10, 12, and 13</td>
+              <td>Pins 8 and 11 open</td>
+            </tr>
+            <tr>
+              <td>Power</td>
+              <td>Pin 14 of each to +5 V</td>
+              <td>Pin 7 of each to ground</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          While the slot's acknowledge is low, <code>PCL</code> follows the card
+          alone. While it is high, <code>PCL</code> follows motherboard
+          <code>DTACK_n</code>, which covers the chain-table fetches. The manual
+          notes that the same circuit asserts ready during cycles the channel is
+          not running and that the controller ignores its ready input then;
+          processor cycles reach the gate and do the same. That sets the PCL
+          transition bit in CSR, which firmware ignores on a channel programmed
+          for ready and clears with the rest of the register. The IDE channel
+          gates its equivalent path with <code>BGACK_n</code> because a spare
+          gate was free there. The slots use Motorola's plain circuit instead of
+          spending another package on a status bit nobody reads.
+        </p>
+      </section>
       <section id="interrupts">
-        <h2>10. Interrupts</h2>
+        <h2>11. Interrupts</h2>
         <p>
           Both connectors share <code>EXP_IRQ_n</code>. The existing 4.7 kohm
           motherboard pull-up holds it high; either card can pull it low. It
@@ -707,7 +1091,7 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
         </p>
       </section>
       <section id="clock-reset">
-        <h2>11. Clock and Reset</h2>
+        <h2>12. Clock and Reset</h2>
         <p>
           Gate 1 of <code>U_EXP_CLK_PHASE</code>, an <code>SN74F04N</code>,
           reads the complementary 10 MHz divider output at
@@ -730,7 +1114,7 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
         </p>
       </section>
       <section id="power">
-        <h2>12. Power Distribution</h2>
+        <h2>13. Power Distribution</h2>
         <p>
           Each slot has separate protection. An <code>RXEF250</code> radial
           resettable fuse feeds +5 V, and an <code>RXEF110</code> feeds +12 V.
@@ -779,7 +1163,7 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
         </p>
       </section>
       <section id="card-rules">
-        <h2>13. Card Requirements</h2>
+        <h2>14. Card Requirements</h2>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Mandatory card-interface limits
@@ -842,6 +1226,30 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
               </td>
             </tr>
             <tr>
+              <td>DMA handshake</td>
+              <td>
+                Open collector on request and ready, no card pull-up, sink at
+                least 4 mA at 0.4 V, no more than 50 pF. No more than two
+                HCT-equivalent inputs on each acknowledge, DTC, and DONE
+                contact.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA port</td>
+              <td>
+                Eight bits on <code>D7..D0</code>. Reverse the
+                <code>R_W</code> interpretation while the acknowledge is low,
+                and advance the port only on <code>CARD_DMA_DTC_n</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Unused DMA contacts</td>
+              <td>
+                A card that does not use DMA leaves a29, a32, c26, c29, and c32
+                unconnected. It shall not tie them to ground.
+              </td>
+            </tr>
+            <tr>
               <td>External power</td>
               <td>
                 Do not back-power either card rail from a front-panel connector.
@@ -862,7 +1270,7 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
         </p>
       </section>
       <section id="software">
-        <h2>14. Software Contract</h2>
+        <h2>15. Software Contract</h2>
         <p>
           The bus has no enumeration register. System configuration identifies
           the card and driver in each physical slot. Probing an empty slot
@@ -909,7 +1317,7 @@ EXPx_RW = 0: CPU B port  --&gt; card A port</code></pre>
         </p>
       </section>
       <section id="example">
-        <h2>15. Example 8-Bit Register Card</h2>
+        <h2>16. Example 8-Bit Register Card</h2>
         <p>
           This lower-byte read/write latch tests either slot. It responds
           throughout the slot's I/O window, so its canonical register is
@@ -1085,7 +1493,7 @@ CARD_DTACK_n = open-collector copy of stage 3 /Q</code></pre>
         </p>
       </section>
       <section id="packages">
-        <h2>16. Motherboard Package and Pin Map</h2>
+        <h2>17. Motherboard Package and Pin Map</h2>
         <p>
           References ending in 1 belong to slot 1; references ending in 2 belong
           to slot 2. The mappings are otherwise identical.
@@ -1273,7 +1681,7 @@ CARD_DTACK_n = open-collector copy of stage 3 /Q</code></pre>
         </p>
       </section>
       <section id="timing">
-        <h2>17. Timing and Electrical Checks</h2>
+        <h2>18. Timing and Electrical Checks</h2>
         <h3>Outgoing and data paths</h3>
         <p>
           At 4.5 V and 50 pF, the SN74HCT244 has 42 ns maximum propagation delay
@@ -1330,7 +1738,7 @@ board allowance                     28.8 ns</code></pre>
         </p>
       </section>
       <section id="parts">
-        <h2>18. Parts Added</h2>
+        <h2>19. Parts Added</h2>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Motherboard expansion-interface parts
@@ -1369,6 +1777,21 @@ board allowance                     28.8 ns</code></pre>
               <td>Expansion-clock root</td>
             </tr>
             <tr>
+              <td>1</td>
+              <td>SN74F32N</td>
+              <td>Per-slot DMA completion qualification</td>
+            </tr>
+            <tr>
+              <td>1 each</td>
+              <td>SN74F00N and SN74F08N</td>
+              <td>Per-slot DMA ready selection</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>2.2 kohm, 5 percent, 0.125 W</td>
+              <td>DMA request and ready pull-ups</td>
+            </tr>
+            <tr>
               <td>2</td>
               <td>HARTING 09 03 296 2824</td>
               <td>DIN receptacles</td>
@@ -1379,7 +1802,7 @@ board allowance                     28.8 ns</code></pre>
               <td>Slot rail protection</td>
             </tr>
             <tr>
-              <td>62</td>
+              <td>68</td>
               <td>33 ohm, 5 percent</td>
               <td>Series damping</td>
             </tr>
@@ -1389,7 +1812,7 @@ board allowance                     28.8 ns</code></pre>
               <td>Completion pull-ups</td>
             </tr>
             <tr>
-              <td>15 each</td>
+              <td>18 each</td>
               <td>100 nF and 1 uF ceramic</td>
               <td>Logic decoupling</td>
             </tr>
@@ -1414,7 +1837,7 @@ board allowance                     28.8 ns</code></pre>
         </p>
       </section>
       <section id="layout">
-        <h2>19. Board Layout</h2>
+        <h2>20. Board Layout</h2>
         <ul>
           <li>
             Place each slot's buffers behind its connector and every 33 ohm
@@ -1435,7 +1858,7 @@ board allowance                     28.8 ns</code></pre>
         </ul>
       </section>
       <section id="acceptance">
-        <h2>20. Assembled-System Acceptance</h2>
+        <h2>21. Assembled-System Acceptance</h2>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Expansion-interface acceptance checks
@@ -1509,11 +1932,52 @@ board allowance                     28.8 ns</code></pre>
                 interrupt in the other.
               </td>
             </tr>
+            <tr>
+              <td>DMA handshake</td>
+              <td>
+                A test card's request reaches the assigned channel, the
+                acknowledge appears only at that slot, and the qualified DTC and
+                DONE pulses appear only during that slot's acknowledge.
+              </td>
+            </tr>
+            <tr>
+              <td>Descriptor ready</td>
+              <td>
+                With the acknowledge inactive, <code>PCL2</code> and
+                <code>PCL3</code> follow motherboard <code>DTACK_n</code>, and a
+                chained transfer completes its chain-table fetches without
+                stalling.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA data</td>
+              <td>
+                Both directions move the expected bytes at even and odd memory
+                addresses, and the card drives nothing while its acknowledge is
+                high.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA fault</td>
+              <td>
+                An injected bus error suppresses <code>CARD_DMA_DTC_n</code>,
+                the card's pointer does not advance, and the BIOS terminates the
+                recorded owner.
+              </td>
+            </tr>
+            <tr>
+              <td>Contact migration</td>
+              <td>
+                A revision 2.1 card with the five former ground contacts
+                unconnected runs without change; a card that grounds them is
+                detected before power-on.
+              </td>
+            </tr>
           </tbody>
         </table>
       </section>
       <section id="signal-reference">
-        <h2>21. Internal Signal Reference</h2>
+        <h2>22. Internal Signal Reference</h2>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
             Expansion-interface internal signals
@@ -1566,11 +2030,46 @@ board allowance                     28.8 ns</code></pre>
               <td>Both cards and 4.7 kohm pull-up</td>
               <td>Level-3 encoder input</td>
             </tr>
+            <tr>
+              <td><code>CARD_DMA_REQ_n</code></td>
+              <td>One card and 2.2 kohm pull-up</td>
+              <td>MC68450 <code>REQ2</code> or <code>REQ3</code></td>
+            </tr>
+            <tr>
+              <td>
+                <code>EXP1_CARD_READY_n</code>, <code>EXP2_CARD_READY_n</code>
+              </td>
+              <td>One card and 2.2 kohm pull-up</td>
+              <td>U_EXP_DMA_AND ready gate</td>
+            </tr>
+            <tr>
+              <td>
+                <code>DTACK_ACT</code>, <code>EXP1_PCL_TERM</code>,
+                <code>EXP2_PCL_TERM</code>
+              </td>
+              <td>U_EXP_DMA_NAND F00</td>
+              <td>U_EXP_DMA_AND ready gates</td>
+            </tr>
+            <tr>
+              <td><code>PCL2_n</code>, <code>PCL3_n</code></td>
+              <td>U_EXP_DMA_AND F08</td>
+              <td>MC68450 <code>PCL2</code> and <code>PCL3</code></td>
+            </tr>
+            <tr>
+              <td><code>CARD_DMA_ACK_n</code></td>
+              <td>Address-high HCT244 channel 8</td>
+              <td>One connector and its card</td>
+            </tr>
+            <tr>
+              <td><code>CARD_DMA_DTC_n</code>, <code>CARD_DMA_DONE_n</code></td>
+              <td>U_EXP_DMA_OR F32</td>
+              <td>One connector and its card</td>
+            </tr>
           </tbody>
         </table>
       </section>
       <section id="sources">
-        <h2>22. Sources</h2>
+        <h2>23. Sources</h2>
         <ul>
           <li>
             Motorola,
@@ -1588,8 +2087,20 @@ board allowance                     28.8 ns</code></pre>
             Texas Instruments,
             <a href="datasheets/sn74f08.pdf"><cite>SN74F08</cite></a
             >, <a href="datasheets/sn74f04.pdf"><cite>SN74F04</cite></a
+            >, <a href="datasheets/sn74f32.pdf"><cite>SN74F32</cite></a
             >, and <a href="datasheets/sn74ls07.pdf"><cite>SN74LS07</cite></a
             >, glue and open-collector timing.
+          </li>
+          <li>
+            Motorola,
+            <a
+              href="datasheets/MC68450_Direct_Memory_Access_Controller_DMAC_Jul89.pdf"
+              ><cite>MC68450 Direct Memory Access Controller</cite></a
+            >, section 4.3.2 for single-address transfers, section 5.4.1.1 for
+            the acknowledge-and-ready device protocol, and Figure 4-12 on pp.
+            4-17 and 4-18 for the ready requirement during chain-table accesses.
+            Channel assignment and the latency budget are in
+            <a href="dma.html">DMA Controller</a>.
           </li>
           <li>
             Texas Instruments,

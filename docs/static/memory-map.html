@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Memory Map, Revision 2.1</title>
+    <title>68EC000 Computer - Memory Map, Revision 2.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -14,14 +14,16 @@
         and firmware. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        The revision 2.1 address specification is frozen. This document may be
+        The revision 2.2 address specification is frozen. This document may be
         corrected or expanded without a new revision. Any change to an address
         range, slot assignment, register address, or privilege attribute
         requires a new memory map revision.
       </p>
       <p>
-        Revision 2.1 extends revision 2.0 by assigning I/O slot 11 to the IDE
-        interface and processor interrupt level 2 to its interrupt request.
+        Revision 2.2 assigns I/O slot 12 to the MC68450 DMA controller, assigns
+        processor interrupt level 1 to DMA, and moves IDE byte registers to the
+        even upper byte after the IDE lane crossing. Revision 2.1 assigned I/O
+        slot 11 to IDE and processor interrupt level 2 to its interrupt request.
         Revision 2.0 firmware remains compatible but cannot use IDE until it
         installs the new register and interrupt support. Revision 2.0 introduced
         the privilege model. Each range now carries a privilege attribute, and
@@ -50,7 +52,7 @@
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 2.1; the address specification is frozen</dd>
+        <dd>Revision 2.2; the address specification is frozen</dd>
         <dt>Privilege model</dt>
         <dd>
           Supervisor-only I/O and firmware; paged main memory with 4 KiB pages
@@ -78,7 +80,9 @@
         <dt>Floppy controller</dt>
         <dd>Intel 82077AA-1 with two Mitsumi D359M3D drives</dd>
         <dt>IDE interface</dt>
-        <dd>Two-device, 16-bit parallel ATA, PIO mode 0</dd>
+        <dd>Two-device, 16-bit parallel ATA, PIO mode 0 and motherboard DMA</dd>
+        <dt>DMA controller</dt>
+        <dd>MC68450L8, four channels, physical supervisor DRAM addressing</dd>
         <dt>Parallel interface and timer</dt>
         <dd>MC68230P10 PI/T</dd>
       </dl>
@@ -103,6 +107,7 @@
           <a href="#8-bit-peripheral-addressing">8-bit Peripheral Addressing</a>
         </li>
         <li><a href="#ide-register-addressing">IDE Register Addressing</a></li>
+        <li><a href="#dma-register-addressing">DMA Register Addressing</a></li>
         <li><a href="#dram-organization">DRAM Organization</a></li>
       </ol>
     </nav>
@@ -559,8 +564,12 @@
               <td><code>$F80000</code></td>
               <td><code>$F9FFFF</code></td>
               <td>128 KiB</td>
-              <td>Reserved</td>
-              <td>Available for future I/O.</td>
+              <td>MC68450 DMA controller</td>
+              <td>
+                The canonical 256-byte register block is
+                <code>$F80000-$F800FF</code> and mirrors through the slot. See
+                <a href="dma.html#registers">DMA Controller</a>.
+              </td>
             </tr>
             <tr>
               <th scope="row">13</th>
@@ -950,9 +959,10 @@
           <code>A3..A1</code> drive ATA <code>DA2..DA0</code>, and
           <code>A4</code> selects the command or control block. The data
           register uses a 16-bit word at <code>$F60000</code>. Command-block
-          registers 1 through 7 use the lower byte at odd addresses
-          <code>$F60003-$F6000F</code>. Alternate Status and Device Control
-          share <code>$F6001D</code> in the control block.
+          registers 1 through 7 use the upper byte at even addresses
+          <code>$F60002-$F6000E</code>. Alternate Status and Device Control
+          share <code>$F6001C</code> in the control block. The crossed ATA byte
+          lanes make direct DMA data words match the 68000 memory byte order.
         </p>
         <p>
           Address lines <code>A16..A5</code> are not decoded, so the 32-byte
@@ -962,8 +972,26 @@
         </p>
       </section>
 
+      <section id="dma-register-addressing">
+        <h2>10. DMA Register Addressing</h2>
+        <p>
+          I/O slot 12 is <code>$F80000-$F9FFFF</code>. The MC68450 decodes
+          A1..A7 and UDS/LDS, so its 256-byte block mirrors when A16..A8 change.
+          Firmware uses <code>$F80000-$F800FF</code>. Channel bases are
+          <code>$00</code>, <code>$40</code>, <code>$80</code>, and
+          <code>$C0</code>; GCR is at offset <code>$FF</code>. Region-7
+          protection makes the window supervisor-only.
+        </p>
+        <p>
+          DMA asserts supervisor-data function code <code>101</code> for data
+          and descriptor accesses. Those cycles bypass user translation and
+          reach physical DRAM only. See <a href="dma.html">DMA Controller</a>
+          for the complete register and ownership rules.
+        </p>
+      </section>
+
       <section id="dram-organization">
-        <h2>10. DRAM Organization</h2>
+        <h2>11. DRAM Organization</h2>
         <p>
           Two 2 MiB banks provide 4 MiB of system DRAM. Each bank uses four 1M x
           4 devices to form the computer's 16-bit data width.

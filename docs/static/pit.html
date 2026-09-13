@@ -154,8 +154,9 @@ F_PIT_5V ----------------------------&gt; J_PIT_USER +5 V pins</code></pre>
         </p>
         <p>
           <code>PC4/DMAREQ</code> reaches the user header as a port C pin. The
-          board has no DMA controller, so firmware leaves the DMA request
-          function unselected.
+          motherboard MC68450 has no channel left for the PI/T, and this pin is
+          not wired to one, so firmware leaves the DMA request function
+          unselected and uses the pin as ordinary port C.
         </p>
       </section>
 

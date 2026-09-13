@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - IDE Interface, Revision 1.0</title>
+    <title>68EC000 Computer - IDE Interface, Revision 2.0</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
   <body>
@@ -13,21 +13,26 @@
         11. <a href="index.html">Return to the main page</a>.
       </p>
       <p>
-        Revision 1.0 follows memory map 2.1. One
-        <code>PALCE20V8Q-15JC/4</code>, one <code>CD74HCT164E</code>, two
-        <code>SN74HCT245N</code> bus transceivers, and one
-        <code>SN74HCT244N</code> connect the MC68EC000 bus to a standard 40-pin
-        ATA cable. The adapter implements programmed I/O and meets PIO mode 0
-        timing. It accepts <code>IORDY</code> wait extension and supports two
-        devices on one cable.
+        Revision 2.0 follows memory map 2.2 and adds MC68450 channel-0 DMA while
+        retaining PIO mode 0. The ATA byte lanes are crossed so direct sector
+        DMA has the same byte order as 68000 memory. A CD74ACT157E forces the
+        ATA data-register address during DMA, the PALCE20V8 reverses the strobe
+        and buffer direction under <code>ACK0_n</code>, and two added HCT
+        packages supply READY, the DIOW trailing edge, and drive reset. ATA
+        DMARQ, DMACK, multiword DMA, and UDMA remain unused.
       </p>
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 1.0 pre-layout design</dd>
+        <dd>
+          Revision 2.0 pre-layout design; PAL fitting and board measurements
+          remain
+        </dd>
         <dt>Address range</dt>
         <dd><code>$F60000-$F7FFFF</code>, I/O slot 11, supervisor access</dd>
         <dt>Host interface</dt>
-        <dd>16-bit PIO mode 0 with IORDY extension; no DMA or UDMA</dd>
+        <dd>
+          PIO mode 0 plus motherboard single-address DMA; no ATA DMA or UDMA
+        </dd>
         <dt>Interrupt</dt>
         <dd>Autovectored processor level 2</dd>
         <dt>Connector</dt>
@@ -41,7 +46,7 @@
         <li><a href="#architecture">Architecture</a></li>
         <li><a href="#register-map">Register Map</a></li>
         <li><a href="#data-path">Data Path and Byte Order</a></li>
-        <li><a href="#control">PAL and Timing Control</a></li>
+        <li><a href="#control">PAL, Multiplexer, and Timing</a></li>
         <li><a href="#connector">ATA Connector</a></li>
         <li><a href="#interrupt-reset">Interrupt and Reset</a></li>
         <li><a href="#firmware">Firmware Rules</a></li>
@@ -58,10 +63,11 @@
         <p>
           The connector and control signals follow the parallel ATA host
           interface. The BIOS starts each device in its reset transfer mode and
-          uses PIO mode 0. ATA hard disks, solid-state disks, and ATAPI optical
-          drives share the same electrical interface. A passive 44-pin adapter
-          can connect a 2.5-inch drive, and a True IDE adapter can connect a
-          CompactFlash card. A SATA device needs an active PATA-to-SATA bridge.
+          uses PIO mode 0 for both processor and DMA data cycles. ATA hard
+          disks, solid-state disks, and ATAPI optical drives share the same
+          electrical interface. A passive 44-pin adapter can connect a 2.5-inch
+          drive, and a True IDE adapter can connect a CompactFlash card. A SATA
+          device needs an active PATA-to-SATA bridge.
         </p>
         <p>
           Both device positions work. Firmware selects device 0 or device 1 with
@@ -82,15 +88,19 @@
 
       <section id="architecture">
         <h2>2. Architecture</h2>
-        <pre><code>MC68EC000 D15..D0 &lt;-&gt; two HCT245 transceivers &lt;-&gt; ATA DD15..DD0
-MC68EC000 A3..A1 --&gt; HCT244 --+---------------&gt; ATA DA2..DA0
-                               +--&gt; PAL IDE_A3..IDE_A1
-R/W --&gt; two HCT04 inverters --&gt; IDE_RW
-IO11_n, A4, IDE_RW, UDS_n, LDS_n --&gt; PALCE20V8 --&gt; ATA controls
-MFP_CLK_5 --&gt; HCT164 --&gt; PAL timing taps QB and QD
-ATA IORDY ------------------------------------&gt; PAL completion gate
-ATA INTRQ --&gt; HCT04 inverter --&gt; level-2 priority input
-PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code></pre>
+        <pre><code>system D15..D8 &lt;-&gt; HCT245 &lt;-&gt; ATA DD7..DD0
+system D7..D0  &lt;-&gt; HCT245 &lt;-&gt; ATA DD15..DD8
+CPU A3..A1 or 000 --&gt; ACT157 --&gt; HCT244 --&gt; ATA DA2..DA0
+ACK0_n ---------------^ select: high = CPU A3..A1, low = 000
+IO11_n, A4, IDE_A3..A1, UDS_n, LDS_n, IDE_RW, ACK0_n --&gt; PALCE20V8
+MFP_CLK_5 --&gt; HCT164 --&gt; PAL timing taps QB and QE
+PAL --&gt; IDE_CS0_n, IDE_CS1_n, IDE_DIOR_n, IDE_BUF_DIR, IDE_BUF_OE_n
+PAL IDE_DTACK_n ------------------------------&gt; CPU completion tree
+PAL IDE_DIOW_RAW_n + ACK0_n + DTC_n --&gt; HCT32, HCT04 --&gt; ATA DIOW_n
+IDE_QE + ATA IORDY --&gt; HCT08, HCT04 --&gt; IDE_READY_n --&gt; ACT157 4A
+motherboard DTACK_n -----------------------------------&gt; ACT157 4B
+ACT157 4Y + BGACK_n --&gt; HCT32 --&gt; PCL0_n at the MC68450
+ATA INTRQ --&gt; HCT04 inverter --&gt; level-2 priority input</code></pre>
         <p>
           <code>IO11_n</code> supplies the protected slot select. The IDE
           adapter sees supervisor cycles because the top I/O decoder suppresses
@@ -106,8 +116,9 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
           CPU address lines <code>A3..A1</code> drive ATA
           <code>DA2..DA0</code> through <code>U_IDE_BUS</code>.
           <code>A4</code> selects the command block or the control block. The
-          command-block data register uses a 16-bit word at an even address. The
-          remaining registers use <code>D7..D0</code> at odd addresses.
+          command-block data register uses a 16-bit word. The remaining
+          registers use <code>D15..D8</code> at even addresses because the lane
+          crossing moves ATA <code>DD7..DD0</code> to the 68000 upper lane.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -133,76 +144,76 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
               <td>16-bit word</td>
             </tr>
             <tr>
-              <td><code>$F60003</code></td>
+              <td><code>$F60002</code></td>
               <td><code>CS0_n</code></td>
               <td>001</td>
               <td>Error</td>
               <td>Features</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F60005</code></td>
+              <td><code>$F60004</code></td>
               <td><code>CS0_n</code></td>
               <td>010</td>
               <td>Sector Count</td>
               <td>Sector Count</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F60007</code></td>
+              <td><code>$F60006</code></td>
               <td><code>CS0_n</code></td>
               <td>011</td>
               <td>LBA Low</td>
               <td>LBA Low</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F60009</code></td>
+              <td><code>$F60008</code></td>
               <td><code>CS0_n</code></td>
               <td>100</td>
               <td>LBA Mid</td>
               <td>LBA Mid</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F6000B</code></td>
+              <td><code>$F6000A</code></td>
               <td><code>CS0_n</code></td>
               <td>101</td>
               <td>LBA High</td>
               <td>LBA High</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F6000D</code></td>
+              <td><code>$F6000C</code></td>
               <td><code>CS0_n</code></td>
               <td>110</td>
               <td>Device</td>
               <td>Device</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F6000F</code></td>
+              <td><code>$F6000E</code></td>
               <td><code>CS0_n</code></td>
               <td>111</td>
               <td>Status</td>
               <td>Command</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F6001D</code></td>
+              <td><code>$F6001C</code></td>
               <td><code>CS1_n</code></td>
               <td>110</td>
               <td>Alternate Status</td>
               <td>Device Control</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
             <tr>
-              <td><code>$F6001F</code></td>
+              <td><code>$F6001E</code></td>
               <td><code>CS1_n</code></td>
               <td>111</td>
               <td>Device Address</td>
               <td>Reserved</td>
-              <td>Lower byte</td>
+              <td>Upper byte</td>
             </tr>
           </tbody>
         </table>
@@ -211,33 +222,35 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
           so the 32-byte register pattern repeats through the slot. Firmware
           uses the canonical addresses above. A byte access to the data register
           receives no <code>IDE_DTACK_n</code> and reaches the motherboard
-          timeout. Word accesses to an 8-bit register transfer the lower byte
-          and leave the upper byte undefined.
+          timeout. Word accesses to an 8-bit register transfer the upper byte
+          and leave the lower byte undefined.
         </p>
       </section>
 
       <section id="data-path">
         <h2>4. Data Path and Byte Order</h2>
         <p>
-          <code>U_IDE_DATA_LO</code> connects ATA <code>DD7..DD0</code> to CPU
-          <code>D7..D0</code>. <code>U_IDE_DATA_HI</code> connects
-          <code>DD15..DD8</code> to <code>D15..D8</code>. Both parts are
+          <code>U_IDE_DATA_LO</code> connects ATA <code>DD7..DD0</code> to
+          system <code>D15..D8</code>. <code>U_IDE_DATA_HI</code> connects ATA
+          <code>DD15..DD8</code> to system <code>D7..D0</code>. Both parts are
           <code>SN74HCT245N</code>. Their A ports face ATA, their B ports face
-          the processor, and <code>IDE_RW</code> drives both DIR pins. Two
+          the processor, and <code>IDE_BUF_DIR</code> drives both DIR pins. Two
           cascaded gates in <code>U_IDE_IRQ</code> buffer processor
-          <code>R/W</code> into <code>IDE_RW</code>. A read drives A to B. A
-          write drives B to A. <code>IDE_BUF_OE_n</code> enables both parts
-          during a valid IDE cycle.
+          <code>R/W</code> into <code>IDE_RW</code>, and the PAL combines
+          <code>IDE_RW</code> with <code>ACK0_n</code> to make
+          <code>IDE_BUF_DIR</code>. A PIO read and a DMA transfer into memory
+          both drive A to B. A PIO write and a DMA transfer out of memory both
+          drive B to A. <code>IDE_BUF_OE_n</code> enables both parts during a
+          valid PIO or DMA cycle.
         </p>
         <p>
-          The straight bit mapping preserves ATA register and command-word bit
-          numbers. It places each pair of sector bytes in reverse order in
-          big-endian memory because ATA transfers the first byte on
-          <code>DD7..DD0</code>. BIOS sector reads swap the two bytes in each
-          16-bit data word before storing them. Sector writes apply the same
-          swap before writing the data register. IDENTIFY numeric words keep
-          their bit positions; firmware handles ATA string fields with their
-          specified byte order.
+          The crossed lanes place ATA sector byte zero at the lower memory
+          address, so sector PIO and DMA use the same memory image and need no
+          per-word sector swap. This wiring deliberately reverses the apparent
+          bit positions of a 16-bit ATA word at the CPU. Firmware byte-swaps
+          numeric IDENTIFY words when interpreting them and handles ATA strings,
+          ATAPI packets, and ATAPI responses according to each format instead of
+          applying one blanket rule.
         </p>
         <p>
           Place 33 ohm series resistors between each transceiver A-side cable
@@ -248,13 +261,16 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
       </section>
 
       <section id="control">
-        <h2>5. PAL and Timing Control</h2>
+        <h2>5. PAL, Multiplexer, and Timing Control</h2>
         <p>
           <code>U_IDE_CTRL</code> is a <code>PALCE20V8Q-15JC/4</code> in a
           28-pin PLCC socket. The CUPL listing below is the source of record for
           the programmed equations and pin assignment. The PAL uses
-          combinational mode. Pin 17 reads the reset-stretcher output. Pin 27 is
-          an unused input and connects to ground.
+          combinational mode with permanently enabled outputs. Revision 2.0
+          spends the last free input, physical pin 27, on <code>ACK0_n</code>.
+          All eight macrocells are now allocated, so <code>IDE_RESET_n</code>,
+          <code>IDE_READY_n</code>, and the DIOW trailing edge moved to discrete
+          HCT gates.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -286,7 +302,7 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
             <tr>
               <td>11, 12, 13</td>
               <td>
-                <code>IDE_QB</code>, <code>IDE_QD</code>, <code>IDE_IORDY</code>
+                <code>IDE_QB</code>, <code>IDE_QE</code>, <code>IDE_IORDY</code>
               </td>
               <td>Strobe and completion timing</td>
             </tr>
@@ -296,6 +312,14 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
                 <code>PERIPH_RESET_n</code>, <code>IDE_RESET_PULSE_n</code>
               </td>
               <td>Cycle inhibit and stretched drive reset</td>
+            </tr>
+            <tr>
+              <td>27</td>
+              <td><code>ACK0_n</code></td>
+              <td>
+                MC68450 channel-0 acknowledge; the last free input, CUPL logical
+                pin 23
+              </td>
             </tr>
             <tr>
               <td>18, 19, 20, 21</td>
@@ -308,10 +332,13 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
             <tr>
               <td>23, 24, 25, 26</td>
               <td>
-                <code>IDE_DIOW_n</code>, <code>IDE_DTACK_n</code>,
-                <code>IDE_BUF_OE_n</code>, <code>IDE_RESET_n</code>
+                <code>IDE_DIOW_RAW_n</code>, <code>IDE_DTACK_n</code>,
+                <code>IDE_BUF_OE_n</code>, <code>IDE_BUF_DIR</code>
               </td>
-              <td>Write, completion, buffers, reset</td>
+              <td>
+                Ungated write strobe, completion, buffer enable, buffer
+                direction
+              </td>
             </tr>
             <tr>
               <td>1, 8, 15, 22</td>
@@ -325,11 +352,19 @@ PAL IDE_DTACK_n ------------------------------&gt; motherboard DTACK tree</code>
             </tr>
           </tbody>
         </table>
+        <p>
+          Physical PLCC pins map to CUPL 24-pin logical numbers by removing the
+          four no-connect pins: physical 2 through 7 are logical 1 through 6,
+          physical 9 through 14 are logical 7 through 12, physical 16 through 21
+          are logical 13 through 18, and physical 23 through 28 are logical 19
+          through 24. Keep the two numbering systems distinct in the schematic,
+          the fitter report, and the build record.
+        </p>
         <h3>Complete CUPL Source</h3>
         <pre><code>Name     IDE_CONTROL;
-PartNo   001;
+PartNo   002;
 Date     2026-09-12;
-Revision 01;
+Revision 02;
 Designer m68k-computer;
 Company  None;
 Assembly None;
@@ -347,51 +382,269 @@ PIN 6  = IDE_RW;
 PIN 7  = UDS_n;
 PIN 8  = LDS_n;
 PIN 9  = IDE_QB;
-PIN 10 = IDE_QD;
+PIN 10 = IDE_QE;
 PIN 11 = IDE_IORDY;
 PIN 13 = PERIPH_RESET_n;
 PIN 14 = IDE_RESET_PULSE_n;
-PIN 23 = NC_I13;
+PIN 23 = ACK0_n;
 
 PIN 15 = IDE_CYCLE;
 PIN 16 = IDE_CS0_n;
 PIN 17 = IDE_CS1_n;
 PIN 18 = IDE_DIOR_n;
-PIN 19 = IDE_DIOW_n;
+PIN 19 = IDE_DIOW_RAW_n;
 PIN 20 = IDE_DTACK_n;
 PIN 21 = IDE_BUF_OE_n;
-PIN 22 = IDE_RESET_n;
+PIN 22 = IDE_BUF_DIR;
 
-DATA_REG = !A4 &amp; !IDE_A3 &amp; !IDE_A2 &amp; !IDE_A1;
-BYTE_CYCLE = !LDS_n;
+RUN        = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
+DATA_REG   = !A4 &amp; !IDE_A3 &amp; !IDE_A2 &amp; !IDE_A1;
+BYTE_CYCLE = !UDS_n;
 WORD_CYCLE = !UDS_n &amp; !LDS_n;
 
-IDE_CYCLE = !IO11_n &amp; PERIPH_RESET_n &amp; IDE_RESET_PULSE_n
+PIO_CYCLE = !IO11_n &amp; RUN
           &amp; ((!DATA_REG &amp; BYTE_CYCLE) # (DATA_REG &amp; WORD_CYCLE));
+DMA_CYCLE = !ACK0_n &amp; RUN;
+CYCLE     = PIO_CYCLE # DMA_CYCLE;
 
-IDE_CS0_n = !(IDE_CYCLE &amp; !A4);
-IDE_CS1_n = !(IDE_CYCLE &amp; A4);
+PIO_READ      = PIO_CYCLE &amp; IDE_RW;
+PIO_WRITE     = PIO_CYCLE &amp; !IDE_RW;
+DMA_DEV_READ  = DMA_CYCLE &amp; !IDE_RW;
+DMA_DEV_WRITE = DMA_CYCLE &amp; IDE_RW;
 
-IDE_DIOR_n = !(IDE_CYCLE &amp; IDE_QB &amp; IDE_RW);
-IDE_DIOW_n = !(IDE_CYCLE &amp; IDE_QB &amp; !IDE_RW);
-
-IDE_DTACK_n = !(IDE_CYCLE &amp; IDE_QD &amp; IDE_IORDY);
-IDE_BUF_OE_n = !IDE_CYCLE;
-IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
-
-/* Tie NC_I13 to ground at the package. */</code></pre>
+IDE_CYCLE      = CYCLE;
+IDE_CS0_n      = !((PIO_CYCLE &amp; !A4) # DMA_CYCLE);
+IDE_CS1_n      = !(PIO_CYCLE &amp; A4);
+IDE_DIOR_n     = !((PIO_READ # DMA_DEV_READ) &amp; IDE_QB);
+IDE_DIOW_RAW_n = !((PIO_WRITE # DMA_DEV_WRITE) &amp; IDE_QB);
+IDE_DTACK_n    = !(PIO_CYCLE &amp; IDE_QE &amp; IDE_IORDY);
+IDE_BUF_OE_n   = !CYCLE;
+IDE_BUF_DIR    = (ACK0_n &amp; IDE_RW) # (!ACK0_n &amp; !IDE_RW);</code></pre>
         <p>
-          Compile the listing for a GAL20V8-compatible target, then program and
-          verify the PALCE20V8. Keep the compiler version and generated JEDEC
-          checksum with the board build record.
+          <code>RUN</code>, <code>DATA_REG</code>, <code>PIO_CYCLE</code>,
+          <code>DMA_CYCLE</code>, and <code>CYCLE</code> are intermediate
+          expressions. CUPL expands them into each output's sum of products
+          instead of routing them through a pin, so no equation depends on
+          output feedback. Simple mode gives every macrocell eight product terms
+          and leaves pins 15 and 22 without feedback, which this listing does
+          not need.
         </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Product terms per output against the eight available
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Output</th>
+              <th scope="col">Terms</th>
+              <th scope="col">Expansion</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>IDE_CYCLE</code>, <code>IDE_BUF_OE_n</code></td>
+              <td>6</td>
+              <td>
+                Five from <code>PIO_CYCLE</code> and one from
+                <code>DMA_CYCLE</code>
+              </td>
+            </tr>
+            <tr>
+              <td><code>IDE_CS0_n</code></td>
+              <td>5</td>
+              <td>Four PIO terms that survive <code>!A4</code>, plus DMA</td>
+            </tr>
+            <tr>
+              <td><code>IDE_CS1_n</code></td>
+              <td>4</td>
+              <td>PIO terms that survive <code>A4</code>; DMA drops out</td>
+            </tr>
+            <tr>
+              <td><code>IDE_DIOR_n</code>, <code>IDE_DIOW_RAW_n</code></td>
+              <td>6</td>
+              <td>Five PIO terms and one DMA term, each gated by QB</td>
+            </tr>
+            <tr>
+              <td><code>IDE_DTACK_n</code></td>
+              <td>5</td>
+              <td>PIO terms gated by QE and IORDY; no DMA term</td>
+            </tr>
+            <tr>
+              <td><code>IDE_BUF_DIR</code></td>
+              <td>2</td>
+              <td>One term per ownership state</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>!DATA_REG</code> expands to four terms, one each for
+          <code>A4</code>, <code>IDE_A3</code>, <code>IDE_A2</code>, and
+          <code>IDE_A1</code>, so <code>PIO_CYCLE</code> costs five product
+          terms and <code>DMA_CYCLE</code> costs one. The PALCE20V8 has
+          programmable output polarity, so an active-low output carries the same
+          term count as the active-high function it inverts. The environment
+          used to write this revision has no compatible CUPL fitter, so these
+          counts are hand expansions. JEDEC fit, fuse checksum, and programmer
+          verification remain build checks.
+        </p>
+        <h3>Address Multiplexer</h3>
+        <p>
+          During <code>ACK0_n</code> the shared address bus carries the DRAM
+          address, so the ATA register address cannot come from
+          <code>A3..A1</code>. <code>U_IDE_DA_MUX</code>, a
+          <code>CD74ACT157E</code>, selects the source. ACT inputs accept the
+          TTL levels that the processor and the MC68450 produce. Pin 1 is the
+          common select and takes <code>ACK0_n</code> directly: a low select
+          passes the A inputs, a high select passes the B inputs. Ground pin 15
+          so the outputs stay enabled.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            U_IDE_DA_MUX channel assignment
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">A input, DMA</th>
+              <th scope="col">B input, PIO and idle</th>
+              <th scope="col">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>2, ground</td>
+              <td>3, CPU <code>A1</code></td>
+              <td>4, <code>IDE_A1</code></td>
+            </tr>
+            <tr>
+              <td>5, ground</td>
+              <td>6, CPU <code>A2</code></td>
+              <td>7, <code>IDE_A2</code></td>
+            </tr>
+            <tr>
+              <td>11, ground</td>
+              <td>10, CPU <code>A3</code></td>
+              <td>9, <code>IDE_A3</code></td>
+            </tr>
+            <tr>
+              <td>14, <code>IDE_READY_n</code></td>
+              <td>13, <code>DTACK_n</code></td>
+              <td>12, <code>IDE_PCL_MUX</code></td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The three address outputs drive <code>U_IDE_BUS</code> and the PAL
+          decode inputs. A DMA cycle therefore presents ATA
+          <code>DA2..DA0</code> = <code>000</code>, the data register, with
+          <code>CS0_n</code> asserted by the <code>DMA_CYCLE</code> term and
+          <code>CS1_n</code> held inactive. Driven selection replaces the
+          cable-side pull-downs that a passive scheme would need. The fourth
+          channel carries the READY source below, which needs the same select.
+        </p>
+        <h3>Discrete Glue</h3>
+        <p>
+          <code>U_IDE_GATE</code> is an <code>SN74HCT08N</code> and
+          <code>U_IDE_OR</code> is an <code>SN74HCT32N</code>. Both sit beside
+          the PAL. The three spare inverters in <code>U_IDE_IRQ</code> supply
+          the inversions.
+        </p>
+        <pre><code>IDE_RESET_n   = PERIPH_RESET_n AND IDE_RESET_PULSE_n
+IDE_READY     = IDE_QE AND IDE_IORDY
+IDE_READY_n   = NOT IDE_READY
+IDE_DMA_END_n = ACK0_n OR DTC_n
+IDE_DMA_END   = NOT IDE_DMA_END_n
+IDE_DIOW_n    = IDE_DIOW_RAW_n OR IDE_DMA_END
+
+IDE_PCL_MUX   = IDE_READY_n  while ACK0_n = 0
+IDE_PCL_MUX   = DTACK_n      while ACK0_n = 1
+PCL0_n        = IDE_PCL_MUX OR BGACK_n</code></pre>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Added gate allocation
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Package and gate</th>
+              <th scope="col">Pins</th>
+              <th scope="col">Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>U_IDE_GATE</code> gate 1</td>
+              <td>1, 2 to 3</td>
+              <td><code>IDE_RESET_n</code> to <code>U_IDE_BUS</code> pin 17</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_GATE</code> gate 2</td>
+              <td>4, 5 to 6</td>
+              <td><code>IDE_READY</code>, active high</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_GATE</code> gates 3 and 4</td>
+              <td>9, 10 to 8; 12, 13 to 11</td>
+              <td>Unused: inputs grounded, outputs open</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_OR</code> gate 1</td>
+              <td>1, 2 to 3</td>
+              <td><code>IDE_DMA_END_n</code> from ACK0 and DTC</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_OR</code> gate 2</td>
+              <td>4, 5 to 6</td>
+              <td><code>IDE_DIOW_n</code> to <code>U_IDE_BUS</code> pin 15</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_OR</code> gate 3</td>
+              <td>9, 10 to 8</td>
+              <td><code>PCL0_n</code> to MC68450 pin 5</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_OR</code> gate 4</td>
+              <td>12, 13 to 11</td>
+              <td>Unused: inputs to +5 V, output open</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_IRQ</code> gates 4, 5, 6</td>
+              <td>Three remaining inverters</td>
+              <td>
+                <code>IDE_DMA_END</code>, <code>IDE_READY_n</code>, and one
+                spare with its input grounded
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          <code>ACK0_n</code> is an MC68450 output that stays driven, so it
+          needs no board bias. <code>DTC_n</code> is three-stated while the
+          processor owns the bus and carries the 10 kohm pull-up listed in
+          <a href="dma.html#electrical">DMA Controller</a>, which holds
+          <code>IDE_DMA_END_n</code> high through every PIO cycle.
+          <code>BGACK_n</code> forces <code>PCL0_n</code> inactive whenever the
+          processor owns the bus, so ordinary CPU completions do not toggle the
+          MC68450 PCL input. The PCL transition bit still sets on the
+          transitions that do occur; firmware ignores that bit on a channel
+          programmed for READY and clears it with the rest of CSR.
+        </p>
+        <h3>Sequencer and PIO Timing</h3>
         <p>
           <code>U_IDE_SEQ</code> is a <code>CD74HCT164E</code>. Tie serial
           inputs A and B high, connect <code>MFP_CLK_5</code> to CLK, and
-          connect <code>IDE_CYCLE</code> to active-low CLR. QB becomes high on
-          the second rising clock edge after the PAL accepts a cycle. QD becomes
-          high on the fourth edge. Ending the cycle drives CLR low and clears
-          both taps without waiting for a clock.
+          connect <code>IDE_CYCLE</code> to active-low CLR. QB at pin 4 becomes
+          high on the second rising clock edge after the PAL accepts a cycle. QE
+          at pin 10 becomes high on the fifth edge. Ending the cycle drives CLR
+          low and clears both taps without waiting for a clock. Revision 2.0
+          moves the PAL completion input from QD to QE because only one tap
+          input remains and the DMA READY term needs the longer delay. PIO
+          cycles grow by two 5 MHz periods as a result.
+        </p>
+        <p>
+          The first sampling edge falls anywhere in the 200 ns period after the
+          cycle starts, so QB arrives 200 ns to 400 ns after the start and QE
+          arrives 800 ns to 1000 ns after it. At the oscillator's +100 ppm limit
+          one period is 199.98 ns; the figures below use the four-period worst
+          case of 799.92 ns for QE.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -414,12 +667,12 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
               <td>
                 <code>DIOR_n</code> or <code>DIOW_n</code> before completion
               </td>
-              <td>Two 5 MHz periods, about 400 ns</td>
+              <td>Three 5 MHz periods, about 600 ns</td>
               <td>290 ns</td>
             </tr>
             <tr>
               <td>Transfer cycle</td>
-              <td>At least four 5 MHz periods plus CPU release</td>
+              <td>At least five 5 MHz periods plus CPU release</td>
               <td>600 ns</td>
             </tr>
           </tbody>
@@ -446,15 +699,15 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
           </thead>
           <tbody>
             <tr>
-              <td>2, CPU <code>A1</code></td>
+              <td>2, <code>IDE_A1</code> from mux pin 4</td>
               <td>18, <code>IDE_A1 / DA0</code></td>
             </tr>
             <tr>
-              <td>4, CPU <code>A2</code></td>
+              <td>4, <code>IDE_A2</code> from mux pin 7</td>
               <td>16, <code>IDE_A2 / DA1</code></td>
             </tr>
             <tr>
-              <td>6, CPU <code>A3</code></td>
+              <td>6, <code>IDE_A3</code> from mux pin 9</td>
               <td>14, <code>IDE_A3 / DA2</code></td>
             </tr>
             <tr>
@@ -484,19 +737,155 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
           +5 V. Place each source-series resistor after the listed output. Tap
           <code>IDE_A1..IDE_A3</code> for the PAL before those resistors.
         </p>
+        <h3>DMA Cycle Timing</h3>
         <p>
-          The CPU-side load added by IDE is one HCT244 input on each of
+          During <code>ACK0_n</code> the single-address <code>R/W</code>
+          describes memory, not the device.
+          <code>DMA_DEV_READ = DMA_CYCLE &amp; !IDE_RW</code> turns a memory
+          write into an ATA read, and
+          <code>DMA_DEV_WRITE = DMA_CYCLE &amp; IDE_RW</code> turns a memory
+          read into an ATA write. <code>IDE_BUF_DIR</code> reverses the
+          transceivers on the same rule, so the PIO interpretation is inverted
+          for both the strobes and the data path.
+        </p>
+        <p>
+          <code>DMA_CYCLE</code> depends on <code>ACK0_n</code> alone and not on
+          <code>UDS_n</code> or <code>LDS_n</code>. A device-to-memory transfer
+          therefore starts <code>DIOR_n</code> from the acknowledge, before the
+          MC68450 issues data strobes. Deriving the strobe from
+          <code>UDS_n</code> would deadlock: the controller withholds the data
+          strobes until READY, and READY would wait for the strobes.
+        </p>
+        <table border="1" cellpadding="4" cellspacing="0">
+          <caption>
+            Single-address DMA intervals at the connector
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Interval</th>
+              <th scope="col">Adapter value</th>
+              <th scope="col">ATA mode 0 requirement</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <code>ACK0_n</code> low to <code>DA2..DA0</code> and
+                <code>CS0_n</code> valid
+              </td>
+              <td>
+                ACT157 select-to-output 14.5 ns plus HCT244 28 ns, 42.5 ns
+                maximum at 4.5 V into 50 pF
+              </td>
+              <td>Address valid before the strobe</td>
+            </tr>
+            <tr>
+              <td>Address and chip select before the strobe</td>
+              <td>199.98 ns minus the 42.5 ns above, 157 ns worst case</td>
+              <td>70 ns, t1</td>
+            </tr>
+            <tr>
+              <td>Strobe asserted before READY reaches the MC68450</td>
+              <td>Three 5 MHz periods, 599.94 ns minimum</td>
+              <td>290 ns pulse width, t2</td>
+            </tr>
+            <tr>
+              <td>Device read data valid before DRAM samples it</td>
+              <td>599.94 ns after <code>DIOR_n</code> falls</td>
+              <td>240 ns derived; see below</td>
+            </tr>
+            <tr>
+              <td>DRAM data before the <code>DIOW_n</code> trailing edge</td>
+              <td>The whole strobe, at least 599.94 ns</td>
+              <td>60 ns setup, t3</td>
+            </tr>
+            <tr>
+              <td>DRAM data after the <code>DIOW_n</code> trailing edge</td>
+              <td>
+                <code>DTC_n</code> ends the strobe while the controller still
+                drives <code>AS_n</code> and the data strobes
+              </td>
+              <td>30 ns hold, t4</td>
+            </tr>
+            <tr>
+              <td>Address hold after the strobe</td>
+              <td>
+                The mux holds <code>000</code> until <code>ACK0_n</code> rises,
+                after both strobes have ended
+              </td>
+              <td>20 ns, t9</td>
+            </tr>
+            <tr>
+              <td>Cycle time</td>
+              <td>
+                799.92 ns to READY plus MC68450 synchronization and the memory
+                cycle
+              </td>
+              <td>600 ns, t0</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          The 240 ns figure is derived rather than quoted. A device that meets
+          mode 0 cannot know that this host stretches the strobe, so it must
+          present read data early enough for a host that negates
+          <code>DIOR_n</code> at the 290 ns minimum while still meeting the 50
+          ns read data setup. That leaves 240 ns from the falling edge. READY
+          reaches the MC68450 no earlier than 599.94 ns after the same edge, and
+          the controller then adds its own synchronization before it asserts the
+          data strobes that start the DRAM write. Measure the device
+          strobe-to-data-valid delay during board verification instead of
+          relying on the derivation alone.
+        </p>
+        <p>
+          <code>IDE_DTACK_n</code> carries no DMA term. The addressed DRAM
+          supplies completion for every single-address cycle, and the adapter
+          contributes READY only. When <code>ACK0_n</code> is inactive the
+          fourth mux channel passes motherboard <code>DTACK_n</code>, which
+          supplies the READY that the MC68450 requires during descriptor
+          fetches. The two sources never drive the pin together, so the PIO
+          completion term is not reused as a DMA completion. The manual's
+          warning on p. 4-16 constrains DTACK rather than READY: a DTACK that
+          arrived before READY would end a device-to-memory cycle with the data
+          strobes never asserted. The DRAM request detector starts on those data
+          strobes, so its DTACK cannot precede them.
+        </p>
+        <p>
+          A memory-to-device transfer ends <code>DIOW_n</code> on
+          <code>DTC_n</code>, the controller's successful-cycle output. A cycle
+          that takes a bus error suppresses <code>DTC_n</code>, so the write
+          strobe then ends on <code>ACK0_n</code> instead. That ordering does
+          not retract a strobe the device already accepted;
+          <a href="#firmware">section 8</a> gives the command recovery.
+        </p>
+        <p>
+          The PIO decode requires <code>IO11_n</code>, and revision 2.2 of
+          <a href="bus-and-decode.html#top-i-o-slot-decoder"
+            >Bus and Address Decode</a
+          >
+          gives both I/O decoders an ownership enable.
+          <code>IO11_n</code> therefore cannot assert during a DMA cycle at all,
+          whatever address the controller drives, so a misprogrammed channel
+          cannot start a register access here. The BIOS range check is still the
+          first line; the decoder enable is what makes a firmware mistake
+          harmless.
+        </p>
+        <p>
+          The CPU-side load added by IDE is one ACT157 input on each of
           <code>A1..A3</code>, one PAL input on <code>A4</code>, one PAL input
           on each data strobe, and one HCT04 input on <code>R/W</code>. Each
-          data bit sees one HCT245 port. Include socket, route, and probe
-          capacitance in the motherboard load audit.
+          data bit sees one HCT245 port. <code>ACK0_n</code> drives one PAL
+          input, one ACT157 select, and one HCT32 input;
+          <code>DTC_n</code> drives one HCT32 input. Include socket, route, and
+          probe capacitance in the motherboard load audit.
         </p>
         <p>
           On <code>U_IDE_IRQ</code>, gate 1 inverts processor
           <code>R/W</code> and gate 2 inverts it again to make
           <code>IDE_RW</code>. Gate 3 inverts ATA <code>INTRQ</code> to make
-          <code>IDE_IRQ_n</code>. Ground the three unused inputs and leave their
-          outputs open.
+          <code>IDE_IRQ_n</code>. Gates 4 and 5 produce
+          <code>IDE_DMA_END</code> and <code>IDE_READY_n</code>. Ground the
+          remaining input and leave its output open.
         </p>
       </section>
 
@@ -668,9 +1057,12 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
           Tie <code>/A</code> low and <code>/CLR</code> high, and drive B with
           <code>PERIPH_RESET_n</code>. The rising reset-release edge starts a
           nominal 4.5 ms pulse with a 100 kohm resistor and 100 nF capacitor.
-          The complementary output is <code>IDE_RESET_PULSE_n</code>. The PAL
-          combines the incoming reset and the pulse before
-          <code>U_IDE_BUS</code> drives the cable.
+          The complementary output is <code>IDE_RESET_PULSE_n</code>. Gate 1 of
+          <code>U_IDE_GATE</code> combines the incoming reset and the pulse
+          before <code>U_IDE_BUS</code> drives the cable. Both signals also
+          inhibit the PAL cycle terms, so neither a PIO access nor an
+          <code>ACK0_n</code> cycle can drive ATA strobes while the drive is
+          held in reset.
         </p>
         <pre><code>IDE_RESET_n = PERIPH_RESET_n AND IDE_RESET_PULSE_n</code></pre>
         <p>
@@ -701,28 +1093,62 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
             size, removable-media handling, or packet commands.
           </li>
           <li>
-            Keep transfers in PIO mode 0. Do not enable multiword DMA or UDMA.
+            Keep every command in ATA PIO mode 0 with the DIOR and DIOW
+            protocol. Do not enable multiword DMA or UDMA. Motherboard DMA
+            carries the same PIO data cycles, and ATA DMARQ and DMACK stay
+            unused.
           </li>
           <li>
-            Transfer the data register with 16-bit word accesses. Swap each
-            sector-data word between the ATA port and byte-addressed big-endian
-            memory.
+            Transfer the data register with 16-bit word accesses. The crossed
+            lanes put ATA sector byte zero at the lower memory address, so
+            neither PIO nor DMA swaps sector words.
           </li>
           <li>
-            Use byte accesses for task-file and control registers. Poll BSY,
-            DRQ, DF, and ERR at each command phase and impose a software timeout
-            measured in milliseconds or seconds.
+            Byte-swap IDENTIFY numeric words when interpreting them. Treat ATA
+            string fields, ATAPI command packets, and ATAPI response data under
+            each format's own rules rather than one blanket swap.
+          </li>
+          <li>
+            Use byte accesses at even addresses with <code>UDS_n</code> for
+            task-file and control registers. Poll BSY, DRQ, DF, and ERR at each
+            command phase and impose a software timeout measured in milliseconds
+            or seconds.
           </li>
           <li>
             Install an autovector level-2 handler before enabling ATA
             interrupts. Polling remains valid while <code>nIEN</code> is set in
             Device Control.
           </li>
+          <li>
+            Start MC68450 channel 0 only after the command has reached its data
+            phase: BSY clear, DRQ set, ERR and DF clear, and the direction
+            matching the command. Program the channel as a 16-bit implicitly
+            addressed device with acknowledge and ready, internal maximum-rate
+            requests, and word operands.
+          </li>
+          <li>
+            Bound each activation to the permitted data phase and to at most 32
+            words. A single-sector command allows 256 words; an ATAPI packet
+            transfer allows the byte count the device reports. Re-read Status
+            and DRQ between activations. Do not let the channel auto-request
+            across a sector or packet boundary.
+          </li>
+          <li>
+            Treat an ATA command as indeterminate after a DMA bus error. A
+            suppressed <code>DTC_n</code> does not undo a strobe the device
+            already accepted. Read Status, drain or reset the interrupted
+            command, release the pinned buffer, then re-issue.
+          </li>
+          <li>
+            Include command issue, status polling, interrupt service, and chunk
+            restarts in any throughput figure. The channel moves data only
+            inside the data phase.
+          </li>
         </ol>
         <p>
           ATAPI support needs the PACKET command and the packet command set in
-          firmware. The motherboard supplies the same register, interrupt, and
-          data paths to ATA and ATAPI devices.
+          firmware. The motherboard supplies the same register, interrupt, data,
+          and DMA paths to ATA and ATAPI devices.
         </p>
       </section>
 
@@ -743,7 +1169,10 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
             <tr>
               <td><code>U_IDE_CTRL</code></td>
               <td><code>PALCE20V8Q-15JC/4</code></td>
-              <td>Decode, strobes, wait gating, completion, and reset</td>
+              <td>
+                Decode, strobes, buffer control, wait gating, and completion for
+                PIO and DMA cycles
+              </td>
             </tr>
             <tr>
               <td><code>U_IDE_SEQ</code></td>
@@ -769,8 +1198,28 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
               <td><code>U_IDE_IRQ</code></td>
               <td><code>SN74HCT04N</code></td>
               <td>
-                INTRQ inversion and two-stage R/W buffering; three gates unused
+                INTRQ inversion, two-stage R/W buffering,
+                <code>IDE_DMA_END</code>, and <code>IDE_READY_n</code>; one gate
+                unused
               </td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_DA_MUX</code></td>
+              <td><code>CD74ACT157E</code></td>
+              <td>
+                ATA register address and PCL0 source selection between PIO and
+                DMA
+              </td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_GATE</code></td>
+              <td><code>SN74HCT08N</code></td>
+              <td>Drive reset combine and the IORDY-qualified READY term</td>
+            </tr>
+            <tr>
+              <td><code>U_IDE_OR</code></td>
+              <td><code>SN74HCT32N</code></td>
+              <td>DIOW trailing edge on DTC and the ownership-gated PCL0</td>
             </tr>
             <tr>
               <td><code>J_IDE</code></td>
@@ -820,6 +1269,18 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
             Keep <code>IDE_IORDY</code> and <code>INTRQ</code> away from clock
             traces. Place their pull resistors at the motherboard receivers.
           </li>
+          <li>
+            Put <code>U_IDE_DA_MUX</code> between the PAL and
+            <code>U_IDE_BUS</code> so the selected address reaches the cable
+            driver without a detour.
+          </li>
+          <li>
+            Group <code>U_IDE_GATE</code>, <code>U_IDE_OR</code>, and
+            <code>U_IDE_IRQ</code> beside the PAL. Keep <code>ACK0_n</code>,
+            <code>DTC_n</code>, <code>BGACK_n</code>, <code>DTACK_n</code>, and
+            <code>PCL0_n</code> short between this cluster and the MC68450, and
+            away from the cable edge.
+          </li>
         </ul>
       </section>
 
@@ -839,8 +1300,10 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
             <tr>
               <td>PAL build</td>
               <td>
-                CUPL fits the equations and fixed pins in a PALCE20V8-compatible
-                fuse map; programmer verification passes.
+                Unrun. No compatible CUPL fitter is installed. On a machine that
+                has one, the listing must fit the fixed pins in a
+                PALCE20V8-compatible fuse map within eight product terms per
+                output, and programmer verification must pass.
               </td>
             </tr>
             <tr>
@@ -867,9 +1330,10 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
             <tr>
               <td>Byte lanes</td>
               <td>
-                Task-file byte accesses use D7..D0. Data-register word tests
-                preserve all 16 bit positions and the BIOS byte swap preserves
-                sector byte order.
+                Task-file byte accesses use even addresses and
+                <code>D15..D8</code>. A data-register word test preserves all 16
+                bit positions across the crossing, and a sector read stores ATA
+                byte zero at the lower memory address with no software swap.
               </td>
             </tr>
             <tr>
@@ -899,6 +1363,67 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
               <td>
                 Power-on, push-button, watchdog, and CPU RESET assertion reach
                 connector pin 1 with the required pulse width.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA address selection</td>
+              <td>
+                <code>ACK0_n</code> forces <code>DA2..DA0</code> to
+                <code>000</code> and <code>CS0_n</code> active with
+                <code>CS1_n</code> high, and the measured setup ahead of the
+                strobe exceeds 70 ns at the connector.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA direction</td>
+              <td>
+                A memory write drives <code>DIOR_n</code> and turns the
+                transceivers toward the processor; a memory read drives
+                <code>DIOW_n</code> and turns them toward the cable. Neither
+                strobe appears without <code>ACK0_n</code> or a slot-11 cycle.
+              </td>
+            </tr>
+            <tr>
+              <td>READY path</td>
+              <td>
+                <code>PCL0_n</code> follows the QE and IORDY term during
+                <code>ACK0_n</code>, follows motherboard <code>DTACK_n</code>
+                during descriptor fetches, and stays high while the processor
+                owns the bus. Holding IORDY low delays READY and the DRAM write
+                until IORDY rises or the motherboard timeout expires.
+              </td>
+            </tr>
+            <tr>
+              <td>Device data validity</td>
+              <td>
+                Measured device strobe-to-data-valid delay is shorter than the
+                interval from <code>DIOR_n</code> falling to the DRAM write, for
+                every drive on the acceptance list.
+              </td>
+            </tr>
+            <tr>
+              <td>Write strobe end</td>
+              <td>
+                <code>DTC_n</code> ends <code>DIOW_n</code> while DRAM data is
+                still driven, and the measured hold exceeds 30 ns.
+              </td>
+            </tr>
+            <tr>
+              <td>DMA faults</td>
+              <td>
+                An injected bus error during a channel-0 cycle suppresses
+                <code>DTC_n</code>, aborts the channel, and leaves the command
+                recoverable by the documented sequence. A channel deliberately
+                programmed with a slot-11 address asserts no <code>IO11_n</code>
+                and drives no ATA strobe.
+              </td>
+            </tr>
+            <tr>
+              <td>Mixed traffic</td>
+              <td>
+                Repeated 32-word activations interleave with floppy and
+                expansion channels, DRAM refresh, and CPU PIO without data
+                corruption or a missed status phase.
               </td>
             </tr>
           </tbody>
@@ -935,6 +1460,26 @@ IDE_RESET_n = PERIPH_RESET_n &amp; IDE_RESET_PULSE_n;
             <a href="datasheets/sn74hct245.pdf"><cite>SN74HCT245</cite></a> and
             <a href="datasheets/sn74hct244.pdf"><cite>SN74HCT244</cite></a
             >, bus buffering.
+          </li>
+          <li>
+            Texas Instruments,
+            <a href="datasheets/cd74act157.pdf"><cite>CD74ACT157</cite></a
+            >, common select, active-low strobe, TTL-compatible input levels,
+            and select-to-output switching limits;
+            <a href="datasheets/sn74hct08.pdf"><cite>SN74HCT08</cite></a> and
+            <a href="datasheets/sn74hct32.pdf"><cite>SN74HCT32</cite></a
+            >, added gate delays and drive.
+          </li>
+          <li>
+            Motorola,
+            <a
+              href="datasheets/MC68450_Direct_Memory_Access_Controller_DMAC_Jul89.pdf"
+              ><cite>MC68450 Direct Memory Access Controller</cite></a
+            >, single-address transfers, the acknowledge-and-ready device
+            protocol, the descriptor-fetch READY requirement in Figure 4-12 on
+            pp. 4-17 and 4-18, and <code>DTC_n</code> behaviour on a failed
+            cycle. The board-level connections are in
+            <a href="dma.html">DMA Controller</a>.
           </li>
           <li>
             Motorola,

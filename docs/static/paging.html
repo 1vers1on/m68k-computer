@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Paging, Revision 2.0</title>
+    <title>68EC000 Computer - Paging, Revision 2.1</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -19,9 +19,9 @@
       </p>
 
       <p>
-        Supervisor cycles bypass translation entirely and see flat physical
-        memory, so the BIOS reaches all 4 MiB and can load tables while a
-        program is stopped.
+        Supervisor cycles, including MC68450 DMA cycles with function code 101,
+        bypass translation entirely and see flat physical memory, so the BIOS
+        reaches all 4 MiB and can load tables while a program is stopped.
         <a href="bus-and-decode.html#supervisor-protection"
           >Supervisor Protection</a
         >
@@ -32,12 +32,12 @@
       <dl>
         <dt>Document status</dt>
         <dd>
-          Revision 2.0 pre-layout design; the MACH210 fitting report and
+          Revision 2.1 pre-layout design; the MACH210 fitting report and
           assembled-board measurements remain
         </dd>
 
         <dt>Memory map</dt>
-        <dd><a href="memory-map.html">Frozen revision 2.0</a></dd>
+        <dd><a href="memory-map.html">Frozen revision 2.2</a></dd>
 
         <dt>Page size</dt>
         <dd>4 KiB</dd>
@@ -554,9 +554,26 @@ SRAM A14..A10 &lt;-- context register, U_PAGE_MMU</code></pre>
         </p>
 
         <pre><code>TBL_DRIVE  = (NOT FC2) AND PAGE_ENABLE
-APERTURE   = (NOT EXP_MEM5_n) OR (NOT EXP_MEM6_n)
+APERTURE   = ((NOT EXP_MEM5_n) OR (NOT EXP_MEM6_n)) AND OWN_n
 TBL_OE_n   = NOT (TBL_DRIVE OR (APERTURE AND R/W))
 PHYS_OE_n  = TBL_DRIVE OR APERTURE</code></pre>
+
+        <p>
+          <code>OWN_n</code> is high while the processor owns the bus and low
+          while the MC68450 owns it. Qualifying <code>APERTURE</code> with it
+          keeps a DMA cycle out of the page table. Supervisor data cycles pass
+          the <code>FC2</code> test that stops user code, and the controller
+          drives exactly that function code, so without this term a channel
+          programmed with an address in <code>$A00000-$DFFFFF</code> would read
+          and write page-table entries with full rights. That is the one DMA
+          target that would break the privilege model rather than merely corrupt
+          data.
+          <a href="bus-and-decode.html#supervisor-protection"
+            >Bus and Address Decode</a
+          >
+          asserts a bus error for the same address range, so the cycle aborts as
+          well as finding nothing to answer it.
+        </p>
 
         <p>
           <code>PHYS_OE_n</code> gates the <code>PPA9</code> and
@@ -898,10 +915,11 @@ PAGE_DTACK_n     = 0</code></pre>
         <p>
           The <a href="datasheets/MACH210A-7.PDF">MACH210</a> offers 38 signal
           pins in the 44-pin PLCC, of which at most 32 can be outputs. The lists
-          below name 21 inputs and 17 outputs, but <code>PPN9</code> and
-          <code>PPA9</code> share one I/O pin, so the design occupies 37 pins
-          and leaves one spare. Fifteen macrocells are unused as well, though
-          the one free pin is what limits any later addition.
+          below name 22 inputs and 17 outputs, but <code>PPN9</code> and
+          <code>PPA9</code> share one I/O pin, so the design occupies all 38
+          pins. Revision 2.1 spends the last free pin on <code>OWN_n</code> for
+          the aperture interlock. Fifteen macrocells are unused, but no signal
+          pin remains, so any later addition has to displace something.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -927,6 +945,14 @@ PAGE_DTACK_n     = 0</code></pre>
               <td><code>R/W</code></td>
               <td>1</td>
               <td>Direction, for the <code>W</code> test.</td>
+            </tr>
+            <tr>
+              <td><code>OWN_n</code></td>
+              <td>1</td>
+              <td>
+                Bus ownership. High for a processor cycle; low while the MC68450
+                owns the bus and the aperture is closed.
+              </td>
             </tr>
             <tr>
               <td><code>RESET_n</code></td>
@@ -1792,8 +1818,32 @@ PAGE_DTACK_n     = 0</code></pre>
         </table>
       </section>
 
+      <section id="dma-physical-addressing">
+        <h2>17. DMA Physical Addressing</h2>
+        <p>
+          The MC68450 drives <code>FC2..FC0 = 101</code> from MFCR and BFCR for
+          every data or descriptor address. The page-unit equations therefore
+          leave TRANSLATE low and PERMIT true. Physical A21 selects the DRAM
+          bank directly. The shared FC bus uses three-state handoff and 10 kohm
+          pull-ups; only the current CPU or DMAC master drives it.
+        </p>
+        <p>
+          Paging does not translate a DMA target, and it is not what keeps the
+          controller away from the page table. Three hardware interlocks do
+          that: the aperture term above, the ownership enables on both I/O
+          decoders, and the <code>DMA_BERR</code> range test in
+          <code>U_PROT</code>. Inside main memory the BIOS is still the only
+          check, so it validates physical ranges and permissions, pins data and
+          descriptor frames, and prevents user writes to descriptors until
+          completion or confirmed abort. A channel record binds the transfer to
+          its requesting process so an error interrupt cannot charge a different
+          current process. DMA to the BIOS-private low 128 KiB is rejected for
+          user owners.
+        </p>
+      </section>
+
       <section id="sources">
-        <h2>17. Sources</h2>
+        <h2>18. Sources</h2>
         <ul>
           <li>
             Advanced Micro Devices,

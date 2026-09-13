@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>68EC000 Computer - Bus and Address Decode, Revision 2.1</title>
+    <title>68EC000 Computer - Bus and Address Decode, Revision 2.2</title>
     <link rel="stylesheet" href="defaults.css" />
   </head>
 
@@ -21,7 +21,10 @@
       </p>
 
       <p>
-        Revision 2.1 assigns <code>IO11_n</code> to the
+        Revision 2.2 adds MC68450 bus ownership, I/O slot 12, DTACK isolation,
+        DMA exception routing, the fourth completion group, and three ownership
+        interlocks that keep a DMA cycle inside main memory. Revision 2.1
+        assigned <code>IO11_n</code> to the
         <a href="ide.html">IDE interface</a> and connects
         <code>IDE_DTACK_n</code> to the spare fourth input of the final
         acknowledgement-tree gate. The top I/O decoder and the first three
@@ -40,7 +43,7 @@
         decode. <code>SYSREG2</code> becomes the VGA window grant, the second
         <code>U_OVERLAY</code> flip-flop stores that grant, and the bus-error
         gate moves from <code>U_AND</code> to <code>U_PROT</code>, which now
-        combines four sources instead of two. The CL-GD5428 window, top I/O, and
+        combines five sources instead of two. The CL-GD5428 window, top I/O, and
         the ROM alias take the new <code>NORMAL_PROT_n</code> qualifier in place
         of <code>NORMAL_MEM_n</code> or <code>NORMAL_MISC_n</code>, which costs
         them one 30 ns gate stage. The two DRAM bank requests become
@@ -52,7 +55,7 @@
 
       <dl>
         <dt>Document status</dt>
-        <dd>Revision 2.1 pre-layout design</dd>
+        <dd>Revision 2.2 pre-layout design</dd>
 
         <dt>Memory map</dt>
         <dd><a href="memory-map.html">Frozen revision 2.1</a></dd>
@@ -143,6 +146,7 @@
         <li>
           <a href="#internal-signal-reference">Internal Signal Reference</a>
         </li>
+        <li><a href="#dma-integration">DMA Bus Integration</a></li>
         <li><a href="#sources">Sources</a></li>
       </ol>
     </nav>
@@ -192,7 +196,10 @@
           <li>Address decoding uses discrete 74-series logic.</li>
           <li>The processor and motherboard logic run at +5 V.</li>
           <li>The processor clock is 10 MHz.</li>
-          <li>The computer does not support DMA or bus arbitration.</li>
+          <li>
+            The processor and the motherboard MC68450 are the only bus masters.
+            Expansion cards do not arbitrate.
+          </li>
           <li>
             <code>RESET_n</code> is the external reset-source signal, not the
             processor's bidirectional <code>/RESET</code> pin.
@@ -342,13 +349,14 @@
         <h2>4. Bus Arbitration</h2>
 
         <p>
-          This computer has one bus master. DMA and external bus arbitration are
-          not supported.
+          The MC68EC000 and motherboard MC68450 are the two bus masters.
+          Expansion cards can request a DMA channel but cannot arbitrate for or
+          drive the shared address bus.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
-            Unused arbitration connections
+            CPU to MC68450 arbitration connections
           </caption>
           <thead>
             <tr>
@@ -361,18 +369,18 @@
           <tbody>
             <tr>
               <td><code>/BR</code></td>
-              <td>10 kohm pull-up to +5 V</td>
-              <td>Prevents an external bus request.</td>
+              <td>MC68450 <code>BR_n</code>, 2.2 kohm pull-up to +5 V</td>
+              <td>Requests CPU bus release.</td>
             </tr>
             <tr>
               <td><code>/BGACK</code></td>
-              <td>10 kohm pull-up to +5 V</td>
-              <td>Prevents an external bus-grant acknowledgement.</td>
+              <td>MC68450 <code>BGACK_n</code>, 2.2 kohm pull-up to +5 V</td>
+              <td>Marks DMAC ownership.</td>
             </tr>
             <tr>
               <td><code>/BG</code></td>
-              <td>No connection</td>
-              <td>The motherboard has no second bus master.</td>
+              <td>MC68450 <code>BG_n</code></td>
+              <td>Grants the bus after the CPU releases its cycle.</td>
             </tr>
           </tbody>
         </table>
@@ -644,9 +652,20 @@ CPU_SPACE        = CPU_SPACE_STAGE1 AND FC0</code></pre>
           noninverting outputs distribute identical copies of the qualifier.
         </p>
 
-        <pre><code>NORMAL_MEM_n = NORMAL_CYCLE_n
-NORMAL_EXP_n = NORMAL_CYCLE_n
-NORMAL_MISC_n = NORMAL_CYCLE_n</code></pre>
+        <pre><code>NORMAL_MEM_n      = NORMAL_CYCLE_n
+NORMAL_EXP_RAW_n  = NORMAL_CYCLE_n
+NORMAL_MISC_n     = NORMAL_CYCLE_n
+
+NORMAL_EXP_n      = NORMAL_EXP_RAW_n OR OWN_ACTIVE</code></pre>
+
+        <p>
+          Revision 2.2 adds the ownership term on the expansion copy.
+          <code>U_DMA_QUAL</code> gate 2, an <code>SN74F32N</code>, produces
+          <code>NORMAL_EXP_n</code> from the buffered copy, so the four
+          expansion memory selects cannot qualify a cycle the MC68450 is
+          running. The DRAM copy keeps no such term, because main memory is the
+          one region a DMA cycle is allowed to reach.
+        </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -896,15 +915,51 @@ REGION4_P = A23 AND (NOT A22) AND (NOT A21) AND (NOT VGA_GRANT)
 VIOL_ACTIVE = (NOT FC2) AND (REGION7_P OR REGION4_P)
 PROT_BERR   = VIOL_ACTIVE AND (NOT AS_n)
 
-BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
-         AND PAGE_BERR_n AND (NOT PROT_BERR)</code></pre>
+DMA_RANGE   = (A23 OR A22) AND (NOT OWN_n)
+DMA_BERR    = DMA_RANGE AND (NOT AS_n)
+
+BUS_BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
+             AND PAGE_BERR_n AND (NOT PROT_BERR)
+             AND (NOT DMA_BERR)</code></pre>
 
         <p>
-          <code>REGION7_P</code>, <code>REGION4_P</code>, and
-          <code>PROT_BERR</code> are internal nodes and reach no pin. The device
+          <code>REGION7_P</code>, <code>REGION4_P</code>,
+          <code>PROT_BERR</code>, <code>DMA_RANGE</code>, and
+          <code>DMA_BERR</code> are internal nodes and reach no pin. The device
           presents two outputs: <code>VIOL_ACTIVE</code>, which gates the
-          protected selects, and <code>BERR_n</code>, which drives the
-          processor.
+          protected selects, and <code>BUS_BERR_n</code>. Ownership glue sends
+          that combined fault to CPU /BERR or to the DMAC BEC encoder.
+        </p>
+
+        <h3>DMA Range Interlock</h3>
+
+        <p>
+          <code>DMA_BERR</code> is a hardware bound on where the MC68450 can
+          address. Main memory occupies <code>$000000-$3FFFFF</code>, so
+          <code>A23</code> and <code>A22</code> are both low for every legal DMA
+          address. While <code>OWN_n</code> is low, any address at or above
+          <code>$400000</code> asserts <code>BUS_BERR_n</code> 15 ns after the
+          address settles. The DMAC encodes that as a bus error, suppresses
+          <code>DTC_n</code>, and aborts the channel.
+        </p>
+
+        <p>
+          The interlock covers what firmware validation alone cannot. A channel
+          programmed with a bad address would otherwise reach the VGA aperture,
+          an expansion memory window, the firmware ROM, or the page-table
+          aperture, and a write to the last of those would rewrite a page table
+          and break the privilege model. The BIOS still validates every range
+          before it starts a channel; this term makes a firmware mistake a
+          contained fault instead of a protection hole.
+        </p>
+
+        <p>
+          Blocking the address is not enough on its own, because a select is
+          combinational and a device can act before the controller aborts. The
+          two I/O decoders therefore carry their own ownership enables, so no
+          I/O slot decodes a DMA address at all. Between them, the only regions
+          a DMA cycle can reach are main memory and an unanswered address that
+          ends in the bus timeout.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -979,7 +1034,17 @@ BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
           through a violation.
         </p>
 
-        <pre><code>NORMAL_PROT_n = NORMAL_MEM_n OR VIOL_ACTIVE</code></pre>
+        <pre><code>NORMAL_PROT_RAW_n = NORMAL_MEM_n OR VIOL_ACTIVE
+NORMAL_PROT_n     = NORMAL_PROT_RAW_n OR OWN_ACTIVE</code></pre>
+
+        <p>
+          <code>U_DMA_QUAL</code> gate 1 adds the ownership term. The protected
+          qualifier gates the CL-GD5428 window and the top I/O region, and
+          neither may answer an address the MC68450 drives. Inserting the gate
+          here also delays the protected selects by one more FAST propagation,
+          which widens rather than narrows the settling margin that
+          <code>VIOL_ACTIVE</code> needs.
+        </p>
 
         <p>
           Three request gates take the protected qualifier. The DRAM requests
@@ -1037,11 +1102,11 @@ BERR_n = TIMEOUT_BERR_n AND INT_BERR_n
           microsecond bus timeout would eventually end it, so
           <code>U_PROT</code> asserts <code>/BERR</code> directly instead and
           saves the wait. The same device combines the three other bus-error
-          sources, so <code>BERR_n</code> leaves it as one signal.
+          sources, so <code>BUS_BERR_n</code> leaves it as one signal.
         </p>
 
         <p>
-          A violation drives <code>BERR_n</code> low 15 ns after
+          A violation drives <code>BUS_BERR_n</code> low 15 ns after
           <code>AS_n</code> falls, well inside the first
           <code>/BERR</code> sampling edge, so a faulting cycle runs no longer
           than a normal one. It releases 15 ns after <code>AS_n</code> returns
@@ -1146,8 +1211,9 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
           PLCC, rated 15 ns input to combinatorial output and 55 mA. The
           <code>ATF16V8BQL-15PU</code> that the
           <a href="debug-display.html">debug display</a> uses fits the same
-          equations in a 20-pin DIP, so either part works here. Nine inputs and
-          two outputs leave six I/O pins spare.
+          equations in a 20-pin DIP, so either part works here. Revision 2.2
+          adds <code>OWN_n</code>, so ten inputs and two outputs leave five I/O
+          pins spare.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -1200,13 +1266,20 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
               <td><a href="paging.html">Page unit</a></td>
             </tr>
             <tr>
+              <td>Input</td>
+              <td><code>OWN_n</code></td>
+              <td>
+                MC68450 ownership, from <a href="dma.html">DMA Controller</a>
+              </td>
+            </tr>
+            <tr>
               <td>Output</td>
               <td><code>VIOL_ACTIVE</code></td>
               <td><code>U_OR6</code> gate 3</td>
             </tr>
             <tr>
               <td>Output</td>
-              <td><code>BERR_n</code></td>
+              <td><code>BUS_BERR_n</code></td>
               <td>Processor <code>/BERR</code> input</td>
             </tr>
           </tbody>
@@ -1296,7 +1369,10 @@ VGA_GRANT     = D0 latched on the rising edge of GRANT_CLK</code></pre>
           </li>
           <li>
             Protection covers processor cycles. A bus master on an expansion
-            card would bypass it, and the motherboard supports none.
+            card would bypass it, and the motherboard supports none. The MC68450
+            bypasses it too, which is why the BIOS validates every physical
+            range before it programs a channel; see
+            <a href="dma.html#firmware">DMA Controller</a>.
           </li>
           <li>
             The debug display and the boot-overlay register sit in I/O slot 4,
@@ -1927,7 +2003,7 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
 
             <tr>
               <td><code>G1</code></td>
-              <td>+5 V</td>
+              <td><code>OWN_n</code></td>
             </tr>
             <tr>
               <td><code>/G2A</code></td>
@@ -1942,7 +2018,10 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
 
         <p>
           <code>U_IO_LOW</code> is enabled only when <code>TOP_IO_n</code> is
-          low and <code>A20</code> is low.
+          low, <code>A20</code> is low, and <code>OWN_n</code> is high. The last
+          term is the ownership interlock added in revision 2.2. The MC68450
+          drives the same address bus, and no I/O slot may answer an address it
+          produces. Revision 2.1 tied <code>G1</code> to +5 V.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -2052,14 +2131,19 @@ EXP_MEM6_n = REGION6_n OR NORMAL_EXP_n</code></pre>
             </tr>
             <tr>
               <td><code>/G2B</code></td>
-              <td>GND</td>
+              <td><code>OWN_ACTIVE</code></td>
             </tr>
           </tbody>
         </table>
 
         <p>
           <code>U_IO_HIGH</code> is enabled only when <code>TOP_IO_n</code> is
-          low and <code>A20</code> is high.
+          low, <code>A20</code> is high, and <code>OWN_ACTIVE</code> is low.
+          <code>OWN_ACTIVE</code> is the inverted MC68450
+          <code>OWN_n</code> from
+          <a href="dma.html#demultiplex">DMA Controller</a>, so this decoder
+          carries the same ownership interlock as the low half. Revision 2.1
+          grounded <code>/G2B</code>.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -3086,9 +3170,24 @@ OVERLAY_WRITE_n = 0 -> OVERLAY_EN = 0</code></pre>
           <code>OVERLAY_n</code> is active when the boot overlay is enabled. An
           OR gate combines the two active-low signals, so its output is low only
           when the address is inside the alias range and the overlay is enabled.
+          A second gate adds <code>OWN_ACTIVE</code>, which forces the alias off
+          for the whole of a DMA cycle.
         </p>
 
-        <pre><code>ROM_ALIAS_ADDR_n = LOW128_n OR OVERLAY_n</code></pre>
+        <pre><code>ROM_ALIAS_RAW_n  = LOW128_n OR OVERLAY_n
+ROM_ALIAS_ADDR_n = ROM_ALIAS_RAW_n OR OWN_ACTIVE</code></pre>
+
+        <p>
+          Without the second term the alias would apply to the MC68450 as well.
+          A DMA read of physical <code>$000000-$01FFFF</code> would return
+          firmware bytes instead of DRAM, and a DMA write there would reach a
+          read-only device and be lost without any fault. The vector table and
+          BIOS private memory live in that range, so revision 2.2 makes the
+          overlay a processor-only mapping in hardware rather than a firmware
+          sequencing rule. <code>U_OR2</code> gate 3 produces
+          <code>ROM_ALIAS_RAW_n</code> and <code>U_OR_DTACK</code> gate 3, one
+          of that package's two spare FAST gates, adds the ownership term.
+        </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
@@ -3098,7 +3197,7 @@ OVERLAY_WRITE_n = 0 -> OVERLAY_EN = 0</code></pre>
             <tr>
               <th scope="col">LOW128_n</th>
               <th scope="col">OVERLAY_n</th>
-              <th scope="col">ROM_ALIAS_ADDR_n</th>
+              <th scope="col">ROM_ALIAS_RAW_n</th>
               <th scope="col">Meaning</th>
             </tr>
           </thead>
@@ -3936,7 +4035,7 @@ IO0_n..IO15_n    = 1
 
 PROT_BERR        = VIOL_ACTIVE AND (NOT AS_n)
                  = 1
-BERR_n           = 0</code></pre>
+BUS_BERR_n       = 0</code></pre>
 
         <p>
           The MC68901 never sees a chip select, so the read has no side effect
@@ -4257,7 +4356,7 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
               <td>
                 9: <code>DTACK_GROUP0_n</code>; 10: <code>DTACK_GROUP1_n</code>;
                 12: <code>DTACK_GROUP2_n</code>; 13:
-                <code>IDE_DTACK_n</code>
+                <code>DTACK_GROUP3_n</code>
               </td>
               <td>8</td>
               <td><code>DTACK_RAW_n</code></td>
@@ -4267,8 +4366,10 @@ DTACK_n = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
 
         <p>
           Pin 7 of each package connects to ground and pin 14 connects to +5 V.
-          Revision 2.1 connects <code>IDE_DTACK_n</code> to the final gate input
-          that revision 2.0 tied high: pin 13 on <code>U_DTACK_B</code> gate 2.
+          Revision 2.2 connects <code>DTACK_GROUP3_n</code> to pin 13 on
+          <code>U_DTACK_B</code> gate 2. New <code>U_DTACK_C</code>, an
+          SN74F21N, combines <code>IDE_DTACK_n</code> and
+          <code>DMAC_DTACK_n</code>, with its other two gate inputs high.
           <code>EXP_DTACK_n</code> has a 10 kohm pull-up at the motherboard and
           the expansion card may only pull it low. The timeout circuit masks
           <code>DTACK_RAW_n</code> after a bus error and drives the CPU
@@ -4457,9 +4558,10 @@ global release-tree logic delay     &lt;= 17.2 ns</code></pre>
           <code>INT_BERR_n</code> from the interrupt logic, with
           <code>PAGE_BERR_n</code> from the <a href="paging.html">page unit</a>,
           and with the internal protection violation, all inside
-          <code>U_PROT</code>. The result <code>BERR_n</code> drives the
-          processor's physical <code>/BERR</code> input. None of the four
-          sources asserts <code>/HALT</code>.
+          <code>U_PROT</code>. The result <code>BUS_BERR_n</code> reaches the
+          processor only during CPU ownership. During DMA ownership a retained
+          copy becomes BEC bus-error code 101 and masks DTACK. None of the four
+          sources asserts CPU <code>/HALT</code>.
         </p>
 
         <h3>Normal Cycle Qualification</h3>
@@ -4529,8 +4631,9 @@ TIMEOUT_BERR_n = 0
 
         <pre><code>TIMEOUT_ACTIVE = U_TIMEOUT Q10
 TIMEOUT_BERR_n = NOT TIMEOUT_ACTIVE
-BERR_n         = TIMEOUT_BERR_n AND INT_BERR_n
+BUS_BERR_n     = TIMEOUT_BERR_n AND INT_BERR_n
                  AND PAGE_BERR_n AND (NOT PROT_BERR)
+                 AND (NOT DMA_BERR)
 DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
         <p>
           <code>INT_BERR_n</code> is the spurious-interrupt-acknowledge abort
@@ -4538,9 +4641,12 @@ DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
           during normal cycles. <code>PROT_BERR</code> is the internal
           protection violation from section 8 and <code>PAGE_BERR_n</code> the
           page fault from the page unit, and both are inactive whenever the
-          processor runs in supervisor mode. <code>U_PROT</code> combines all
-          four sources; any one of them asserts the processor
-          <code>/BERR</code> input.
+          processor runs in supervisor mode. <code>DMA_BERR</code> is the DMA
+          range interlock from section 8 and is inactive whenever the processor
+          owns the bus. <code>U_PROT</code> combines all five sources. Any of
+          the first four asserts the processor <code>/BERR</code> input. The
+          fifth reaches the MC68450 BEC encoder only, because the ownership gate
+          holds CPU <code>/BERR</code> inactive throughout DMA.
         </p>
 
         <table border="1" cellpadding="4" cellspacing="0">
@@ -4593,9 +4699,9 @@ DTACK_n        = DTACK_RAW_n OR TIMEOUT_ACTIVE</code></pre>
           Once <code>TIMEOUT_ACTIVE</code> rises, the <code>U_OR_DTACK</code>
           <code>SN74F32N</code> gate forces <code>DTACK_n</code> high even if a
           late device response arrives. The inverter asserts
-          <code>BERR_n</code> low. When the CPU releases <code>AS_n</code>,
+          <code>BUS_BERR_n</code> low. When the CPU releases <code>AS_n</code>,
           <code>NORMAL_MISC_n</code> resets the counter, releases
-          <code>BERR_n</code>, and removes the acknowledgement mask.
+          <code>BUS_BERR_n</code>, and removes the acknowledgement mask.
         </p>
 
         <h3>CPU Space Cycles</h3>
@@ -4717,7 +4823,7 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td>
                 <code>U_PROT</code>, combined with <code>TIMEOUT_BERR_n</code>,
                 <code>PAGE_BERR_n</code>, and the internal protection violation
-                to form <code>BERR_n</code>. See
+                to form <code>BUS_BERR_n</code>. See
                 <a href="#bus-error-and-timeout">Bus Error and Timeout</a>.
               </td>
             </tr>
@@ -4946,6 +5052,14 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td>Normal-cycle qualifier distribution</td>
             </tr>
             <tr>
+              <td><code>U_DMA_QUAL</code></td>
+              <td>SN74F32N</td>
+              <td>
+                Ownership terms on the protected and expansion qualifiers; two
+                gates unused, inputs grounded and outputs open
+              </td>
+            </tr>
+            <tr>
               <td><code>U_INVERT</code></td>
               <td>SN74HCT04N</td>
               <td>
@@ -4986,7 +5100,7 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td>PALCE16V8Q-15JC</td>
               <td>
                 Supervisor protection decode and the four-source
-                <code>BERR_n</code>
+                <code>BUS_BERR_n</code>
               </td>
             </tr>
           </tbody>
@@ -5082,9 +5196,13 @@ NORMAL_CYCLE_n  = 0 OR 1
         <h3>SN74F32N Gate Map</h3>
 
         <p>
-          <code>U_OR_DTACK</code> uses two gates. Gate 1 input pins 1 and 2
-          carry <code>DTACK_RAW_n</code> and <code>TIMEOUT_ACTIVE</code>, and
-          output pin 3 is <code>DTACK_n</code> to the processor
+          <code>U_OR_DTACK</code> uses three gates in revision 2.2. Gate 3 input
+          pins 9 and 10 carry <code>ROM_ALIAS_RAW_n</code> and
+          <code>OWN_ACTIVE</code>, and output pin 8 is
+          <code>ROM_ALIAS_ADDR_n</code>. Gate 4 stays unused with pins 12 and 13
+          grounded and pin 11 open. Gate 1 input pins 1 and 2 carry
+          <code>DTACK_RAW_n</code> and <code>TIMEOUT_ACTIVE</code>, and output
+          pin 3 is <code>DTACK_n</code> to the processor
           <code>/DTACK</code> pin. Gate 2 input pins 4 and 5 carry
           <code>IO9_n</code> and <code>LDS_n</code>, and output pin 6 is
           <code>PIT_CS_n</code>. Gates 3 and 4 are unused; their input pins 9,
@@ -5656,7 +5774,7 @@ NORMAL_CYCLE_n  = 0 OR 1
               <td>Verified, PALCE16V8Q-15 commercial</td>
             </tr>
             <tr>
-              <td>Any source to <code>BERR_n</code></td>
+              <td>Any source to <code>BUS_BERR_n</code></td>
               <td><code>U_PROT</code>, PALCE16V8Q-15JC</td>
               <td>Input to combinatorial output</td>
               <td><code>tPD</code></td>
@@ -5720,8 +5838,8 @@ NORMAL_CYCLE_n  = 0 OR 1
         </table>
 
         <p>
-          The full <code>TIMEOUT_ACTIVE</code> to <code>BERR_n</code> path is 40
-          ns: 25 ns through the <code>SN74HCT04N</code> inverter and 15 ns
+          The full <code>TIMEOUT_ACTIVE</code> to <code>BUS_BERR_n</code> path
+          is 40 ns: 25 ns through the <code>SN74HCT04N</code> inverter and 15 ns
           through <code>U_PROT</code>. The bus timeout is a 51.2 microsecond
           event, so neither stage affects when the processor sees
           <code>/BERR</code>. A protection violation reaches the same device by
@@ -5788,7 +5906,7 @@ NORMAL_CYCLE_n  = 0 OR 1
               </td>
             </tr>
             <tr>
-              <td><code>AS_n -&gt; BERR_n</code>, protection violation</td>
+              <td><code>AS_n -&gt; BUS_BERR_n</code>, protection violation</td>
               <td>15 ns</td>
               <td>15 ns</td>
               <td>Verified; one <code>U_PROT</code> pass</td>
@@ -6393,7 +6511,9 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               <td>Compatible</td>
             </tr>
             <tr>
-              <td>16V8 output (<code>BERR_n</code>, <code>U_PROT</code>)</td>
+              <td>
+                16V8 output (<code>BUS_BERR_n</code>, <code>U_PROT</code>)
+              </td>
               <td>MC68EC000 <code>/BERR</code> input</td>
               <td>2.40 V</td>
               <td>2.00 V</td>
@@ -6509,7 +6629,7 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               <td>Pass</td>
             </tr>
             <tr>
-              <td><code>BERR_n</code></td>
+              <td><code>BUS_BERR_n</code></td>
               <td><code>U_PROT</code>, PALCE16V8Q-15JC</td>
               <td>MC68EC000 <code>/BERR</code> (2.5 uA leakage)</td>
               <td>2.5 uA / 2.5 uA</td>
@@ -7346,7 +7466,7 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               </td>
               <td>Low</td>
               <td><code>U_PAGE_MMU</code></td>
-              <td><code>U_PROT</code> (<code>BERR_n</code>)</td>
+              <td><code>U_PROT</code> (<code>BUS_BERR_n</code>)</td>
             </tr>
           </tbody>
         </table>
@@ -7688,7 +7808,7 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               <td>An unanswered normal cycle exceeded the permitted time.</td>
               <td>Low</td>
               <td><code>NOT TIMEOUT_ACTIVE</code> in <code>U_INVERT</code></td>
-              <td><code>U_PROT</code> (<code>BERR_n</code>)</td>
+              <td><code>U_PROT</code> (<code>BUS_BERR_n</code>)</td>
             </tr>
             <tr>
               <td><code>INT_BERR_n</code></td>
@@ -7698,10 +7818,10 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
               </td>
               <td>Low</td>
               <td><a href="interrupts.html">Interrupt logic</a></td>
-              <td><code>U_PROT</code> (<code>BERR_n</code>)</td>
+              <td><code>U_PROT</code> (<code>BUS_BERR_n</code>)</td>
             </tr>
             <tr>
-              <td><code>BERR_n</code></td>
+              <td><code>BUS_BERR_n</code></td>
               <td>
                 Combined bus error: the timeout, the interrupt abort, the page
                 fault, and the internal protection violation.
@@ -7714,8 +7834,63 @@ LOW noise margin  = VIL(max) - VOL(max)</code></pre>
         </table>
       </section>
 
+      <section id="dma-integration">
+        <h2>28. DMA Bus Integration</h2>
+        <p>
+          The shared address, data, function-code, and control nets are
+          master-neutral. <code>OWN_n</code> selects the MC68450 address latches
+          and qualifies its register chip select. A new ACT244 control buffer
+          keeps each master's direct R/W, AS, UDS, LDS, and FC load below the
+          former fanout limit. Two ACT373 latches and three HCT245 transceivers
+          implement the manual's multiplex circuit. See
+          <a href="dma.html#demultiplex">DMA Controller</a> for pins, polarity,
+          and lane crossing.
+        </p>
+        <pre><code>CPU_BERR_n      = BUS_BERR_n OR (NOT OWN_n)
+DMA_FAULT_SET_n = BUS_BERR_n OR BGACK_n
+DMAC_CS_n       = IO12_n OR (NOT OWN_n) OR (UDS_n AND LDS_n)
+DMA_BERR        = (A23 OR A22) AND (NOT OWN_n) AND (NOT AS_n)
+
+DTACK_GROUP3_n = IDE_DTACK_n AND DMAC_DTACK_n AND 1 AND 1
+DTACK_RAW_n    = GROUP0_n AND GROUP1_n AND GROUP2_n AND GROUP3_n</code></pre>
+        <p>
+          An SN74HCT125N isolates the bidirectional DMAC DTACK pin. One gate
+          carries motherboard completion into the DMAC only while OWN is low;
+          another carries register completion into group 3 only while OWN is
+          high. Pull-ups define both isolated nodes. The timeout counter resets
+          on every AS-high interval, so a long DMA ownership burst does not
+          accumulate one timeout across several bus cycles.
+        </p>
+        <p>
+          Five interlocks bound where a DMA cycle can reach.
+          <code>U_DMA_QUAL</code> adds <code>OWN_ACTIVE</code> to the protected
+          and expansion normal-cycle qualifiers, so the CL-GD5428 window, the
+          top I/O region, and all four expansion memory windows stop qualifying.
+          Both I/O decoders take an ownership enable as well. The boot-ROM alias
+          takes the same term, so the MC68450 always sees DRAM in the low 128
+          KiB, and <a href="paging.html#table-aperture">the page unit</a> closes
+          its aperture. <code>U_PROT</code> then asserts
+          <code>DMA_BERR</code> for any DMA address at or above
+          <code>$400000</code>, which aborts the channel instead of leaving it
+          to the bus timeout. Main memory is the only region a DMA cycle can
+          reach. The firmware ROM is the only thing outside it that will still
+          answer, and ROM is read-only, so the worst case there is a discarded
+          write on a channel that is aborting anyway.
+        </p>
+        <p>
+          BUS_BERR is retained only after BGACK proves DMA ownership. It masks
+          completion and drives BEC code 101 for at least two DMA clocks. Reset
+          drives BEC code 000 regardless of ownership. This covers the A84G
+          ownership restriction and prevents a CPU fault from parking the DMAC.
+          BR, BGACK, and OWN use 2.2 kohm pull-ups; their calculated 2.0 V
+          threshold crossing is below 45 ns at 50 pF. Final rise time, control
+          buffer loading, and all twelve relative clock phases remain
+          post-layout scope checks.
+        </p>
+      </section>
+
       <section id="sources">
-        <h2>28. Sources</h2>
+        <h2>29. Sources</h2>
         <ul>
           <li>
             Motorola,
