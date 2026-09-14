@@ -645,12 +645,12 @@ ACKx_n + DTACK_n + CARD_DMA_READY_n --&gt; F00, F08 --&gt; PCL2 / PCL3</code></p
       <section id="data">
         <h2>8. Data Bus</h2>
         <p>
-          Two SN74HCT245N packages serve each slot. A ports face the card;
-          B ports face the motherboard. During CPU PIO, DIR follows EXPx_RW.
+          Two SN74HCT245N packages serve each slot. A ports face the card; B
+          ports face the motherboard. During CPU PIO, DIR follows EXPx_RW.
           During DMA, R/W describes the memory access, so invert it for the
-          lower-byte transceiver. Keep the connector's EXPx_RW unchanged.
-          The upper-byte transceiver stays disabled during DMA; the DMAC's
-          HIBYTE bridge handles even-address memory bytes.
+          lower-byte transceiver. Keep the connector's EXPx_RW unchanged. The
+          upper-byte transceiver stays disabled during DMA; the DMAC's HIBYTE
+          bridge handles even-address memory bytes.
         </p>
         <pre><code>EXP1_CYCLE_n = EXP_MEM2_n AND IO6_n
 EXP2_CYCLE_n = EXP_MEM3_n AND IO7_n
@@ -670,29 +670,28 @@ DMA R/W=0:     DIR=1, card A --&gt; memory (device-to-memory)
 DMA R/W=1:     DIR=0, memory --&gt; card A (memory-to-device)</code></pre>
         <p>
           Keep U_EXP_GLUE gates 1 and 2 for the PIO cycle terms. Add
-          U_EXP_DMA_EN (SN74F08N): gate 1 computes DS_INACTIVE and gates
-          2 and 3 compute the slot-1 and slot-2 low enables. Add
-          U_EXP_DMA_MASK_A and U_EXP_DMA_MASK_B (SN74F32N): A gates 1-4
-          compute CYCLE_END, ACK2_n OR OWN_n, ACK3_n OR OWN_n, and
-          EXP1_DMA_n; B gate 1 computes EXP2_DMA_n. Add U_EXP_DMA_DIR
-          (SN74F86N), gates 1 and 2, for the two lower-byte DIR signals.
-          These 14-pin gate packages use A/B/Y pins 1/2/3, 4/5/6,
-          9/10/8, and 12/13/11; pin 7 is ground and pin 14 is +5 V.
-          Ground unused inputs, leave unused outputs open, and add a
-          100 nF bypass capacitor at each package.
+          U_EXP_DMA_EN (SN74F08N): gate 1 computes DS_INACTIVE and gates 2 and 3
+          compute the slot-1 and slot-2 low enables. Add U_EXP_DMA_MASK_A and
+          U_EXP_DMA_MASK_B (SN74F32N): A gates 1-4 compute CYCLE_END, ACK2_n OR
+          OWN_n, ACK3_n OR OWN_n, and EXP1_DMA_n; B gate 1 computes EXP2_DMA_n.
+          Add U_EXP_DMA_DIR (SN74F86N), gates 1 and 2, for the two lower-byte
+          DIR signals. These 14-pin gate packages use A/B/Y pins 1/2/3, 4/5/6,
+          9/10/8, and 12/13/11; pin 7 is ground and pin 14 is +5 V. Ground
+          unused inputs, leave unused outputs open, and add a 100 nF bypass
+          capacitor at each package.
         </p>
         <p>
-          U_EXP_RW_BUF remains an SN74HCT244N with two R_W inputs.
-          Each output drives its connector R/W contact, upper-byte DIR,
-          and one XOR input. OWN settles before DMA cycles. Raw AS and
-          byte-strobe qualification keep the DMA data path disabled during
-          address/direction setup and descriptor fetches without ACK.
-          Check DIR setup before /OE at the HCT245 pins using the MC68450
-          strobe timing and the added FAST gate delays. Include the two new
-          XOR loads on OWN_ACTIVE in the DMA ownership fanout budget.
-          CPU PIO still passes all 16 bits; cards qualify their byte lanes.
-          Add these four FAST packages and their bypass capacitors to the
-          motherboard interface supply budget, outside the card rail allowance.
+          U_EXP_RW_BUF remains an SN74HCT244N with two R_W inputs. Each output
+          drives its connector R/W contact, upper-byte DIR, and one XOR input.
+          OWN settles before DMA cycles. Raw AS and byte-strobe qualification
+          keep the DMA data path disabled during address/direction setup and
+          descriptor fetches without ACK. Check DIR setup before /OE at the
+          HCT245 pins using the MC68450 strobe timing and the added FAST gate
+          delays. Include the two new XOR loads on OWN_ACTIVE in the DMA
+          ownership fanout budget. CPU PIO still passes all 16 bits; cards
+          qualify their byte lanes. Add these four FAST packages and their
+          bypass capacitors to the motherboard interface supply budget, outside
+          the card rail allowance.
         </p>
         <table border="1" cellpadding="4" cellspacing="0">
           <caption>
