@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Override these with -DPROGRAMMER_LOG_LEVEL=DEBUG or -DPROGRAMMER_ROOT_LOG_LEVEL=WARN -->
+    <property name="APP_LOG_LEVEL" value="${PROGRAMMER_LOG_LEVEL:-DEBUG}" />
+    <property name="ROOT_LOG_LEVEL" value="${PROGRAMMER_ROOT_LOG_LEVEL:-WARN}" />
+
+    <property name="LOG_PATTERN"
+        value="%date{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] %logger{40} - %msg%n%ex" />
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="com.ellie.programmer" level="${APP_LOG_LEVEL}" additivity="false">
+        <appender-ref ref="CONSOLE" />
+    </logger>
+
+    <root level="${ROOT_LOG_LEVEL}">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>
